@@ -1,0 +1,27 @@
+{
+  "id": "121aab17-9eae-42bf-a55e-104511736910",
+  "runtime": "bash",
+  "purpose": "UAT M001/S06/uat-001 (uat-runtime-check)",
+  "metadata": {
+    "kind": "uat_exec",
+    "milestoneId": "M001",
+    "sliceId": "S06",
+    "checkId": "uat-001",
+    "intent": "uat-runtime-check"
+  },
+  "script_chars": 71,
+  "started_at": "2026-10-05T23:46:54.281Z",
+  "finished_at": "2026-10-05T23:46:54.312Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 31,
+  "stdout_bytes": 2933,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub/.gsd/exec/121aab17-9eae-42bf-a55e-104511736910.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub/.gsd/exec/121aab17-9eae-42bf-a55e-104511736910.stderr"
+}

@@ -1,0 +1,112 @@
+{
+  "sourceProfileName": "s04-source",
+  "capturedSaveLength": 8400,
+  "destroyedWebView": true,
+  "profileDataSurvived": true,
+  "freshProfileName": "s04-fresh",
+  "importVerified": true,
+  "blocker": null,
+  "passed": true,
+  "stages": [
+    {
+      "stage": "profile-creation",
+      "passed": true,
+      "evidence": [
+        "Created source profile: s04-source",
+        "Created fresh profile: s04-fresh"
+      ]
+    },
+    {
+      "stage": "webView-bind-source",
+      "passed": true,
+      "evidence": [
+        "Bound WebView to profile: s04-source",
+        "Navigated to: https://mrredshark77.github.io/shark-incremental/"
+      ]
+    },
+    {
+      "stage": "await-ready",
+      "passed": true,
+      "evidence": [
+        "Game ready signal observed: true",
+        "Timeout: 10000ms"
+      ]
+    },
+    {
+      "stage": "trigger-save",
+      "passed": true,
+      "evidence": [
+        "Called Shark save() after readiness: true",
+        "Save key 'shark_inc_save' created by game save path: true"
+      ]
+    },
+    {
+      "stage": "poll-save",
+      "passed": true,
+      "evidence": [
+        "Polling result: true",
+        "Save value length: 8400",
+        "Save value preview: eyJmaXNoIjoiMSIsInRvdGFsX2Zpc2giOiIwIiwic2hhcmtfbGV2ZWwiOiIwIiwic2hhcmtfcmFuayI6"
+      ]
+    },
+    {
+      "stage": "capture",
+      "passed": true,
+      "evidence": [
+        "Capture payload length: 8400",
+        "Capture payload preview: eyJmaXNoIjoiMSIsInRvdGFsX2Zpc2giOiIwIiwic2hhcmtfbGV2ZWwiOiIwIiwic2hhcmtfcmFuayI6"
+      ]
+    },
+    {
+      "stage": "validate",
+      "passed": true,
+      "evidence": [
+        "Validation result: true",
+        "Payload passes Shark format checks: true"
+      ]
+    },
+    {
+      "stage": "destroy-webview",
+      "passed": true,
+      "evidence": [
+        "webView.destroy() called: true",
+        "Source WebView destroyed: true"
+      ]
+    },
+    {
+      "stage": "destroy-survive-verify",
+      "passed": true,
+      "evidence": [
+        "Key 'shark_inc_save' exists after destroy: true",
+        "Value matches pre-destroy save: true",
+        "Ephemeral WebView bound to same profile: s04-source",
+        "This is the critical data-preservation invariant proof"
+      ]
+    },
+    {
+      "stage": "prepare-restore",
+      "passed": true,
+      "evidence": [
+        "Import payload length: 8396",
+        "Import payload preview: eyJmaXNoIjoiMSIsInRvdGFsX2Zpc2giOiIwIiwic2hhcmtfbGV2ZWwiOiIwIiwic2hhcmtfcmFuayI6"
+      ]
+    },
+    {
+      "stage": "fresh-webview-bind",
+      "passed": true,
+      "evidence": [
+        "Bound fresh WebView to profile: s04-fresh",
+        "Navigated to: https://mrredshark77.github.io/shark-incremental/"
+      ]
+    },
+    {
+      "stage": "import-verify",
+      "passed": true,
+      "evidence": [
+        "Import verification result: true",
+        "Fresh profile: s04-fresh",
+        "Saved payload length: 8396"
+      ]
+    }
+  ]
+}

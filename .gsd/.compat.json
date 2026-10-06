@@ -1,0 +1,338 @@
+{
+  "schema": 2,
+  "lastWriter": "gsd-pi",
+  "lastProjectedAt": "2026-10-06T02:02:30.951Z",
+  "projections": {
+    "REQUIREMENTS.md": {
+      "sha": "e0bda0324fd01aa5",
+      "entities": []
+    },
+    "PROJECT.md": {
+      "sha": "3f62c997dae9900a",
+      "entities": []
+    },
+    "phases/01-feasibility-and-qualification/01-ROADMAP.md": {
+      "sha": "43f0d83147767a5e",
+      "entities": [
+        "M001"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-CONTEXT.md": {
+      "sha": "3cca3b5261ba47c1",
+      "entities": [
+        "M001"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/slices/S01/S01-RESEARCH.md": {
+      "sha": "03bf6869a70325dd",
+      "entities": [
+        "M001",
+        "M001/S01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-01-PLAN.md": {
+      "sha": "5c594fd69493e251",
+      "entities": [
+        "M001",
+        "M001/S01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S01-T01-SUMMARY.md": {
+      "sha": "12a4e1debe772876",
+      "entities": [
+        "M001",
+        "M001/S01",
+        "M001/S01/T01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S01-T02-SUMMARY.md": {
+      "sha": "256db93e11dbdb6f",
+      "entities": [
+        "M001",
+        "M001/S01",
+        "M001/S01/T02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S01-T03-SUMMARY.md": {
+      "sha": "391f0ca57c6b64c1",
+      "entities": [
+        "M001",
+        "M001/S01",
+        "M001/S01/T03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S01-T04-SUMMARY.md": {
+      "sha": "b4150f23f243834a",
+      "entities": [
+        "M001",
+        "M001/S01",
+        "M001/S01/T04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-02-RESEARCH.md": {
+      "sha": "3ce763af2105bb75",
+      "entities": [
+        "M001",
+        "M001/S02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-02-PLAN.md": {
+      "sha": "f017ec8154839223",
+      "entities": [
+        "M001",
+        "M001/S02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S02-T01-SUMMARY.md": {
+      "sha": "9f3021bd7e31030e",
+      "entities": [
+        "M001",
+        "M001/S02",
+        "M001/S02/T01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S02-T02-SUMMARY.md": {
+      "sha": "df326113677d5f09",
+      "entities": [
+        "M001",
+        "M001/S02",
+        "M001/S02/T02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S02-T03-SUMMARY.md": {
+      "sha": "0b42515926f9790f",
+      "entities": [
+        "M001",
+        "M001/S02",
+        "M001/S02/T03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S02-T04-SUMMARY.md": {
+      "sha": "da955b4a80465d0d",
+      "entities": [
+        "M001",
+        "M001/S02",
+        "M001/S02/T04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-02-ASSESSMENT.md": {
+      "sha": "c60a5436fa64735d",
+      "entities": [
+        "M001",
+        "M001/S02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-03-RESEARCH.md": {
+      "sha": "2b87635303641df4",
+      "entities": [
+        "M001",
+        "M001/S03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-03-PLAN.md": {
+      "sha": "5d1224ed8d2c1592",
+      "entities": [
+        "M001",
+        "M001/S03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S03-T01-SUMMARY.md": {
+      "sha": "6c5322e06f33c3d3",
+      "entities": [
+        "M001",
+        "M001/S03",
+        "M001/S03/S03-T01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S03-T02-SUMMARY.md": {
+      "sha": "919e9f72b81e8fdc",
+      "entities": [
+        "M001",
+        "M001/S03",
+        "M001/S03/S03-T02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S03-T03-SUMMARY.md": {
+      "sha": "de69b78e453c1b48",
+      "entities": [
+        "M001",
+        "M001/S03",
+        "M001/S03/S03-T03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S03-T04-SUMMARY.md": {
+      "sha": "faa707f64e4e8649",
+      "entities": [
+        "M001",
+        "M001/S03",
+        "M001/S03/S03-T04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-03-ASSESSMENT.md": {
+      "sha": "530f4214f0e7520d",
+      "entities": [
+        "M001",
+        "M001/S03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-04-RESEARCH.md": {
+      "sha": "fa14c38e43b66881",
+      "entities": [
+        "M001",
+        "M001/S04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-04-PLAN.md": {
+      "sha": "c08d59cd0cf8c6f7",
+      "entities": [
+        "M001",
+        "M001/S04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S04-T01-SUMMARY.md": {
+      "sha": "9ed9c7ea4117d9fe",
+      "entities": [
+        "M001",
+        "M001/S04",
+        "M001/S04/T01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S04-T02-SUMMARY.md": {
+      "sha": "eaa218bc86d2ab45",
+      "entities": [
+        "M001",
+        "M001/S04",
+        "M001/S04/T02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S04-T03-SUMMARY.md": {
+      "sha": "72ce868edcb7fc31",
+      "entities": [
+        "M001",
+        "M001/S04",
+        "M001/S04/T03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S04-T04-SUMMARY.md": {
+      "sha": "4bc0964cf834464d",
+      "entities": [
+        "M001",
+        "M001/S04",
+        "M001/S04/T04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-04-ASSESSMENT.md": {
+      "sha": "cebffc946a72c277",
+      "entities": [
+        "M001",
+        "M001/S04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-01-SUMMARY.md": {
+      "sha": "12e16dec61d6dd07",
+      "entities": [
+        "M001",
+        "M001/S01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-02-SUMMARY.md": {
+      "sha": "643ccd77a73e35ce",
+      "entities": [
+        "M001",
+        "M001/S02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-03-SUMMARY.md": {
+      "sha": "22745effb2a38998",
+      "entities": [
+        "M001",
+        "M001/S03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-04-SUMMARY.md": {
+      "sha": "f0f09de7177d619b",
+      "entities": [
+        "M001",
+        "M001/S04"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-ASSESSMENT.md": {
+      "sha": "22ef563cc7d4b00f",
+      "entities": [
+        "M001"
+      ]
+    },
+    "DECISIONS.md": {
+      "sha": "62abaf3c756f44cc",
+      "entities": []
+    },
+    "phases/01-feasibility-and-qualification/01-05-RESEARCH.md": {
+      "sha": "adfbe3f8397b0a19",
+      "entities": [
+        "M001",
+        "M001/S05"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S05-T01-SUMMARY.md": {
+      "sha": "ca30eed622769997",
+      "entities": [
+        "M001",
+        "M001/S05",
+        "M001/S05/T01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S05-T02-SUMMARY.md": {
+      "sha": "0b558e26447a5f49",
+      "entities": [
+        "M001",
+        "M001/S05",
+        "M001/S05/T02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S05-T03-SUMMARY.md": {
+      "sha": "a0a7235b4a629302",
+      "entities": [
+        "M001",
+        "M001/S05",
+        "M001/S05/T03"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-06-RESEARCH.md": {
+      "sha": "f2080e594efd63ab",
+      "entities": [
+        "M001",
+        "M001/S06"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S06-T01-SUMMARY.md": {
+      "sha": "4ac5c6ee638ffc96",
+      "entities": [
+        "M001",
+        "M001/S06",
+        "M001/S06/T01"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/S06-T02-SUMMARY.md": {
+      "sha": "04d74dcef000d010",
+      "entities": [
+        "M001",
+        "M001/S06",
+        "M001/S06/T02"
+      ]
+    },
+    "phases/01-feasibility-and-qualification/01-06-SUMMARY.md": {
+      "sha": "1066abf730def962",
+      "entities": [
+        "M001",
+        "M001/S06"
+      ]
+    }
+  },
+  "planning": {
+    "active": false,
+    "layout": null,
+    "projections": {},
+    "passthrough": {}
+  },
+  "piVersion": ""
+}
