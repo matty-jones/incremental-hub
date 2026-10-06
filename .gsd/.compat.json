@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "lastWriter": "gsd-pi",
-  "lastProjectedAt": "2026-10-06T03:40:08.045Z",
+  "lastProjectedAt": "2026-10-06T03:41:17.564Z",
   "projections": {
     "REQUIREMENTS.md": {
       "sha": "e0bda0324fd01aa5",
@@ -263,7 +263,7 @@
       ]
     },
     "DECISIONS.md": {
-      "sha": "7f0485b03c8b32f9",
+      "sha": "51e29d1fe90de2ee",
       "entities": []
     },
     "phases/01-feasibility-and-qualification/01-05-RESEARCH.md": {
