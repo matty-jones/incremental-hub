@@ -1,7 +1,9 @@
 # Codebase Map
 
-Generated: 2026-10-06T02:11:29Z | Files: 1 | Described: 0/1
-<!-- gsd:codebase-meta {"generatedAt":"2026-10-06T02:11:29Z","fingerprint":"ef1a2c337828031b95c8dabdd1d9c415d900e2af","fileCount":1,"truncated":false} -->
+Generated: 2026-10-06T03:16:25Z | Files: 3 | Described: 0/3
+<!-- gsd:codebase-meta {"generatedAt":"2026-10-06T03:16:25Z","fingerprint":"87852b2f36e625d89f6017f40f162ec7705dbf61","fileCount":3,"truncated":false} -->
 
 ### (root)/
+- `.gitignore`
+- `skills-lock.json`
 - `SPEC.md`

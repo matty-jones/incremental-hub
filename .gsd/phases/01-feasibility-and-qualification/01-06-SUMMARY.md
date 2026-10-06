@@ -13,7 +13,7 @@ S04 integrated play-capture-restore spike completes successfully on PixelFold_x6
 ## What Was Done
 
 ### T01: Establish PixelFold_x64 environment
-- Booted PixelFold_x64 AVD (x86_64, android-34, 6.7in Foldable skin)
+- Booted PixelFold_x64 AVD (x86_64, android-36, 6.7in Foldable skin)
 - Confirmed adb-connected stable state, ro.product.cpu.abi=x86_64
 - Verified network connectivity to mrredshark77.github.io
 - Documented ARM64 failure: QEMU2 emulator on x86_64 host cannot run arm64 AVDs

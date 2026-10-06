@@ -6,7 +6,7 @@
 
 1. Updated S06 plan title from "ARM64" to "PixelFold_x64" to reflect approved environment.
 2. Fixed IntegratedSpike.kt to add pre-run profile cleanup: inspects `profileStore.getAllProfileNames()` before `getOrCreateProfile()` and deletes any stale `s04-source` or `s04-fresh` profiles.
-3. Built debug APK and installed on PixelFold_x64 emulator (emulator-5554, x86_64, API 34).
+3. Built debug APK and installed on PixelFold_x64 emulator (emulator-5554, x86_64, API 36, WebView 133.0.6943.137).
 4. Ran integrated spike from fresh app process. Verified logcat confirms pre-run cleanup ran for both profiles.
 5. All 12 stages passed. Report: passed=true, destroyedWebView=true, profileDataSurvived=true, importVerified=true, capturedSaveLength=8400 (real Shark save), blocker=null.
 6. Post-run profile deletion warning ("Cannot delete in-use profile") is expected AndroidX ProfileStore limitation — does not affect correctness.
