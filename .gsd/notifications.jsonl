@@ -1,0 +1,9 @@
+{"id":"47ed129d-761b-434d-8ef9-cebea04c02b7","ts":"2026-10-07T16:29:01.219Z","severity":"info","message":"GSD MCP Server Prepared at /home/blasky/Projects/incremental-hub-clean/.mcp.json","source":"notify","read":false}
+{"id":"039d3034-cdbb-4c26-b0a9-c807ca9057fc","ts":"2026-10-07T16:29:34.622Z","severity":"info","message":"GSD preferences (project) — pick a category to configure.","source":"notify","read":false}
+{"id":"a70e43f8-12b6-47dd-b0d4-2686e939eb42","ts":"2026-10-07T16:30:38.514Z","severity":"info","message":"Mode: solo — defaults: auto_push=true, push_branches=false, pre_merge_check=auto, merge_strategy=squash, isolation=worktree, unique_milestone_ids=false","source":"notify","read":false}
+{"id":"cb073fe5-b40e-4328-b271-3016dec6a433","ts":"2026-10-07T16:34:01.584Z","severity":"info","message":"Saved project preferences to /home/blasky/Projects/incremental-hub-clean/.gsd/PREFERENCES.md","source":"notify","read":false}
+{"id":"e8857991-06cb-489d-a571-dd83eb346111","ts":"2026-10-07T16:34:37.252Z","severity":"info","message":"Installing Skill Discovery skills...","source":"notify","read":false}
+{"id":"28927e87-b719-4efa-b7ae-26798bdceb1a","ts":"2026-10-07T16:34:39.100Z","severity":"info","message":"Installing Skill Authoring, Document Handling skills...","source":"notify","read":false}
+{"id":"8435469f-5ec9-44d3-b131-24c018fedef1","ts":"2026-10-07T16:34:44.545Z","severity":"info","message":"Installing Code Review & Quality, Git Advanced Workflows skills...","source":"notify","read":false}
+{"id":"c7a22235-a370-4765-bb50-52d4201a7c03","ts":"2026-10-07T16:34:47.537Z","severity":"info","message":"Installed: Skill Discovery, Skill Authoring, Document Handling, Code Review & Quality, Git Advanced Workflows","source":"notify","read":false}
+{"id":"936f78d9-cd19-4868-b792-6aeb85cee543","ts":"2026-10-07T16:35:47.904Z","severity":"info","message":"No GSD milestones found. Run /gsd to start.","source":"notify","read":false}
