@@ -15,6 +15,12 @@ The GSD orchestration database was deliberately reset after M001 because its his
 - The original repository `SPEC.md` remains authoritative for the overall product.
 - This document defines the bounded next milestone only.
 
+This GSD planning run MUST create exactly ONE milestone: Playable Hub.
+Do not create, queue, register, plan, or otherwise materialize later product milestones
+from SPEC.md. Durable Vault, Safe Recovery & Portability, Mobile Fit, Human Continuity,
+Compatibility Expansion, Preservation & Automation, and Continuity Assistant are
+future context only and are explicitly outside this GSD planning run.
+
 This work corresponds to **product milestone M002: Playable Hub**. Because this is a fresh GSD orchestration state, GSD may internally number it M001. That numbering difference is intentional and must not cause historical feasibility work to be recreated.
 
 ## Validated baseline
