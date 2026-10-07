@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": 1,
+  "gameId": "shark-incremental",
+  "displayName": "Shark Incremental",
+  "sourceUrl": "https://mrredshark77.github.io",
+  "launchUrl": "https://mrredshark77.github.io",
+  "navigationRules": {
+    "maxDepth": 1,
+    "allowSameOriginNavigation": true,
+    "blockCrossOriginNavigation": false
+  },
+  "storageContext": {
+    "origin": "https://mrredshark77.github.io",
+    "type": "top-level",
+    "keys": [
+      {
+        "name": "shark_inc_save",
+        "format": "base64-json",
+        "freshness": "persisted-only",
+        "description": "Primary player save state, base64-encoded JSON with VERSION field and Decimal serialization via break_eternity.js"
+      }
+    ]
+  },
+  "adapterId": "shark-incremental-adapter",
+  "adapterVersion": "1.0.0",
+  "saveCoverage": {
+    "mode": "persisted-only",
+    "autosaveIntervalMs": 15000,
+    "maxAutosaveIntervalMs": 120000,
+    "keys": ["shark_inc_save"],
+    "coverage": "complete"
+  },
+  "displayDefaults": {
+    "showIcon": true,
+    "iconResId": "ic_shark",
+    "colorPrimary": "#1565C0",
+    "colorSecondary": "#0D47A1",
+    "badgeText": "S"
+  },
+  "versionProbe": {
+    "enabled": true,
+    "minVersion": 3,
+    "field": "VERSION",
+    "javascript": "return typeof player !== 'undefined' && player.VERSION !== undefined ? player.VERSION : 0;"
+  },
+  "compatibility": {
+    "minSdkVersion": 30,
+    "features": ["MULTI_PROFILE", "WEB_MESSAGE_LISTENER"],
+    "notes": "Requires Android 13+ for disposable profile support. WebView must support WEB_MESSAGE_LISTENER for capture/restore bridge."
+  },
+  "resourceObservations": [
+    {
+      "type": "save-js",
+      "url": "https://raw.githubusercontent.com/MrRedShark77/shark-incremental/main/js/save.js",
+      "observed": "SAVE_ID = 'shark_inc_save', save() uses btoa(JSON.stringify(player))"
+    },
+    {
+      "type": "load-js",
+      "url": "https://raw.githubusercontent.com/MrRedShark77/shark-incremental/main/js/load.js",
+      "observed": "loadGame(start=true) calls load(prevSave) which does JSON.parse(atob(x))"
+    },
+    {
+      "type": "decimal-lib",
+      "url": "break_eternity.js",
+      "observed": "Decimal serialization format {s:1,e:2,c:[3]} preserved as opaque JSON strings"
+    }
+  ]
+}

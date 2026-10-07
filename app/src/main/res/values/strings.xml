@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Incremental Hub</string>
+    <string name="title_activity_game_qualification">Candidate Game Qualification</string>
+    <string name="title_activity_integrated_spike">Integrated Spike</string>
+</resources>
