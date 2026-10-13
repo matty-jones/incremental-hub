@@ -68,3 +68,7 @@ tmp/
 .gsd/milestones/**/continue.md
 
 .gradle/
+
+# ── GSD baseline (auto-generated) ──
+.gsd/.compat.json
+.gsd/quarantine/
