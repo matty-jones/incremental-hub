@@ -1,0 +1,10 @@
+   > java.nio.file.NoSuchFileException: /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/test-results/testDebugUnitTest/binary/output.bin.idx
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 13s
+25 actionable tasks: 1 executed, 24 up-to-date

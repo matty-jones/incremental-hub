@@ -1,0 +1,20 @@
+{
+  "id": "adf10b92-2125-429e-97bf-6ed80e1131b9",
+  "runtime": "bash",
+  "purpose": "Run BridgeValidatorTest to verify T02 deliverable",
+  "script_chars": 186,
+  "started_at": "2026-10-10T21:16:37.339Z",
+  "finished_at": "2026-10-10T21:16:46.731Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 9392,
+  "stdout_bytes": 866,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/adf10b92-2125-429e-97bf-6ed80e1131b9.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/adf10b92-2125-429e-97bf-6ed80e1131b9.stderr"
+}

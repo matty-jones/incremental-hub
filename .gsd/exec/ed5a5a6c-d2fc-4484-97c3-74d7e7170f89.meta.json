@@ -1,0 +1,20 @@
+{
+  "id": "ed5a5a6c-d2fc-4484-97c3-74d7e7170f89",
+  "runtime": "bash",
+  "purpose": "Verify all unit tests pass",
+  "script_chars": 49,
+  "started_at": "2026-10-09T18:58:05.274Z",
+  "finished_at": "2026-10-09T18:58:17.425Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 12151,
+  "stdout_bytes": 2302,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/ed5a5a6c-d2fc-4484-97c3-74d7e7170f89.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/ed5a5a6c-d2fc-4484-97c3-74d7e7170f89.stderr"
+}

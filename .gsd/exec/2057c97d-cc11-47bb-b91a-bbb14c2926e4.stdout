@@ -1,0 +1,30 @@
+app/src/main/java/com/example/hub/games/Fe000000Adapter.kt:38:        private const val CAPTURE_TIMEOUT_MS = 10_000L
+app/src/main/java/com/example/hub/games/Fe000000Adapter.kt:39:        private const val READY_TIMEOUT_MS = 10_000L
+app/src/main/java/com/example/hub/games/Fe000000Adapter.kt:75:        val raw: String? = withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
+app/src/main/java/com/example/hub/games/GameQualifier.kt:48:        private const val PROBE_TIMEOUT_MS = 5_000L
+app/src/main/java/com/example/hub/games/GameQualifier.kt:49:        private const val READY_TIMEOUT_MS = 10_000L
+app/src/main/java/com/example/hub/games/GameQualifier.kt:50:        private const val CAPTURE_TIMEOUT_MS = 15_000L
+app/src/main/java/com/example/hub/games/GameQualifier.kt:51:        private const val IMPORT_TIMEOUT_MS = 15_000L
+app/src/main/java/com/example/hub/games/GameQualifier.kt:52:        private const val NAVIGATION_TIMEOUT_MS = 20_000L
+app/src/main/java/com/example/hub/games/GameQualifier.kt:109:                withTimeoutOrNull(PROBE_TIMEOUT_MS) { adapter.probe(syntheticWebView) } ?: false
+app/src/main/java/com/example/hub/games/GameQualifier.kt:124:                withTimeoutOrNull(READY_TIMEOUT_MS) { adapter.awaitReady(syntheticWebView) } ?: false
+app/src/main/java/com/example/hub/games/GameQualifier.kt:130:                "Timeout: ${READY_TIMEOUT_MS}ms",
+app/src/main/java/com/example/hub/games/GameQualifier.kt:148:                withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
+app/src/main/java/com/example/hub/games/GameQualifier.kt:200:                withTimeoutOrNull(IMPORT_TIMEOUT_MS) {
+app/src/main/java/com/example/hub/games/GameQualifier.kt:318:                withTimeoutOrNull(NAVIGATION_TIMEOUT_MS) { deferred.await() }
+app/src/main/java/com/example/hub/navigation/HubNavigation.kt:8:import androidx.navigation.compose.rememberNavController
+app/src/main/java/com/example/hub/navigation/HubNavigation.kt:28:    val navController = rememberNavController()
+app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:28:import androidx.compose.runtime.remember
+app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:29:import androidx.compose.runtime.rememberCoroutineScope
+app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:60:    val coroutineScope = rememberCoroutineScope()
+app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:61:    val snackbarHostState = remember { SnackbarHostState() }
+app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:63:    var result by remember { mutableStateOf<IntegratedSpikeResult?>(null) }
+app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:64:    var reportPath by remember { mutableStateOf<String?>(null) }
+app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:65:    var running by remember { mutableStateOf(false) }
+app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:30:import androidx.compose.runtime.remember
+app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:31:import androidx.compose.runtime.rememberCoroutineScope
+app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:61:    val coroutineScope = rememberCoroutineScope()
+app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:63:    var detectorResult by remember {
+app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:66:    var snapshotResult by remember {
+app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:69:    var running by remember { mutableStateOf(false) }
+app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:70:    val snackbarHostState = remember { SnackbarHostState() }

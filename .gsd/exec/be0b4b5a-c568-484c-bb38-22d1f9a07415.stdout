@@ -1,0 +1,12 @@
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.bridge.BridgeValidatorTest.xml:36
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.database.GameInstanceDaoTest.xml:11
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.Fe000000AdapterTest.xml:7
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameDefinitionValidatorTest.xml:10
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameRegistryTest.xml:10
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.SharkIncrementalAdapterTest.xml:6
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.session.SessionControllerTest.xml:64
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.session.SessionStateTest.xml:32
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.ui.NativeMenuTest.xml:32
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.ui.WebViewHostTest.xml:11
+10
+10

@@ -1,0 +1,20 @@
+{
+  "id": "626b3734-b601-49ac-ae13-1ad7d346d4d7",
+  "runtime": "bash",
+  "purpose": "Run all unit tests to confirm no regressions",
+  "script_chars": 122,
+  "started_at": "2026-10-08T21:03:36.366Z",
+  "finished_at": "2026-10-08T21:03:45.035Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 8669,
+  "stdout_bytes": 1610,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/626b3734-b601-49ac-ae13-1ad7d346d4d7.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/626b3734-b601-49ac-ae13-1ad7d346d4d7.stderr"
+}

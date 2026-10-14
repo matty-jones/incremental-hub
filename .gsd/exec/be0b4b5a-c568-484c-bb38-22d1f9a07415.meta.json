@@ -1,0 +1,20 @@
+{
+  "id": "be0b4b5a-c568-484c-bb38-22d1f9a07415",
+  "runtime": "bash",
+  "purpose": "Count passing vs total test files",
+  "script_chars": 244,
+  "started_at": "2026-10-13T22:52:14.876Z",
+  "finished_at": "2026-10-13T22:52:14.896Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 20,
+  "stdout_bytes": 959,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/be0b4b5a-c568-484c-bb38-22d1f9a07415.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/be0b4b5a-c568-484c-bb38-22d1f9a07415.stderr"
+}

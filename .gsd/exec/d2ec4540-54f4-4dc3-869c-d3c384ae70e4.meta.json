@@ -1,0 +1,20 @@
+{
+  "id": "d2ec4540-54f4-4dc3-869c-d3c384ae70e4",
+  "runtime": "bash",
+  "purpose": "Final unit test verification before slice complete",
+  "script_chars": 132,
+  "started_at": "2026-10-10T21:21:11.621Z",
+  "finished_at": "2026-10-10T21:21:19.496Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 7875,
+  "stdout_bytes": 151,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/d2ec4540-54f4-4dc3-869c-d3c384ae70e4.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/d2ec4540-54f4-4dc3-869c-d3c384ae70e4.stderr"
+}

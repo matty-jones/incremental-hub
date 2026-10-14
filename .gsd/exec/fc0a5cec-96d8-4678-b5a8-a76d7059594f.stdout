@@ -1,0 +1,20 @@
+             ^
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/generated/ksp/debug/java/com/example/hub/database/GameInstanceDao_Impl.java:34: error: duplicate class: com.example.hub.database.GameInstanceDao_Impl
+public final class GameInstanceDao_Impl implements GameInstanceDao {
+             ^
+2 errors
+
+> Task :app:mergeExtDexDebug
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugJavaWithJavac'.
+> Compilation failed; see the compiler error output for details.
+
+* Try:
+> Run with --info option to get more log output.
+> Run with --scan to get full insights.
+
+BUILD FAILED in 20s
+31 actionable tasks: 8 executed, 23 up-to-date

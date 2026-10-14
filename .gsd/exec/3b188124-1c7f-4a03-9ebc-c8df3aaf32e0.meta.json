@@ -1,0 +1,20 @@
+{
+  "id": "3b188124-1c7f-4a03-9ebc-c8df3aaf32e0",
+  "runtime": "bash",
+  "purpose": "Find milestone-level artifacts",
+  "script_chars": 37,
+  "started_at": "2026-10-13T23:16:57.140Z",
+  "finished_at": "2026-10-13T23:16:57.159Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 19,
+  "stdout_bytes": 1093,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/3b188124-1c7f-4a03-9ebc-c8df3aaf32e0.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/3b188124-1c7f-4a03-9ebc-c8df3aaf32e0.stderr"
+}

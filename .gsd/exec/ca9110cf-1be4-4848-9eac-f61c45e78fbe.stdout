@@ -1,0 +1,30 @@
+package com.example.hub.session
+
+import android.webkit.WebView
+import androidx.test.core.app.ApplicationProvider
+import com.example.hub.database.GameInstance
+import com.example.hub.database.GameInstanceDao
+import com.example.hub.games.GameRegistry
+import com.example.hub.bootstrap.DetectorResult
+import androidx.lifecycle.Lifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import java.util.concurrent.CopyOnWriteArrayList
+
+/**
+ * Unit tests for [SessionController].

@@ -1,0 +1,20 @@
+{
+  "id": "b5baf1f9-6e99-4523-860e-c58c41769cb2",
+  "runtime": "bash",
+  "purpose": "Get full GameInstanceDaoTest for UAT evidence",
+  "script_chars": 69,
+  "started_at": "2026-10-08T21:15:16.316Z",
+  "finished_at": "2026-10-08T21:15:16.340Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 24,
+  "stdout_bytes": 3847,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/b5baf1f9-6e99-4523-860e-c58c41769cb2.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/b5baf1f9-6e99-4523-860e-c58c41769cb2.stderr"
+}

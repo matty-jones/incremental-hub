@@ -1,0 +1,20 @@
+{
+  "id": "1417b680-1766-4220-b8d6-db3e76081471",
+  "runtime": "bash",
+  "purpose": "Find milestone-level slice artifacts",
+  "script_chars": 101,
+  "started_at": "2026-10-13T23:21:37.729Z",
+  "finished_at": "2026-10-13T23:21:37.743Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 14,
+  "stdout_bytes": 730,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/1417b680-1766-4220-b8d6-db3e76081471.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/1417b680-1766-4220-b8d6-db3e76081471.stderr"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "9ae24919-3b16-4816-8ed4-d08fc0365d6f",
+  "runtime": "bash",
+  "purpose": "Read full T03 summary",
+  "script_chars": 54,
+  "started_at": "2026-10-13T22:53:35.936Z",
+  "finished_at": "2026-10-13T22:53:35.941Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 5,
+  "stdout_bytes": 1997,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9ae24919-3b16-4816-8ed4-d08fc0365d6f.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9ae24919-3b16-4816-8ed4-d08fc0365d6f.stderr"
+}

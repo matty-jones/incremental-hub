@@ -1,0 +1,20 @@
+{
+  "id": "4beb19e6-812a-45b1-91b3-4e0f1bc142bb",
+  "runtime": "bash",
+  "purpose": "Fresh NativeMenuTest evidence",
+  "script_chars": 104,
+  "started_at": "2026-10-09T19:11:08.712Z",
+  "finished_at": "2026-10-09T19:11:39.322Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 30610,
+  "stdout_bytes": 398,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/4beb19e6-812a-45b1-91b3-4e0f1bc142bb.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/4beb19e6-812a-45b1-91b3-4e0f1bc142bb.stderr"
+}

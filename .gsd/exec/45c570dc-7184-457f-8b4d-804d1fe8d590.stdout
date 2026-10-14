@@ -1,0 +1,10 @@
+build-tools
+cmdline-tools
+emulator
+licenses
+platform-tools
+platforms
+skins
+system-images
+---
+sdk.dir=/home/blasky/android-sdk

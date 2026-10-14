@@ -1,0 +1,80 @@
+package com.example.hub.bootstrap
+
+import android.content.Context
+import android.util.Log
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewCompat
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+
+/**
+ * Result of a [BootstrapDetector] execution.
+ *
+ * @param qualifiedMechanism the mechanism that produced a qualified storage origin,
+ *   or null if neither mechanism produced a qualified origin.
+ * @param webViewAssetLoaderOrigin the origin captured when navigating via
+ *   [WebViewAssetLoader], or null if that path failed.
+ * @param loadDataWithBaseURLOrigin the origin captured when navigating via
+ *   [WebViewCompat.loadDataWithBaseURL], or null if that path failed.
+ * @param webViewAssetLoaderQualified whether the [WebViewAssetLoader] origin matched
+ *   the expected qualified origin ([WebViewAssetLoader.DEFAULT_DOMAIN]).
+ * @param loadDataWithBaseURLQualified whether the [loadDataWithBaseURL] origin was
+ *   a native HTTPS origin that the game's service worker cannot intercept.
+ * @param reportPath absolute path to the JSON report written to [Context.filesDir],
+ *   or null if the report could not be written.
+ * @param message human-readable description of the overall result.
+ */
+data class DetectorResult(
+    val qualifiedMechanism: String?,
+    val webViewAssetLoaderOrigin: String?,
+    val loadDataWithBaseURLOrigin: String?,
+    val webViewAssetLoaderQualified: Boolean,
+    val loadDataWithBaseURLQualified: Boolean,
+    val reportPath: String?,
+    val message: String,
+)
+
+/**
+ * Proves which mechanism — `WebViewAssetLoader` or `loadDataWithBaseURL` — produces a
+ * storage origin that is qualified (isolated from upstream service workers).
+ *
+ * The detector flow:
+ * 1. Create a test profile `s02-bootstrap-test` via [ProfileStore.getOrCreateProfile].
+ * 2. Bind a WebView to the test profile via [WebViewCompat.setProfile] *before* navigation.
+ * 3. Navigate to the `WebViewAssetLoader` bootstrap URL and capture `location.origin`.
+ * 4. Create a fresh WebView bound to the same profile and navigate via
+ *    [WebViewCompat.loadDataWithBaseURL] with a native HTTPS base origin.
+ * 5. Compare each captured origin against the expected qualified origin.
+ * 6. Write a JSON report to `filesDir/bootstrap_report.json`.
+ * 7. Clean up the test profile via [ProfileStore.deleteProfile].
+ *
+ * The highest-risk unknown is which mechanism yields an origin that the game's service
+ * worker cannot intercept. This detector reports the answer empirically on the target
+ * device.
+ *
+ * **Thread confinement:** [test] acquires [Dispatchers.Main] internally, so it may be
+ * called from any coroutine context. WebView creation and profile binding are not
+ * thread-safe and must run on the UI thread.
+ *
+ * **Cleanup guarantee:** Test profile is deleted on success. On failure, the profile
+ * is retained for debugging.
+ */
+class BootstrapDetector(private val context: Context) {
+
+    companion object {
+        private const val TAG = "BootstrapDetector"
+        private const val TEST_PROFILE = "s02-bootstrap-test"
+        private const val BOOTSTRAP_PATH = "bootstrap/native.html"
+        private const val REPORT_FILENAME = "bootstrap_report.json"
+
+        /**
+         * The expected origin when using [WebViewAssetLoader]. This is the default virtual
+         * domain that AndroidX WebViewAssetLoader assigns to assets.
+         */

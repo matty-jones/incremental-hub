@@ -1,0 +1,26 @@
+package com.example.hub.database
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+/**
+ * Minimal Room entity tracking a single GameInstance row.
+ *
+ * Deliberately narrow per R002 — stores only the metadata needed to
+ * order and resume sessions. No archive, vault, or history schemas.
+ *
+ * @param gameId            Primary key — the stable identifier from the game definition.
+ * @param profileName       User-assigned or auto-generated profile label.
+ * @param sessionIdentity   Opaque token identifying this specific play session.
+ * @param lastPlayedAtMillis Epoch millis of the most recent play; used for ordering.
+ * @param resumeToken       Nullable token used to restore a session. Null when no resume is available.
+ */
+@Entity(tableName = "game_instances")
+data class GameInstance(
+    @PrimaryKey val gameId: String,
+    @ColumnInfo(name = "profile_name") val profileName: String,
+    @ColumnInfo(name = "session_identity") val sessionIdentity: String,
+    @ColumnInfo(name = "last_played_at_millis") val lastPlayedAtMillis: Long,
+    @ColumnInfo(name = "resume_token") val resumeToken: String? = null,
+)

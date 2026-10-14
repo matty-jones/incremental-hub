@@ -1,0 +1,20 @@
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.ui.WebViewHostTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.Fe000000AdapterTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameRegistryTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.bridge.BridgeValidatorTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.database.GameInstanceDaoTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.session.SessionControllerTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameDefinitionValidatorTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.SharkIncrementalAdapterTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.ui.NativeMenuTest.xml
+app/build/test-results/testDebugUnitTest/TEST-com.example.hub.session.SessionStateTest.xml
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.ui.WebViewHostTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.Fe000000AdapterTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameRegistryTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.bridge.BridgeValidatorTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.database.GameInstanceDaoTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.session.SessionControllerTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameDefinitionValidatorTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.SharkIncrementalAdapterTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.ui.NativeMenuTest.xml ===
+=== app/build/test-results/testDebugUnitTest/TEST-com.example.hub.session.SessionStateTest.xml ===

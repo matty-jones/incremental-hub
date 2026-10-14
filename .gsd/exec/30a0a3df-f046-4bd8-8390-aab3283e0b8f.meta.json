@@ -1,0 +1,20 @@
+{
+  "id": "30a0a3df-f046-4bd8-8390-aab3283e0b8f",
+  "runtime": "bash",
+  "purpose": "Check SharkIncrementalAdapter test",
+  "script_chars": 97,
+  "started_at": "2026-10-13T23:42:47.383Z",
+  "finished_at": "2026-10-13T23:42:47.419Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 36,
+  "stdout_bytes": 862,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/30a0a3df-f046-4bd8-8390-aab3283e0b8f.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/30a0a3df-f046-4bd8-8390-aab3283e0b8f.stderr"
+}

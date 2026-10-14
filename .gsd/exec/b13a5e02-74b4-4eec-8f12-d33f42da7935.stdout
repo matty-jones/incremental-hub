@@ -1,0 +1,20 @@
+
+> Task :app:compileDebugUnitTestKotlin FAILED
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/test/java/com/example/hub/games/GameDefinitionValidatorTest.kt:108:16 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.lang.ClassLoader?'.
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/test/java/com/example/hub/games/GameRegistryTest.kt:187:16 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.lang.ClassLoader?'.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugUnitTestKotlin'.
+> Cannot access output property 'classpathSnapshotProperties.classpathSnapshotDir' of task ':app:compileDebugUnitTestKotlin'. Accessing unreadable inputs or outputs is not supported. Declare the task as untracked by using Task.doNotTrackState(). For more information, please refer to https://docs.gradle.org/8.9/userguide/incremental_build.html#sec:disable-state-tracking in the Gradle documentation.
+   > Failed to create MD5 hash for file '/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/kotlin/compileDebugUnitTestKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin' as it does not exist.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 15s
+23 actionable tasks: 1 executed, 22 up-to-date

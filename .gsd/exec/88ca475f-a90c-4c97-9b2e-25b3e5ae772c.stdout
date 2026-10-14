@@ -1,0 +1,21 @@
+app/src/main/java/com/example/hub/games/GameRegistry.kt:open class GameRegistry(private val context: Context) {
+app/src/main/java/com/example/hub/games/GameRegistry.kt-
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    companion object {
+app/src/main/java/com/example/hub/games/GameRegistry.kt-        private const val TAG = "GameRegistry"
+app/src/main/java/com/example/hub/games/GameRegistry.kt-        private const val GAMES_ASSET_DIR = "games"
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    }
+app/src/main/java/com/example/hub/games/GameRegistry.kt-
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    /** Lazily computed, cached list of all definitions with their validation status. */
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    private var _definitions: List<DefinitionWithStatus>? = null
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    private val definitions: List<DefinitionWithStatus> get() = _definitions ?: loadDefinitions().also { _definitions = it }
+app/src/main/java/com/example/hub/games/GameRegistry.kt-
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    /** Lazily computed, cached list of resolved (valid) games. */
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    private var _resolvedGames: List<RegisteredGame>? = null
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    private val resolvedGames: List<RegisteredGame> get() = _resolvedGames ?: buildResolvedGames(definitions).also { _resolvedGames = it }
+app/src/main/java/com/example/hub/games/GameRegistry.kt-
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    /**
+app/src/main/java/com/example/hub/games/GameRegistry.kt-     * Inject pre-loaded JSON strings for testing. Call before [getGames] to override
+app/src/main/java/com/example/hub/games/GameRegistry.kt-     * the default asset-based loading.
+app/src/main/java/com/example/hub/games/GameRegistry.kt-     */
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    fun injectDefinitions(jsons: List<String>) {
+app/src/main/java/com/example/hub/games/GameRegistry.kt-        _definitions = jsons.map { json ->

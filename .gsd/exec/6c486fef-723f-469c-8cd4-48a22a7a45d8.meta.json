@@ -1,0 +1,20 @@
+{
+  "id": "6c486fef-723f-469c-8cd4-48a22a7a45d8",
+  "runtime": "bash",
+  "purpose": "Build debug APK to verify no compile errors",
+  "script_chars": 118,
+  "started_at": "2026-10-08T21:03:36.356Z",
+  "finished_at": "2026-10-08T21:03:44.660Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 8304,
+  "stdout_bytes": 1618,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6c486fef-723f-469c-8cd4-48a22a7a45d8.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6c486fef-723f-469c-8cd4-48a22a7a45d8.stderr"
+}

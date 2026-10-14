@@ -1,0 +1,50 @@
+
+SessionControllerTest > requestBackgroundFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > isActiveIsFalseWhenClosed FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > open_persistsGameInstance FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestRecovery_transitionsDegradedToRecoveryRequired FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestForegroundFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestClosing_fromDegraded_transitionsToClosed FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > illegalTransitionsFromPlaying_areRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestBackground_transitionsPlayingToBackground FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > activeProfileNameTracksCurrentProfile FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > close_transitionsPlayingToClosed FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > open_transitionsClosedToPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestForeground_restoresBackgroundToPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+34 tests completed, 34 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+BUILD FAILED in 7s
+25 actionable tasks: 1 executed, 24 up-to-date

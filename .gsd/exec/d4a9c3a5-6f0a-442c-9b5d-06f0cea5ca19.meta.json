@@ -1,0 +1,20 @@
+{
+  "id": "d4a9c3a5-6f0a-442c-9b5d-06f0cea5ca19",
+  "runtime": "bash",
+  "purpose": "Read GameRegistryTest for UAT evidence",
+  "script_chars": 63,
+  "started_at": "2026-10-08T21:12:58.308Z",
+  "finished_at": "2026-10-08T21:12:58.316Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 8,
+  "stdout_bytes": 8093,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/d4a9c3a5-6f0a-442c-9b5d-06f0cea5ca19.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/d4a9c3a5-6f0a-442c-9b5d-06f0cea5ca19.stderr"
+}

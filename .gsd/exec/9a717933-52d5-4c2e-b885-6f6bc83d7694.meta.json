@@ -1,0 +1,20 @@
+{
+  "id": "9a717933-52d5-4c2e-b885-6f6bc83d7694",
+  "runtime": "bash",
+  "purpose": "Read S02 full summary",
+  "script_chars": 40,
+  "started_at": "2026-10-13T23:48:40.938Z",
+  "finished_at": "2026-10-13T23:48:40.951Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 13,
+  "stdout_bytes": 2421,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9a717933-52d5-4c2e-b885-6f6bc83d7694.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9a717933-52d5-4c2e-b885-6f6bc83d7694.stderr"
+}

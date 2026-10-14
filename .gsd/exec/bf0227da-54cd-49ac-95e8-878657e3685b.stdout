@@ -1,0 +1,56 @@
+package com.example.hub.navigation
+
+import android.util.Log
+import androidx.compose.runtime.Composable
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.example.hub.ui.LauncherScreen
+import com.example.hub.ui.PlaySurfaceStub
+
+private const val TAG = "HubNavigation"
+
+/**
+ * Navigation host for the Playable Hub app.
+ *
+ * Two routes:
+ * - `"launcher"` — the main launcher screen ([LauncherScreen]).
+ * - `"play_surface/{gameId}"` — the play surface stub ([PlaySurfaceStub]),
+ *   wired for S02 WebView implementation.
+ *
+ * The [LauncherScreen] callbacks ([onLaunch], [onResume]) both navigate to
+ * the play_surface route with the given [gameId].
+ */
+@Composable
+fun HubNavigation() {
+    val navController = rememberNavController()
+
+    NavHost(
+        navController = navController,
+        startDestination = "launcher",
+    ) {
+        composable("launcher") {
+            LauncherScreen(
+                onLaunch = { gameId ->
+                    Log.d(TAG, "HubNavigation: navigate to play_surface/$gameId (launch)")
+                    navController.navigate("play_surface/$gameId")
+                },
+                onResume = { gameId ->
+                    Log.d(TAG, "HubNavigation: navigate to play_surface/$gameId (resume)")
+                    navController.navigate("play_surface/$gameId")
+                },
+            )
+        }
+        composable(
+            route = "play_surface/{gameId}",
+            arguments = listOf(navArgument("gameId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val gameId = backStackEntry.arguments?.getString("gameId")
+                ?: throw IllegalArgumentException("gameId is required for play_surface route")
+            Log.d(TAG, "HubNavigation: play_surface displayed for gameId=$gameId")
+            PlaySurfaceStub(gameId = gameId)
+        }
+    }
+}

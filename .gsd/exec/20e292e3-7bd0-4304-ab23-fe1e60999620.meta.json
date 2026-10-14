@@ -1,0 +1,20 @@
+{
+  "id": "20e292e3-7bd0-4304-ab23-fe1e60999620",
+  "runtime": "bash",
+  "purpose": "Get source file checksums for verification",
+  "script_chars": 58,
+  "started_at": "2026-10-13T23:00:58.078Z",
+  "finished_at": "2026-10-13T23:00:58.099Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 21,
+  "stdout_bytes": 2774,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/20e292e3-7bd0-4304-ab23-fe1e60999620.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/20e292e3-7bd0-4304-ab23-fe1e60999620.stderr"
+}

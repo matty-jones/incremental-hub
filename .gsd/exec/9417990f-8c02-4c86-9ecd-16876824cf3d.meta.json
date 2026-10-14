@@ -1,0 +1,20 @@
+{
+  "id": "9417990f-8c02-4c86-9ecd-16876824cf3d",
+  "runtime": "bash",
+  "purpose": null,
+  "script_chars": 157,
+  "started_at": "2026-10-10T21:30:42.161Z",
+  "finished_at": "2026-10-10T21:30:42.189Z",
+  "exit_code": 2,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 28,
+  "stdout_bytes": 0,
+  "stderr_bytes": 31,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9417990f-8c02-4c86-9ecd-16876824cf3d.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9417990f-8c02-4c86-9ecd-16876824cf3d.stderr"
+}

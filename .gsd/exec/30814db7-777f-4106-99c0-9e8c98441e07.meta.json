@@ -1,0 +1,20 @@
+{
+  "id": "30814db7-777f-4106-99c0-9e8c98441e07",
+  "runtime": "bash",
+  "purpose": "run SessionControllerTest to verify cadence implementation after fix",
+  "script_chars": 105,
+  "started_at": "2026-10-10T21:54:59.630Z",
+  "finished_at": "2026-10-10T21:56:13.254Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 73624,
+  "stdout_bytes": 4809,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/30814db7-777f-4106-99c0-9e8c98441e07.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/30814db7-777f-4106-99c0-9e8c98441e07.stderr"
+}

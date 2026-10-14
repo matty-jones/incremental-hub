@@ -1,0 +1,30 @@
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-en-rIN/values-en-rIN.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-hy/values-hy.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-uk/values-uk.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-ur/values-ur.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-mk/values-mk.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-ml/values-ml.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-mn/values-mn.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-uz/values-uz.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-mr/values-mr.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-af/values-af.xml (No such file or directory). Cause: null). Check logs for more details.
+   > A failure occurred while executing com.android.build.gradle.internal.res.ResourceCompilerRunnable
+      > Resource compilation failed (/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values-fr-rCA/values-fr-rCA.xml (No such file or directory). Cause: null). Check logs for more details.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 12s
+9 actionable tasks: 9 executed

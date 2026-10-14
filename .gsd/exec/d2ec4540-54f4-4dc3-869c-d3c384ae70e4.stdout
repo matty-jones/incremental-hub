@@ -1,0 +1,5 @@
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest UP-TO-DATE
+
+BUILD SUCCESSFUL in 7s
+25 actionable tasks: 25 up-to-date

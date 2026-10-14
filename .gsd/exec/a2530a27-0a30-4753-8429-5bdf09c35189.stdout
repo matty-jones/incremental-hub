@@ -1,0 +1,39 @@
+# S02: Play Surface and Native Menu — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-09T19:18:39.183Z
+
+## UAT: Play Surface and Native Menu
+
+**Slice:** S02 — Milestone M001
+
+### Pre-conditions
+- App built and installed on device/emulator
+- At least one game registered in GameRegistry (S01 deliverable)
+- local.properties points to valid Android SDK
+
+### UAT Type
+- UAT mode: runtime-executable
+
+### Checks
+
+| # | Description | Expected Outcome | Mode |
+|---|-------------|-----------------|------|
+| U1 | Launch app, navigate to a registered game, enter play surface | WebView renders game content; session state is OPENING then PLAYING | runtime |
+| U2 | Open native menu while game is playing | Menu overlays without recreating WebView; game remains active in background | runtime |
+| U3 | Trigger each of 7 menu actions (Resume, SnapshotNow, Checkpoint, Vault, Reload, Display, ReturnToHub) | Each action fires onAction callback; menu closes after ReturnToHub; no WebView recreation | runtime |
+| U4 | Press Android Back while menu is open | Menu closes; session stays PLAYING; no silent navigation back | runtime |
+| U5 | Press Android Back while menu is closed | App navigates back to launcher; session transitions to CLOSING then CLOSED | runtime |
+| U6 | Rotate device / change window size while menu is open | Layout adapts (compact→bottom sheet, wide→side panel); WebView identity stable | runtime |
+| U7 | Trigger configuration change (IME open/close) while playing | FoldAwareLayout adjusts insets; WebView content not covered by keyboard | runtime |
+| U8 | Run ./gradlew :app:assembleDebug --no-daemon | BUILD SUCCESSFUL | artifact |
+| U9 | Run ./gradlew :app:testDebugUnitTest --tests "com.example.hub.session.SessionStateTest" | 30/30 tests pass | artifact |
+| U10 | Run ./gradlew :app:testDebugUnitTest --tests "com.example.hub.ui.WebViewHostTest" | 4/4 tests pass | artifact |
+| U11 | Run ./gradlew :app:testDebugUnitTest --tests "com.example.hub.ui.NativeMenuTest" | 30/30 tests pass | artifact |
+
+### Edge Cases
+- E1: Menu opened/closed rapidly while game loads — WebView identity must remain stable
+- E2: SessionState is CLOSED — WebViewHost must not create a WebView (early return)
+- E3: Different gameId values — each must produce a distinct AndroidView factory invocation
+- E4: Profile bind must occur before loadUrl in WebViewHost factory
+<!-- gsd:state-version=82:1 -->

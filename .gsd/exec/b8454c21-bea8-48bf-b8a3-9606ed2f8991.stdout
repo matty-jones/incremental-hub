@@ -1,0 +1,20 @@
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/CapabilityScreen.kt:132:21 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/GameQualificationScreen.kt:124:21 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/GameQualificationScreen.kt:160:25 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:131:21 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:165:25 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/IntegratedSpikeScreen.kt:182:21 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugJavaResource
+> Task :app:mergeExtDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+
+BUILD SUCCESSFUL in 30s
+38 actionable tasks: 7 executed, 31 up-to-date

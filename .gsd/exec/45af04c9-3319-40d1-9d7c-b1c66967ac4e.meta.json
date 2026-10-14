@@ -1,0 +1,20 @@
+{
+  "id": "45af04c9-3319-40d1-9d7c-b1c66967ac4e",
+  "runtime": "bash",
+  "purpose": "Check GameDefinitionValidator test count",
+  "script_chars": 97,
+  "started_at": "2026-10-13T23:42:47.378Z",
+  "finished_at": "2026-10-13T23:42:47.435Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 57,
+  "stdout_bytes": 1817,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/45af04c9-3319-40d1-9d7c-b1c66967ac4e.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/45af04c9-3319-40d1-9d7c-b1c66967ac4e.stderr"
+}

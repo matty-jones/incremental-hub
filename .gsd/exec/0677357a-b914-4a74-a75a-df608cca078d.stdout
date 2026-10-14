@@ -1,0 +1,30 @@
+package com.example.hub.bridge
+
+import com.example.hub.session.SessionState
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+/**
+ * Unit tests for [BridgeValidator].
+ *
+ * Covers all five rejection reasons deterministically on JVM (no Robolectric
+ * needed for the validator itself, but the suite runs under Robolectric for
+ * consistency with the rest of the test suite).
+ */
+@RunWith(RobolectricTestRunner::class)
+class BridgeValidatorTest {
+
+    private lateinit var validator: BridgeValidator
+
+    @Before
+    fun setUp() {
+        validator = BridgeValidator()
+    }
+
+    // -----------------------------------------------------------------

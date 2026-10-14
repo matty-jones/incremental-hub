@@ -1,0 +1,20 @@
+{
+  "id": "6aa08f3b-9b13-4b3d-8367-d3680a38d8d7",
+  "runtime": "bash",
+  "purpose": "Get current source revision for validation",
+  "script_chars": 44,
+  "started_at": "2026-10-13T23:00:58.048Z",
+  "finished_at": "2026-10-13T23:00:58.086Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 38,
+  "stdout_bytes": 6633,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6aa08f3b-9b13-4b3d-8367-d3680a38d8d7.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6aa08f3b-9b13-4b3d-8367-d3680a38d8d7.stderr"
+}

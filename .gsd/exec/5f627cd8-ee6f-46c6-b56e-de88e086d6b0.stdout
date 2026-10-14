@@ -1,0 +1,60 @@
+package com.example.hub.bootstrap
+
+import android.content.Context
+import android.util.Log
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewCompat
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.security.MessageDigest
+import java.util.UUID
+
+/**
+ * Result of a [PreLaunchSnapshot] capture execution.
+ *
+ * @param passed whether the snapshot envelope was non-empty and the SHA-256 was a
+ *   valid 64-char hex digest.
+ * @param uncompressedBytes the byte count of the serialized snapshot envelope
+ *   (JSON string of keys + entryCount + timestamp).
+ * @param sha256 a 64-char hex SHA-256 digest of the sorted key list.
+ * @param keyCount the number of localStorage keys at the time of capture.
+ * @param mechanism the mechanism used to serve the bootstrap (from
+ *   [BootstrapDetector.DetectorResult.qualifiedMechanism]).
+ * @param timestampEpochMs wall-clock timestamp of the capture in epoch milliseconds.
+ * @param message human-readable description of the result.
+ */
+data class SnapshotResult(
+    val passed: Boolean,
+    val uncompressedBytes: Long,
+    val sha256: String,
+    val keyCount: Int,
+    val mechanism: String?,
+    val timestampEpochMs: Long,
+    val message: String,
+)
+
+/**
+ * Captures a pre-launch snapshot envelope before any upstream game JavaScript executes.
+ *
+ * The capture flow:
+ * 1. Create a test profile via [ProfileStore.getOrCreateProfile].
+ * 2. Write a synthetic key `s02-prelaunch-test` with a unique value into that profile.
+ * 3. Navigate to the bootstrap HTML using the mechanism identified by [detectorResult].
+ * 4. Read all localStorage keys via [WebView.evaluateJavascript].
+ * 5. Compute SHA-256 of the sorted key list (hex digest).
+ * 6. Capture the uncompressed byte count of the serialized snapshot envelope.
+ * 7. Record a wall-clock timestamp.
+ * 8. Return [SnapshotResult] reflecting the outcome.
+ * 9. Clean up the test profile.
+ *
+ * This is the core proof for R008: the snapshot is captured *before* game code
+ * can read or mutate it, because the bootstrap HTML runs at a native-origin
+ * URL that the game's service worker cannot intercept.
+ *

@@ -1,0 +1,20 @@
+{
+  "id": "9e945932-59cf-49ca-9df8-884c3009ffe2",
+  "runtime": "bash",
+  "purpose": "Check R001-R004 status",
+  "script_chars": 65,
+  "started_at": "2026-10-08T21:13:36.597Z",
+  "finished_at": "2026-10-08T21:13:36.616Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 19,
+  "stdout_bytes": 2511,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9e945932-59cf-49ca-9df8-884c3009ffe2.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9e945932-59cf-49ca-9df8-884c3009ffe2.stderr"
+}

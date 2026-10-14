@@ -1,0 +1,20 @@
+{
+  "id": "09213b96-9ab9-46b4-ad5e-8db1d57b1d45",
+  "runtime": "bash",
+  "purpose": "Check for uncommitted changes",
+  "script_chars": 32,
+  "started_at": "2026-10-13T23:49:00.362Z",
+  "finished_at": "2026-10-13T23:49:00.370Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 8,
+  "stdout_bytes": 448,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/09213b96-9ab9-46b4-ad5e-8db1d57b1d45.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/09213b96-9ab9-46b4-ad5e-8db1d57b1d45.stderr"
+}

@@ -1,0 +1,295 @@
+{
+  "nodes": [
+    {
+      "id": "milestone:M001",
+      "label": "M001: Playable Hub",
+      "type": "milestone",
+      "description": "Active milestone: M001",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "concept:phase:validating-milestone",
+      "label": "Phase: validating-milestone",
+      "type": "concept",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "lesson:L001",
+      "label": "L001",
+      "type": "lesson",
+      "description": "Robolectric 4.12.1 + createComposeRule has a known activity-resolution limitation: ActivityScenario cannot resolve the launcher activity when running isolated test classes. The full test suite may pass (when other tests initialize Robolectric first) but isolated execution fails with \"Unable to resolve activity for Intent\". Mitigation: use pure-Kotlin tests for ordering/logic verification, or add a test/AndroidManifest.xml with a dummy launcher activity. Also ensure androidx.test:runner and androidx.test:rules are in testImplementation.",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "lesson:L002",
+      "label": "L002",
+      "type": "lesson",
+      "description": "In Compose foundation 1.7.0 (BOM 2024.09.00), WindowInsets companion extension properties (safeDrawing, ime, systemBars, navigationBars, displayCutout) are defined in WindowInsets_androidKt but may not resolve as static properties in some compiler configurations. Workaround: use modifier-based APIs (statusBarsPadding, navigationBarsPadding, imePadding) instead, or use computeCurrentWindowMetrics(Context) from androidx.window:window:1.3.0 instead of the non-existent getCurrentWindowMetrics().",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "lesson:L003",
+      "label": "L003",
+      "type": "lesson",
+      "description": "SessionController.onAttached() must transit through Opening before reaching Degraded/RecoveryRequired during cold-start recovery, because canTransition(Closed, Degraded) is false — the state machine only allows Closed → Opening. The fix is to call transitionTo(Opening, gameId) first, then transitionTo(Degraded/RecoveryRequired, gameId). The Opening → Degraded transition was added to the state machine specifically for this cold-start path.",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "lesson:L004",
+      "label": "L004",
+      "type": "lesson",
+      "description": "SessionController.settleActiveSession() must transit through Playing after Capturing (Playing → Capturing → delay → Playing → Closing → Closed), because canTransition(Capturing, Closing) is false — the nine-state matrix only allows Capturing → Playing or Capturing → Background. Any direct Capturing → Closing transition will be silently rejected by transitionTo() with a warning log.",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "lesson:L005",
+      "label": "L005",
+      "type": "lesson",
+      "description": "SessionController.settleActiveSession() must transit through Playing after Capturing (Playing → Capturing → delay → Playing → Closing → Closed), because canTransition(Capturing, Closing) is false — the nine-state matrix only allows Capturing → Playing or Capturing → Background. Any direct Capturing → Closing transition will be silently rejected by transitionTo() with a warning log.",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "slice:M001:S01",
+      "label": "S01: Game Registry and Launcher",
+      "type": "slice",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S01:T01",
+      "label": "T01: Room Foundation: Entity, DAO, Database, and Build Config",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S01:T02",
+      "label": "T02: GameRegistry: Enumerate, Validate, and Resolve Game Definitions",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S01:T03",
+      "label": "T03: LauncherScreen: Material 3 Card UI",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S01:T04",
+      "label": "T04: Navigation Wiring and MainActivity Entry Surface",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "slice:M001:S02",
+      "label": "S02: Play Surface and Native Menu",
+      "type": "slice",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S02:T01",
+      "label": "T01: SessionState sealed class + transition validation",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S02:T02",
+      "label": "T02: WebViewHost composable with stable AndroidView identity",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S02:T03",
+      "label": "T03: NativeMenu composable with seven actions and Back behavior",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S02:T04",
+      "label": "T04: FoldAwareLayout + PlaySurface composition + HubNavigation wiring",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "slice:M001:S03",
+      "label": "S03: SessionController Core",
+      "type": "slice",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S03:T01",
+      "label": "T01: SessionController Core",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S03:T02",
+      "label": "T02: Bridge Validation",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S03:T03",
+      "label": "T03: Profile Binding Integration",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S03:T04",
+      "label": "T04: PlaySurface Wiring",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "slice:M001:S04",
+      "label": "S04: SessionController Resilience",
+      "type": "slice",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S04:T01",
+      "label": "T01: Capture Cadence (R012)",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S04:T02",
+      "label": "T02: Process-Death Recovery (R015)",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S04:T03",
+      "label": "T03: Crash Handling (R014)",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "task:M001:S04:T04",
+      "label": "T04: Bootstrap Integration and Game Switching (R013 + R016)",
+      "type": "task",
+      "confidence": "EXTRACTED"
+    }
+  ],
+  "edges": [
+    {
+      "from": "milestone:M001",
+      "to": "slice:M001:S01",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S01",
+      "to": "task:M001:S01:T01",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S01",
+      "to": "task:M001:S01:T02",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S01",
+      "to": "task:M001:S01:T03",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S01",
+      "to": "task:M001:S01:T04",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "milestone:M001",
+      "to": "slice:M001:S02",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S02",
+      "to": "task:M001:S02:T01",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S02",
+      "to": "task:M001:S02:T02",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S02",
+      "to": "task:M001:S02:T03",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S02",
+      "to": "task:M001:S02:T04",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "milestone:M001",
+      "to": "slice:M001:S03",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S03",
+      "to": "task:M001:S03:T01",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S03",
+      "to": "task:M001:S03:T02",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S03",
+      "to": "task:M001:S03:T03",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S03",
+      "to": "task:M001:S03:T04",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "milestone:M001",
+      "to": "slice:M001:S04",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S04",
+      "to": "task:M001:S04:T01",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S04",
+      "to": "task:M001:S04:T02",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S04",
+      "to": "task:M001:S04:T03",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "from": "slice:M001:S04",
+      "to": "task:M001:S04:T04",
+      "type": "contains",
+      "confidence": "EXTRACTED"
+    }
+  ],
+  "builtAt": "2026-10-13T22:55:04.345Z"
+}

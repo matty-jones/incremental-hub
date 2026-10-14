@@ -1,0 +1,10 @@
+=== TEST-com.example.hub.bridge.BridgeValidatorTest.xml ===
+=== TEST-com.example.hub.database.GameInstanceDaoTest.xml ===
+=== TEST-com.example.hub.games.Fe000000AdapterTest.xml ===
+=== TEST-com.example.hub.games.GameDefinitionValidatorTest.xml ===
+=== TEST-com.example.hub.games.GameRegistryTest.xml ===
+=== TEST-com.example.hub.games.SharkIncrementalAdapterTest.xml ===
+=== TEST-com.example.hub.session.SessionControllerTest.xml ===
+=== TEST-com.example.hub.session.SessionStateTest.xml ===
+=== TEST-com.example.hub.ui.NativeMenuTest.xml ===
+=== TEST-com.example.hub.ui.WebViewHostTest.xml ===

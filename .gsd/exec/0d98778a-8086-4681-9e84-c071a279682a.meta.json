@@ -1,0 +1,20 @@
+{
+  "id": "0d98778a-8086-4681-9e84-c071a279682a",
+  "runtime": "bash",
+  "purpose": "Verify debug build passes",
+  "script_chars": 83,
+  "started_at": "2026-10-08T21:12:58.306Z",
+  "finished_at": "2026-10-08T21:13:05.297Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 6991,
+  "stdout_bytes": 2934,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/0d98778a-8086-4681-9e84-c071a279682a.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/0d98778a-8086-4681-9e84-c071a279682a.stderr"
+}

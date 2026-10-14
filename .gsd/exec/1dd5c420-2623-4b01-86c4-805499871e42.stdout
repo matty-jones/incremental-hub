@@ -1,0 +1,20 @@
+
+SessionControllerTest > open_transitionsClosedToPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestForeground_restoresBackgroundToPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+34 tests completed, 34 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+BUILD FAILED in 7s
+25 actionable tasks: 1 executed, 24 up-to-date

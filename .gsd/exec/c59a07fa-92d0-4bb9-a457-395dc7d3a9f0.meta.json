@@ -1,0 +1,20 @@
+{
+  "id": "c59a07fa-92d0-4bb9-a457-395dc7d3a9f0",
+  "runtime": "bash",
+  "purpose": "Run S02 tests together",
+  "script_chars": 189,
+  "started_at": "2026-10-09T19:05:01.100Z",
+  "finished_at": "2026-10-09T19:05:13.131Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 12031,
+  "stdout_bytes": 3163,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/c59a07fa-92d0-4bb9-a457-395dc7d3a9f0.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/c59a07fa-92d0-4bb9-a457-395dc7d3a9f0.stderr"
+}

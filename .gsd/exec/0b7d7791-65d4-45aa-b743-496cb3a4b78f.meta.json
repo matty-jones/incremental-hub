@@ -1,0 +1,20 @@
+{
+  "id": "0b7d7791-65d4-45aa-b743-496cb3a4b78f",
+  "runtime": "bash",
+  "purpose": "T02 verify: GameRegistryTest",
+  "script_chars": 98,
+  "started_at": "2026-10-08T18:59:59.821Z",
+  "finished_at": "2026-10-08T19:00:06.645Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 6824,
+  "stdout_bytes": 1449,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/0b7d7791-65d4-45aa-b743-496cb3a4b78f.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/0b7d7791-65d4-45aa-b743-496cb3a4b78f.stderr"
+}

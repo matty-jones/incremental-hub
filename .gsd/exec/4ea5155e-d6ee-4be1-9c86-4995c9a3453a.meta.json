@@ -1,0 +1,20 @@
+{
+  "id": "4ea5155e-d6ee-4be1-9c86-4995c9a3453a",
+  "runtime": "bash",
+  "purpose": "Read roadmap",
+  "script_chars": 69,
+  "started_at": "2026-10-13T23:02:18.760Z",
+  "finished_at": "2026-10-13T23:02:18.819Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 59,
+  "stdout_bytes": 3773,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/4ea5155e-d6ee-4be1-9c86-4995c9a3453a.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/4ea5155e-d6ee-4be1-9c86-4995c9a3453a.stderr"
+}

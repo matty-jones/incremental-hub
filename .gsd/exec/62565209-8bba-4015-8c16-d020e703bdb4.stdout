@@ -1,0 +1,12 @@
+120:## 4. User interaction contract
+122:### 4.1 Launcher
+130:### 4.2 Play surface
+140:### 4.3 Vault and destructive actions
+148:### 4.4 Display preferences
+355:4. On startup, reconcile incomplete journals and orphan files. Never silently discard a metadata row whose blob is missing: mark it corrupt and offer other snapshots.
+378:4. **Restore evidence:** fixture-tested adapter compatibility, or an actual restore verification for this snapshot.
+564:## 14. Security, navigation and operational behaviour
+566:### 14.1 Navigation versus network access
+576:### 14.2 Failure reporting
+649:4. Force-stop and relaunch; verify progress and accurate freshness/protection status.
+690:4. Implement the smallest vertical slice that proves play → capture → destroy → fresh-profile restore → verify. Resolve its findings before expanding the UI.

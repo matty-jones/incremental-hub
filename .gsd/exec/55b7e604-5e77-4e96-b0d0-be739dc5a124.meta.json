@@ -1,0 +1,20 @@
+{
+  "id": "55b7e604-5e77-4e96-b0d0-be739dc5a124",
+  "runtime": "bash",
+  "purpose": "Full test output to find failure",
+  "script_chars": 87,
+  "started_at": "2026-10-08T21:17:06.680Z",
+  "finished_at": "2026-10-08T21:17:13.107Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 6427,
+  "stdout_bytes": 2301,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/55b7e604-5e77-4e96-b0d0-be739dc5a124.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/55b7e604-5e77-4e96-b0d0-be739dc5a124.stderr"
+}

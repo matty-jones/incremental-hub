@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T02",
+  "unitId": "M001/S01/T02",
+  "timestamp": 1791486197608,
+  "passed": true,
+  "discoverySource": "task-plan",
+  "checks": [
+    {
+      "command": "./gradlew :app:testDebugUnitTest --tests \"com.example.hub.games.GameRegistryTest\" --no-daemon && ./gradlew :app:testDebugUnitTest --tests \"com.example.hub.games.GameDefinitionValidatorTest\" --no-daemon",
+      "exitCode": 0,
+      "durationMs": 11353,
+      "verdict": "pass"
+    }
+  ]
+}

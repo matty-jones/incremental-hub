@@ -1,0 +1,50 @@
+# S04: SessionController Resilience — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-13T22:55:03.639Z
+
+## S04 UAT: SessionController Resilience
+
+### Precondition
+- App built and installed (assembleDebug passes)
+- At least one game registered in GameRegistry
+- HubDatabase schema v2 present (migration from v1)
+
+### UAT Type
+- UAT mode: browser-executable
+
+### Check 1: 60-Second Capture Cadence
+- **Steps:**
+  1. Launch app, select a registered game
+  2. Wait until session reaches Playing state
+  3. Observe logcat for capture cadence events
+- **Expected:** Playing→Capturing log appears ~60s after session starts. Subsequent cadence fires every ~60s. Cadence cancels when state leaves Playing.
+- **Edge case:** Pressing back (state→Closing) stops cadence immediately.
+
+### Check 2: Renderer Crash → Recovery UI
+- **Steps:**
+  1. Launch a game, reach Playing state
+  2. Trigger WebView error (e.g., navigate to invalid URL via menu or force error via test hook)
+  3. Observe state transition
+- **Expected:** State transitions Playing→Degraded. Log shows crash error with gameId. RecoveryOverlay is shown. Manual menu action transitions Degraded→RecoveryRequired.
+- **Edge case:** onRenderProcessGone returns true (handled as crash). RecoveryOverlay only shows after user action transitions Degraded→RecoveryRequired.
+
+### Check 3: Process-Death Recovery
+- **Steps:**
+  1. Launch a game, reach Playing state
+  2. Force process death (adb shell am kill or kill -9)
+  3. Relaunch app
+- **Expected:** onAttached() reads DAO for recoveryState. App transits Closed→Opening→Degraded/RecoveryRequired. Profile name restored. RecoveryOverlay available for user to resume.
+- **Edge case:** No prior session → normal Closed start. Schema migration v1→v2 works in test DAO.
+
+### Check 4: Game-Switching Isolation
+- **Steps:**
+  1. Launch Game A, reach Playing state
+  2. Launch Game B while Game A is active
+  3. Verify Game A is settled, Game B activates
+- **Expected:** Old session settles (Playing→Capturing→delay→Playing→Closing→Closed). Epoch increments. New game activates with fresh profile. No cross-game bridge leakage. Late callbacks from Game A do not mutate Game B state.
+- **Edge case:** Switching from Degraded/RecoveryRequired state triggers requestClosing() on old session.
+
+### Check 5: assembleDebug Regression
+- **Steps:** Run ./gradlew :app:assembleDebug --no-daemon
+- **Expected:** BUILD SUCCESSFUL, 0 errors, 0 warnings from S04 changes.

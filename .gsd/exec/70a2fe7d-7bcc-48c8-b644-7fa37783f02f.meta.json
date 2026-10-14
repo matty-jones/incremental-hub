@@ -1,0 +1,20 @@
+{
+  "id": "70a2fe7d-7bcc-48c8-b644-7fa37783f02f",
+  "runtime": "bash",
+  "purpose": "run SessionControllerTest after fixing timing tests and dispatcher",
+  "script_chars": 105,
+  "started_at": "2026-10-10T22:09:33.444Z",
+  "finished_at": "2026-10-10T22:10:46.737Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 73293,
+  "stdout_bytes": 5215,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/70a2fe7d-7bcc-48c8-b644-7fa37783f02f.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/70a2fe7d-7bcc-48c8-b644-7fa37783f02f.stderr"
+}

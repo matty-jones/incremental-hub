@@ -1,0 +1,80 @@
+
+SessionControllerTest > bindProfileAndNavigate_missingGameReturnsNull FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > allValidTransitionsFromPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > openFromPlaying_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestCaptureFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestClosingFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > fullOpenCloseCycle_incrementsNavigationEpoch FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestRecoveryFromPlaying_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestCapture_transitionsPlayingToCapturing FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestRestoreFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > isActiveIsTrueWhenPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestBackgroundFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > isActiveIsFalseWhenClosed FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > open_persistsGameInstance FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestRecovery_transitionsDegradedToRecoveryRequired FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestForegroundFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestClosing_fromDegraded_transitionsToClosed FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > illegalTransitionsFromPlaying_areRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestBackground_transitionsPlayingToBackground FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > activeProfileNameTracksCurrentProfile FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > close_transitionsPlayingToClosed FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > open_transitionsClosedToPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestForeground_restoresBackgroundToPlaying FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+34 tests completed, 34 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+BUILD FAILED in 10s
+25 actionable tasks: 1 executed, 24 up-to-date

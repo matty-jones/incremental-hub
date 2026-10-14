@@ -1,0 +1,20 @@
+{
+  "id": "fe787594-85e6-4edf-9fa2-18eec0191a88",
+  "runtime": "bash",
+  "purpose": "Read all slice assessments",
+  "script_chars": 262,
+  "started_at": "2026-10-13T23:04:56.209Z",
+  "finished_at": "2026-10-13T23:04:56.238Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 29,
+  "stdout_bytes": 12,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/fe787594-85e6-4edf-9fa2-18eec0191a88.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/fe787594-85e6-4edf-9fa2-18eec0191a88.stderr"
+}

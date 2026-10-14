@@ -1,0 +1,5 @@
+e: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/FoldAwareLayout.kt:44:66 Unresolved reference 'getRunningAppProcesses'.
+e: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/FoldAwareLayout.kt:75:18 None of the following candidates is applicable:
+e: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/FoldAwareLayout.kt:76:69 Unresolved reference 'navigationBars'.
+e: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/FoldAwareLayout.kt:78:77 Unresolved reference 'ime'.
+e: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/FoldAwareLayout.kt:98:66 Unresolved reference 'getRunningAppProcesses'.

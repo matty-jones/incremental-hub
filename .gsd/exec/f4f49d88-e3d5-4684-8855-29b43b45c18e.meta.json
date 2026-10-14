@@ -1,0 +1,20 @@
+{
+  "id": "f4f49d88-e3d5-4684-8855-29b43b45c18e",
+  "runtime": "bash",
+  "purpose": "Combined S02 test run for fresh evidence",
+  "script_chars": 200,
+  "started_at": "2026-10-09T19:12:29.916Z",
+  "finished_at": "2026-10-09T19:12:44.287Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 14371,
+  "stdout_bytes": 398,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/f4f49d88-e3d5-4684-8855-29b43b45c18e.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/f4f49d88-e3d5-4684-8855-29b43b45c18e.stderr"
+}

@@ -1,0 +1,9 @@
+7:import androidx.lifecycle.LifecycleEventObserver
+31: * Implements [LifecycleEventObserver] so the controller can be attached to
+44: * @param lifecycleOwner  The owner that drives [onStateChanged] callbacks.
+52:    private val lifecycleOwner: LifecycleOwner,
+54:) : LifecycleEventObserver {
+134:    fun attach(lifecycleOwner: LifecycleOwner) {
+135:        lifecycleOwner.lifecycle.addObserver(this)
+136:        Log.d(TAG, "Attached to lifecycle $lifecycleOwner")
+141:        lifecycleOwner.lifecycle.removeObserver(this)

@@ -1,0 +1,20 @@
+    	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+    	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+    	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+    	at java.base/java.lang.Thread.run(Thread.java:840)
+    
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:mergeDebugResources'.
+> Error: /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values/values.xml (No such file or directory)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 9s
+5 actionable tasks: 5 executed

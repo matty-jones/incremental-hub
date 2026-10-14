@@ -1,0 +1,20 @@
+{
+  "id": "7227bf3a-8de3-4318-a605-a748165f2d9f",
+  "runtime": "bash",
+  "purpose": "Find requirements and decisions files",
+  "script_chars": 60,
+  "started_at": "2026-10-08T21:13:23.953Z",
+  "finished_at": "2026-10-08T21:13:23.971Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 18,
+  "stdout_bytes": 39,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/7227bf3a-8de3-4318-a605-a748165f2d9f.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/7227bf3a-8de3-4318-a605-a748165f2d9f.stderr"
+}

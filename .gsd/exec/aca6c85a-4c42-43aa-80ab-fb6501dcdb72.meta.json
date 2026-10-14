@@ -1,0 +1,20 @@
+{
+  "id": "aca6c85a-4c42-43aa-80ab-fb6501dcdb72",
+  "runtime": "bash",
+  "purpose": "Find S02 summaries",
+  "script_chars": 122,
+  "started_at": "2026-10-09T19:05:01.088Z",
+  "finished_at": "2026-10-09T19:05:01.102Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 14,
+  "stdout_bytes": 626,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/aca6c85a-4c42-43aa-80ab-fb6501dcdb72.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/aca6c85a-4c42-43aa-80ab-fb6501dcdb72.stderr"
+}

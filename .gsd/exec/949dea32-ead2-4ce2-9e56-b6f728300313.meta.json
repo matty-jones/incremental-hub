@@ -1,0 +1,20 @@
+{
+  "id": "949dea32-ead2-4ce2-9e56-b6f728300313",
+  "runtime": "bash",
+  "purpose": "Read S01 UAT full",
+  "script_chars": 36,
+  "started_at": "2026-10-13T23:48:21.443Z",
+  "finished_at": "2026-10-13T23:48:21.471Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 28,
+  "stdout_bytes": 3098,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/949dea32-ead2-4ce2-9e56-b6f728300313.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/949dea32-ead2-4ce2-9e56-b6f728300313.stderr"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "2ced7f5c-3513-4db1-b586-dd63a991c5bb",
+  "runtime": "bash",
+  "purpose": "Read S04 full summary",
+  "script_chars": 40,
+  "started_at": "2026-10-13T23:48:40.947Z",
+  "finished_at": "2026-10-13T23:48:40.989Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 42,
+  "stdout_bytes": 2277,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/2ced7f5c-3513-4db1-b586-dd63a991c5bb.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/2ced7f5c-3513-4db1-b586-dd63a991c5bb.stderr"
+}

@@ -1,0 +1,20 @@
+testsuite name="com.example.hub.ui.WebViewHostTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:51:58" hostname="BLASKATRON" time="0.002">
+testsuite>
+testsuite name="com.example.hub.games.Fe000000AdapterTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:50:21" hostname="BLASKATRON" time="0.014">
+testsuite>
+testsuite name="com.example.hub.games.GameRegistryTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:50:21" hostname="BLASKATRON" time="0.079">
+testsuite>
+testsuite name="com.example.hub.bridge.BridgeValidatorTest" tests="25" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:50:18" hostname="BLASKATRON" time="1.18">
+testsuite>
+testsuite name="com.example.hub.database.GameInstanceDaoTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:50:19" hostname="BLASKATRON" time="1.247">
+testsuite>
+testsuite name="com.example.hub.session.SessionControllerTest" tests="62" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:50:21" hostname="BLASKATRON" time="96.922">
+testsuite>
+testsuite name="com.example.hub.games.GameDefinitionValidatorTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:50:21" hostname="BLASKATRON" time="0.007">
+testsuite>
+testsuite name="com.example.hub.games.SharkIncrementalAdapterTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:50:21" hostname="BLASKATRON" time="0.001">
+testsuite>
+testsuite name="com.example.hub.ui.NativeMenuTest" tests="30" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:51:58" hostname="BLASKATRON" time="0.012">
+testsuite>
+testsuite name="com.example.hub.session.SessionStateTest" tests="30" skipped="0" failures="0" errors="0" timestamp="2026-10-13T22:51:58" hostname="BLASKATRON" time="0.003">
+testsuite>

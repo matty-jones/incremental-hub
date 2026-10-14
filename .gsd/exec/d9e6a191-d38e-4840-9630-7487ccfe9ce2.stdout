@@ -1,0 +1,10 @@
+TEST-com.example.hub.bridge.BridgeValidatorTest: tests=25 failures=0
+TEST-com.example.hub.database.GameInstanceDaoTest: tests=9 failures=0
+TEST-com.example.hub.games.Fe000000AdapterTest: tests=5 failures=0
+TEST-com.example.hub.games.GameDefinitionValidatorTest: tests=8 failures=0
+TEST-com.example.hub.games.GameRegistryTest: tests=8 failures=0
+TEST-com.example.hub.games.SharkIncrementalAdapterTest: tests=4 failures=0
+TEST-com.example.hub.session.SessionControllerTest: tests=62 failures=0
+TEST-com.example.hub.session.SessionStateTest: tests=30 failures=0
+TEST-com.example.hub.ui.NativeMenuTest: tests=30 failures=0
+TEST-com.example.hub.ui.WebViewHostTest: tests=9 failures=0

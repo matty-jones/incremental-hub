@@ -1,0 +1,8 @@
+### R001 — Enumerate registered game definitions from assets/games/, parse using existing schema, validate with GameDefinitionValidator, reject invalid definitions explicitly, provide deterministic ordering/lookup, expose metadata for launcher rendering.
+### R002 — Minimal Room persistence for GameInstance: game identity, profile/session identity, last-played/resume metadata. Deliberately narrow — no archive/vault/history schemas.
+### R003 — Material 3 launcher showing registered games as native cards: recently played first, honest availability/status labels, Resume where resumable, launch/start otherwise. Shark/FE000000 from registry data, not hard-coded.
+### R004 — Make launcher the normal application entry surface. Wire launch/resume navigation into Play Surface. Acceptance: both known definitions load, invalid rejected, launcher renders, last-played ordering deterministic, launch/resume selects intended instance.
+| R001 | core-capability | active | M001/S01 | none | unmapped |
+| R002 | continuity | active | M001/S01 | none | unmapped |
+| R003 | primary-user-loop | active | M001/S01 | none | unmapped |
+| R004 | launchability | active | M001/S01 | none | unmapped |

@@ -1,0 +1,102 @@
+package com.example.hub.session
+
+/**
+ * Sealed class representing the nine possible states of a game session.
+ *
+ * The state machine is enforced by [canTransition], which encodes the legal
+ * transition matrix. All transitions that are not explicitly listed are
+ * rejected, making illegal state combinations fail closed.
+ *
+ * @see canTransition
+ */
+sealed class SessionState {
+
+    /** The session has no active WebView; the hub launcher is the visible surface. */
+    data object Closed : SessionState()
+
+    /** The session is in the process of opening a WebView and binding a profile. */
+    data object Opening : SessionState()
+
+    /** The WebView is active and the game is running normally. */
+    data object Playing : SessionState()
+
+    /** A capture is in progress; the game may be paused or throttled. */
+    data object Capturing : SessionState()
+
+    /** The session has been backgrounded (e.g. user switched apps). */
+    data object Background : SessionState()
+
+    /** A restore is in progress — a previously captured payload is being replayed. */
+    data object Restoring : SessionState()
+
+    /** The session has degraded (e.g. WebView crash recovery) but is still salvageable. */
+    data object Degraded : SessionState()
+
+    /** The session requires explicit recovery before it can continue. */
+    data object RecoveryRequired : SessionState()
+
+    /** The session is in the process of closing the WebView and cleaning up. */
+    data object Closing : SessionState()
+
+    companion object {
+        /** Tag used for transition logging. */
+        const val TAG = "SessionState"
+    }
+}
+
+/**
+ * Returns true if [from] can legally transition to [to] according to the
+ * nine-state transition matrix defined in the slice spec.
+ *
+ * The matrix:
+ * - CLOSED → OPENING
+ * - OPENING → PLAYING, DEGRADED, RECOVERY_REQUIRED
+ * - PLAYING → CAPTURING, BACKGROUND, DEGRADED, CLOSING
+ * - CAPTURING → PLAYING, BACKGROUND
+ * - BACKGROUND → OPENING, CLOSING
+ * - DEGRADED → RECOVERY_REQUIRED, CLOSING
+ * - RECOVERY_REQUIRED → OPENING, CLOSING
+ * - CLOSING → CLOSED
+ *
+ * Any transition not listed above is rejected (returns false).
+ *
+ * @param from the current session state
+ * @param to the target session state
+ * @return true if the transition is legal
+ */
+fun canTransition(from: SessionState, to: SessionState): Boolean = when (from) {
+    SessionState.Closed -> when (to) {
+        SessionState.Opening -> true
+        else -> false
+    }
+    SessionState.Opening -> when (to) {
+        SessionState.Playing, SessionState.Degraded, SessionState.RecoveryRequired -> true
+        else -> false
+    }
+    SessionState.Playing -> when (to) {
+        SessionState.Capturing, SessionState.Background, SessionState.Degraded, SessionState.Closing -> true
+        else -> false
+    }
+    SessionState.Capturing -> when (to) {
+        SessionState.Playing, SessionState.Background -> true
+        else -> false
+    }
+    SessionState.Background -> when (to) {
+        SessionState.Playing, SessionState.Opening, SessionState.Closing -> true
+        else -> false
+    }
+    SessionState.Degraded -> when (to) {
+        SessionState.RecoveryRequired, SessionState.Closing -> true
+        else -> false
+    }
+    SessionState.RecoveryRequired -> when (to) {
+        SessionState.Opening, SessionState.Closing -> true
+        else -> false
+    }
+    SessionState.Closing -> when (to) {
+        SessionState.Closed -> true
+        else -> false
+    }
+    // Restoring is a sink state: no legal outgoing transitions.
+    SessionState.Restoring -> false
+}

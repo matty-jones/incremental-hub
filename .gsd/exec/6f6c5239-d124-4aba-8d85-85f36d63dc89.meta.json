@@ -1,0 +1,20 @@
+{
+  "id": "6f6c5239-d124-4aba-8d85-85f36d63dc89",
+  "runtime": "bash",
+  "purpose": "Run SessionController unit tests",
+  "script_chars": 116,
+  "started_at": "2026-10-09T21:54:59.228Z",
+  "finished_at": "2026-10-09T21:55:07.243Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 8015,
+  "stdout_bytes": 2094,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6f6c5239-d124-4aba-8d85-85f36d63dc89.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6f6c5239-d124-4aba-8d85-85f36d63dc89.stderr"
+}

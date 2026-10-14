@@ -1,0 +1,17 @@
+/home/blasky/android-sdk/build-tools
+---
+/home/blasky/android-sdk/platform-tools
+---
+DK-Suite
+HTTP Toolkit
+LTX Desktop
+appimagelauncher.AppDir
+containerd
+google
+jadx
+nvidia
+piavpn
+zoom
+---
+---
+PATH=/home/blasky/.gsd/agent/bin:/home/blasky/.nvm/versions/node/v24.12.0/bin:/home/blasky/Software/orca_6_1_0:/home/blasky/Software/xtb4stda:/home/blasky/Software/miniconda3/bin:/home/blasky/Software/miniconda3/condabin:/home/blasky/android-sdk/emulator:/home/blasky/android-sdk/platform-tools:/home/blasky/android-sdk/cmdline-tools/latest/bin:/home/blasky/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/blasky/.local/bin:/usr/local/cuda/bin:/home/blasky/Software/android-studio/bin:/home/blasky/Software/blender

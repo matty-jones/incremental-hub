@@ -1,0 +1,42 @@
+app/src/main/java/com/example/hub/database/:
+total 20
+drwxrwxr-x  2 blasky blasky 4096 Oct  9 22:58 .
+drwxrwxr-x 11 blasky blasky 4096 Oct  9 22:58 ..
+-rw-rw-r--  1 blasky blasky 1165 Oct  9 22:58 GameInstance.kt
+-rw-rw-r--  1 blasky blasky 1133 Oct  9 22:58 GameInstanceDao.kt
+-rw-rw-r--  1 blasky blasky 1092 Oct  9 22:58 HubDatabase.kt
+
+app/src/main/java/com/example/hub/session/:
+total 32
+drwxrwxr-x  2 blasky blasky  4096 Oct  9 22:58 .
+drwxrwxr-x 11 blasky blasky  4096 Oct  9 22:58 ..
+-rw-rw-r--  1 blasky blasky 19029 Oct  9 23:09 SessionController.kt
+-rw-rw-r--  1 blasky blasky  3543 Oct  9 22:58 SessionState.kt
+
+app/src/main/java/com/example/hub/ui/:
+total 148
+drwxrwxr-x  2 blasky blasky  4096 Oct  9 23:38 .
+drwxrwxr-x 11 blasky blasky  4096 Oct  9 22:58 ..
+-rw-rw-r--  1 blasky blasky 13059 Oct  9 22:58 BootstrapScreen.kt
+-rw-rw-r--  1 blasky blasky 11807 Oct  9 22:58 CapabilityScreen.kt
+-rw-rw-r--  1 blasky blasky  3237 Oct  9 22:58 DiagnosticsScreen.kt
+-rw-rw-r--  1 blasky blasky  3318 Oct  9 22:58 FoldAwareLayout.kt
+-rw-rw-r--  1 blasky blasky  1002 Oct  9 22:58 GameQualificationActivity.kt
+-rw-rw-r--  1 blasky blasky 16866 Oct  9 22:58 GameQualificationScreen.kt
+-rw-rw-r--  1 blasky blasky 22277 Oct  9 22:58 IntegratedSpikeScreen.kt
+-rw-rw-r--  1 blasky blasky 10936 Oct  9 22:58 LauncherScreen.kt
+-rw-rw-r--  1 blasky blasky 16444 Oct  9 22:58 NativeMenu.kt
+-rw-rw-r--  1 blasky blasky  5906 Oct 10 15:05 PlaySurface.kt
+-rw-rw-r--  1 blasky blasky  1486 Oct  9 22:58 PlaySurfaceStub.kt
+-rw-rw-r--  1 blasky blasky  2652 Oct  9 23:40 RecoveryOverlay.kt
+-rw-rw-r--  1 blasky blasky  5601 Oct  9 23:09 WebViewHost.kt
+
+app/src/test/java/com/example/hub/:
+total 28
+drwxrwxr-x 7 blasky blasky 4096 Oct  9 22:58 .
+drwxrwxr-x 3 blasky blasky 4096 Oct  9 22:58 ..
+drwxrwxr-x 2 blasky blasky 4096 Oct  9 22:58 bridge
+drwxrwxr-x 2 blasky blasky 4096 Oct  9 22:58 database
+drwxrwxr-x 2 blasky blasky 4096 Oct  9 22:58 games
+drwxrwxr-x 2 blasky blasky 4096 Oct  9 22:58 session
+drwxrwxr-x 2 blasky blasky 4096 Oct  9 22:58 ui

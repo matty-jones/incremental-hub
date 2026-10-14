@@ -1,0 +1,20 @@
+{
+  "id": "442e31f3-43c6-406f-9946-45efc2f5ad9b",
+  "runtime": "bash",
+  "purpose": "Check M001 milestone status",
+  "script_chars": 25,
+  "started_at": "2026-10-13T23:01:15.516Z",
+  "finished_at": "2026-10-13T23:01:15.526Z",
+  "exit_code": 127,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 10,
+  "stdout_bytes": 0,
+  "stderr_bytes": 59,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/442e31f3-43c6-406f-9946-45efc2f5ad9b.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/442e31f3-43c6-406f-9946-45efc2f5ad9b.stderr"
+}

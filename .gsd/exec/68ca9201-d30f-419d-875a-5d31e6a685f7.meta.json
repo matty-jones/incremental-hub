@@ -1,0 +1,20 @@
+{
+  "id": "68ca9201-d30f-419d-875a-5d31e6a685f7",
+  "runtime": "bash",
+  "purpose": "Run unit tests after successful build",
+  "script_chars": 60,
+  "started_at": "2026-10-09T19:04:01.319Z",
+  "finished_at": "2026-10-09T19:04:14.167Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 12848,
+  "stdout_bytes": 1673,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/68ca9201-d30f-419d-875a-5d31e6a685f7.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/68ca9201-d30f-419d-875a-5d31e6a685f7.stderr"
+}

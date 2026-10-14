@@ -1,0 +1,20 @@
+{
+  "id": "675f2d0d-18bc-49fd-9f90-626e587ba321",
+  "runtime": "bash",
+  "purpose": "Run unit tests after daemon restart",
+  "script_chars": 49,
+  "started_at": "2026-10-12T16:20:13.767Z",
+  "finished_at": "2026-10-12T16:20:27.598Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 13831,
+  "stdout_bytes": 3518,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/675f2d0d-18bc-49fd-9f90-626e587ba321.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/675f2d0d-18bc-49fd-9f90-626e587ba321.stderr"
+}

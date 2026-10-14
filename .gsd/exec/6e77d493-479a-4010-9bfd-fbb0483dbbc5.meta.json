@@ -1,0 +1,20 @@
+{
+  "id": "6e77d493-479a-4010-9bfd-fbb0483dbbc5",
+  "runtime": "bash",
+  "purpose": "Verify assembleDebug passes",
+  "script_chars": 45,
+  "started_at": "2026-10-12T16:14:21.361Z",
+  "finished_at": "2026-10-12T16:14:33.416Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 12055,
+  "stdout_bytes": 4231,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6e77d493-479a-4010-9bfd-fbb0483dbbc5.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/6e77d493-479a-4010-9bfd-fbb0483dbbc5.stderr"
+}

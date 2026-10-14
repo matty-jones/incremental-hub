@@ -1,0 +1,30 @@
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates
+    New files were found. This might happen because a process is still writing to the target directory.
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/data_binding_layout_info_type_package
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/data_binding_layout_info_type_package/debug
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/data_binding_layout_info_type_package/debug/packageDebugResources
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/data_binding_layout_info_type_package/debug/packageDebugResources/out
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources/mipmap-mdpi-v4
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources/mipmap-xxxhdpi-v4
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources/values
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources/values/values.xml
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources/mipmap-xhdpi-v4
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources/mipmap-hdpi-v4
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/packaged_res/debug/packageDebugResources/mipmap-xxhdpi-v4
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/packageDebugResources
+    - /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+    - and more ...
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 12s
+1 actionable task: 1 executed

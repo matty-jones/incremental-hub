@@ -1,0 +1,15 @@
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/games/GameQualifier.kt:7:import android.webkit.WebViewClient
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/games/GameQualifier.kt:310:                    webViewClient = object : WebViewClient() {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/session/SessionState.kt:32:    /** The session has degraded (e.g. WebView crash recovery) but is still salvageable. */
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/WebViewHost.kt:6:import android.webkit.WebViewClient
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/WebViewHost.kt:71:                webViewClient = object : WebViewClient() {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/integrated/IntegratedSpike.kt:7:import android.webkit.WebViewClient
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/integrated/IntegratedSpike.kt:402:                    webViewClient = object : WebViewClient() {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/diagnostics/ProfileIsolationTest.kt:6:import android.webkit.WebViewClient
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/diagnostics/ProfileIsolationTest.kt:136:            webViewClient = object : WebViewClient() {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:6:import android.webkit.WebViewClient
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:211:                webViewClient = object : WebViewClient() {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:262:                webViewClient = object : WebViewClient() {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/PreLaunchSnapshot.kt:6:import android.webkit.WebViewClient
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/PreLaunchSnapshot.kt:178:                webViewClient = object : WebViewClient() {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/PreLaunchSnapshot.kt:216:            val webViewClient = object : WebViewClient() {

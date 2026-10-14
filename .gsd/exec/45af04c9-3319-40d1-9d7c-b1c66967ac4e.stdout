@@ -1,0 +1,50 @@
+package com.example.hub.games
+
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.io.InputStream
+
+/**
+ * Unit tests for [GameDefinitionValidator].
+ *
+ * Exercises the validator against both real game-definition JSONs (loaded from
+ * the Android asset pipeline) and against synthetically mutated JSONs that
+ * target individual schema constraints.
+ */
+class GameDefinitionValidatorTest {
+
+    private val validator = GameDefinitionValidator()
+
+    // ---------------------------------------------------------------------
+    // Positive cases — real game definitions
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun `validSharkDefinitionPasses`() {
+        val json = loadGameDefinition("shark-incremental.json")
+        val result = validator.validate(json)
+        assertTrue("shark-incremental should be valid", result.valid)
+        assertEquals(0, result.errorCount)
+    }
+
+    @Test
+    fun `validFe000000DefinitionPasses`() {
+        val json = loadGameDefinition("fe000000.json")
+        val result = validator.validate(json)
+        assertTrue("fe000000 should be valid", result.valid)
+        assertEquals(0, result.errorCount)
+    }
+
+    // ---------------------------------------------------------------------
+    // Negative cases — individual field violations
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun `missingSchemaVersionFails`() {
+        val json = removeField(loadGameDefinition("shark-incremental.json"), "schemaVersion")
+        val result = validator.validate(json)
+        assertFalse("missing schemaVersion should fail", result.valid)

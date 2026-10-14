@@ -1,0 +1,5 @@
+> Task :app:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleDebug UP-TO-DATE
+
+BUILD SUCCESSFUL in 7s
+38 actionable tasks: 38 up-to-date

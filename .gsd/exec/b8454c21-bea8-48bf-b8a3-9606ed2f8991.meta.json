@@ -1,0 +1,20 @@
+{
+  "id": "b8454c21-bea8-48bf-b8a3-9606ed2f8991",
+  "runtime": "bash",
+  "purpose": "Thorough clean and rebuild",
+  "script_chars": 85,
+  "started_at": "2026-10-09T19:03:02.828Z",
+  "finished_at": "2026-10-09T19:03:33.795Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 30967,
+  "stdout_bytes": 2104,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/b8454c21-bea8-48bf-b8a3-9606ed2f8991.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/b8454c21-bea8-48bf-b8a3-9606ed2f8991.stderr"
+}

@@ -1,0 +1,30 @@
+package com.example.hub.database
+
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/**
+ * Unit tests for [GameInstanceDao] backed by an in-memory Room database.
+ *
+ * Covers: upsert, get, delete, and last-played ordering by `lastPlayedAtMillis` DESC.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30], manifest = Config.NONE)
+class GameInstanceDaoTest {
+
+    private lateinit var db: HubDatabase
+    private lateinit var dao: GameInstanceDao
+
+    @Before
+    fun createDb() {
+        db = Room.inMemoryDatabaseBuilder(

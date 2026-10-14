@@ -1,0 +1,20 @@
+{
+  "id": "a9fb4014-6150-4304-af2d-4db872e44dca",
+  "runtime": "bash",
+  "purpose": "Verify debug build passes with correct SDK",
+  "script_chars": 45,
+  "started_at": "2026-10-09T18:57:31.334Z",
+  "finished_at": "2026-10-09T18:57:43.115Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 11781,
+  "stdout_bytes": 2935,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/a9fb4014-6150-4304-af2d-4db872e44dca.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/a9fb4014-6150-4304-af2d-4db872e44dca.stderr"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "469fb70a-a8b0-4c0c-bbb0-d91781d938b0",
+  "runtime": "bash",
+  "purpose": "Read full build error output",
+  "script_chars": 57,
+  "started_at": "2026-10-09T18:56:31.030Z",
+  "finished_at": "2026-10-09T18:56:31.037Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 7,
+  "stdout_bytes": 1619,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/469fb70a-a8b0-4c0c-bbb0-d91781d938b0.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/469fb70a-a8b0-4c0c-bbb0-d91781d938b0.stderr"
+}

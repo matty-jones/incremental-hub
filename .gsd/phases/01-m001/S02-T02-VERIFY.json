@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T02",
+  "unitId": "M001/S02/T02",
+  "timestamp": 1791560559466,
+  "passed": true,
+  "discoverySource": "task-plan",
+  "checks": [
+    {
+      "command": "./gradlew :app:testDebugUnitTest --tests \"com.example.hub.ui.WebViewHostTest\" --no-daemon",
+      "exitCode": 0,
+      "durationMs": 5368,
+      "verdict": "pass"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+package com.example.hub.games
+
+import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
+import org.json.JSONArray
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.util.Base64
+
+/**
+ * Unit tests for SharkIncrementalAdapter format logic.
+ * Tests decode/encode round-trip and VERSION gate without a WebView.
+ */
+class SharkIncrementalAdapterTest {
+
+    private val adapter = SharkIncrementalAdapter()
+
+    @Test
+    fun `capture payload round-trip preserves data`() = runBlocking {
+        val decimalVal = JSONObject().apply {
+            put("s", 1)
+            put("e", 2)
+            put("c", JSONArray(listOf(3)))
+        }
+        val player = JSONObject().apply {
+            put("VERSION", 3)
+            put("money", 1500)
+            put("saveSlot", 1)

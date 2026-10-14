@@ -1,0 +1,20 @@
+{
+  "id": "57995857-4bb5-41cd-b1e5-1adb93ad5bf1",
+  "runtime": "bash",
+  "purpose": "Count all @Test annotations",
+  "script_chars": 66,
+  "started_at": "2026-10-13T23:47:32.155Z",
+  "finished_at": "2026-10-13T23:47:32.240Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 85,
+  "stdout_bytes": 659,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/57995857-4bb5-41cd-b1e5-1adb93ad5bf1.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/57995857-4bb5-41cd-b1e5-1adb93ad5bf1.stderr"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "dcee3682-c46b-4fdb-a13a-5f49275b7109",
+  "runtime": "bash",
+  "purpose": "Count test files",
+  "script_chars": 42,
+  "started_at": "2026-10-13T23:27:59.385Z",
+  "finished_at": "2026-10-13T23:27:59.408Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 23,
+  "stdout_bytes": 3,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/dcee3682-c46b-4fdb-a13a-5f49275b7109.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/dcee3682-c46b-4fdb-a13a-5f49275b7109.stderr"
+}

@@ -1,0 +1,75 @@
+# S04: SessionController Resilience
+
+**Milestone:** M001
+**Slice:** S04
+
+**Goal:** Add four resilience capabilities to SessionController: (1) 60-second foreground capture cadence as a lifecycle-owned coroutine, (2) cold-start bootstrap integration using existing BootstrapDetector/PreLaunchSnapshot, (3) renderer crash detection via WebViewHost error callbacks triggering Degraded state, (4) process-death recovery by persisting recoveryState/lastCaptureAtMillis in GameInstance and restoring on app relaunch, plus (5) game-switching isolation that settles old sessions before opening new ones. All changes are confined to SessionController, WebViewHost, GameInstance schema, and HubDatabase with ~31 new unit tests.
+**Demo:** Foreground capture bounded; renderer crash produces recovery UI; process recovery works; game switching isolated
+
+## Must-Haves
+
+- R012: 60-second cadence starts on Playing, fires at ~60s, cancels on state change, requestForegroundCapture() works as one-shot
+- R013: open() runs BootstrapDetector, transitions to Playing on success, RecoveryRequired on failure, PreLaunchSnapshot fires asynchronously
+- R014: WebView error callback triggers Degraded transition, RecoveryOverlay shown in RecoveryRequired state
+- R015: cold-start reads DAO for recoveryState, persists recoveryState on Degraded, schema migration v1→v2 works
+- R016: switching games settles old session, increments epoch, activates new game, no cross-game leakage
+- ./gradlew :app:assembleDebug passes, all 10+31=41+ existing tests pass
+
+## Proof Level
+
+- This slice proves: strong
+
+## Integration Closure
+
+S04 consumes SessionController (S03), WebViewHost (S02), GameInstance DAO (S01), BootstrapDetector/PreLaunchSnapshot (M0). Produces: capture cadence API, crash auto-detection, process-recovery cold-start, game-switching orchestration. No new public APIs beyond what SessionController already exposes.
+
+## Verification
+
+- New: cadence transition logs (Playing→Capturing→Playing every 60s), crash error logs with gameId, recoveryState persistence logs, game-switch settle logs. Existing transition logging preserved.
+
+<tasks>
+- [ ] **T01**: Capture Cadence (R012) _(2h)_
+  **Why:** SessionController has a manual `requestCapture()` but no automatic cadence. Per R012, foreground progress must be captured on a 60-second lifecycle-owned coroutine cadence. This is the lowest-risk seam in S04 — it touches only SessionController and its tests, with no schema or WebView changes.
+
+  **Do:** Add a lifecycle-bound `captureJob` coroutine to SessionController that starts when state enters PLAYING and fires every 60 seconds (Playing→Capturing→delay→Playing). Cancel the cadence when state leaves PLAYING. Add a `requestForegroundCapture()` one-shot method. Wire ON_PAUSE lifecycle event to trigger a best-effort capture before suspension. Add ~8 unit tests covering: cadence starts on Playing, fires at 60s intervals, cancels on state change, requestForegroundCapture() one-shot, ON_PAUSE best-effort capture, cadence restarts on re-entering Playing.
+
+  **Done when:** SessionController has a working 60-second capture cadence coroutine. `./gradlew :app:testDebugUnitTest` passes with the new tests. `./gradlew :app:assembleDebug` passes. No regressions in existing 37 SessionControllerTest tests.
+  - Files: `app/src/main/java/com/example/hub/session/SessionController.kt`, `app/src/test/java/com/example/hub/session/SessionControllerTest.kt`
+  - Verify: ./gradlew :app:testDebugUnitTest --no-daemon
+- [ ] **T02**: Process-Death Recovery (R015) _(3h)_
+  **Why:** Per R015, the app must survive process death and allow recovery of the last session. Currently, on app relaunch, SessionController starts in Closed state regardless of prior durable session. We need to persist recovery metadata and read it on cold-start.
+
+  **Do:** (1) Add `recoveryState: String?` and `lastCaptureAtMillis: Long` columns to `GameInstance` entity. (2) Bump `HubDatabase` schema version 1→2 with a migration that adds the columns (use fallbackToDestructiveMigration for tests). (3) Update `GameInstanceDao` queries if needed for the new columns. (4) In `SessionController.onAttached()`, query DAO for active instance with non-null `recoveryState`; if found, transition to Degraded or RecoveryRequired and restore profile name. (5) Persist `recoveryState` on state transitions to Degraded/RecoveryRequired; clear it on successful Playing transition. (6) Add ~6 unit tests covering: cold-start recovery reads DAO and restores state, recoveryState is persisted on Degraded transition, recoveryState is cleared on Playing transition, schema migration works in test DAO.
+
+  **Done when:** GameInstance has new columns. Cold-start recovery reads DAO and restores appropriate state. Schema migration v1→v2 works in tests. `./gradlew :app:testDebugUnitTest` passes. `./gradlew :app:assembleDebug` passes.
+  - Files: `app/src/main/java/com/example/hub/database/GameInstance.kt`, `app/src/main/java/com/example/hub/database/GameInstanceDao.kt`, `app/src/main/java/com/example/hub/database/HubDatabase.kt`, `app/src/main/java/com/example/hub/session/SessionController.kt`, `app/src/test/java/com/example/hub/database/GameInstanceDaoTest.kt`, `app/src/test/java/com/example/hub/session/SessionControllerTest.kt`
+  - Verify: ./gradlew :app:testDebugUnitTest --no-daemon
+- [ ] **T03**: Crash Handling (R014) _(2h)_
+  **Why:** Per R014, renderer crashes must be detected and produce a RecoveryRequired state with visible UI. Currently, crash handling is manual-only — the menu button triggers `requestDegraded()`, but there is no automatic crash detection. The RecoveryOverlay composable exists but nothing triggers it in production.
+
+  **Do:** (1) Add an `onError: (String) -> Unit` callback parameter to `WebViewHost`. (2) In WebViewHost's `webViewClient`, override `onPageFailed` and `onReceivedError` to call the error callback with the error details. (3) In `SessionController`, add a `setCrashHandler` or accept onError in constructor to wire WebView errors to `requestDegraded()`. (4) Ensure `requestDegraded()` transitions Playing→Degraded and logs with gameId. (5) Ensure RecoveryOverlay is shown when state is RecoveryRequired (already wired in PlaySurface, just needs the trigger). (6) Add ~5 unit tests in WebViewHostTest covering: error callback fires on page fail, error callback fires on received error, error triggers Degraded transition in controller.
+
+  **Done when:** WebViewHost detects page failures and received errors and reports them via callback. SessionController responds to errors by transitioning to Degraded. RecoveryOverlay shows in RecoveryRequired state. `./gradlew :app:testDebugUnitTest` passes. `./gradlew :app:assembleDebug` passes.
+  - Files: `app/src/main/java/com/example/hub/ui/WebViewHost.kt`, `app/src/main/java/com/example/hub/session/SessionController.kt`, `app/src/test/java/com/example/hub/ui/WebViewHostTest.kt`, `app/src/test/java/com/example/hub/session/SessionControllerTest.kt`
+  - Verify: ./gradlew :app:testDebugUnitTest --no-daemon
+- [ ] **T04**: Bootstrap Integration and Game Switching (R013 + R016) _(3h)_
+  **Why:** Per R013, `SessionController.open()` must integrate the existing `BootstrapDetector` and `PreLaunchSnapshot` into the session opening flow. Per R016, game switching must settle the old session before activating a new one — currently, opening a second game while one is active is silently rejected. Both modify `open()` and are tightly coupled.
+
+  **Do:** (1) Modify `SessionController.open()` to run `BootstrapDetector.test(profileStore)` after profile binding. If a qualified mechanism is found, navigate and transition to Playing; otherwise transition to RecoveryRequired. (2) Fire `PreLaunchSnapshot.capture()` asynchronously (fire-and-forget) after successful navigation. (3) Modify `open()` to handle the "already active" case by settling the old session first (if Playing: requestCapture() then requestClosing(); if Background: requestForeground() then requestClosing(); if Degraded/RecoveryRequired: requestClosing()). (4) Add `settleActiveSession()` private method. (5) Add ~6 unit tests covering: open() runs bootstrap and transitions to Playing on success, open() transitions to RecoveryRequired on bootstrap failure, PreLaunchSnapshot is fired asynchronously, game switching settles old Playing session, game switching settles old Background session, no cross-game leakage after switching.
+
+  **Done when:** `open()` integrates bootstrap detection and PreLaunchSnapshot. Game switching settles old sessions and increments epoch. `./gradlew :app:testDebugUnitTest` passes. `./gradlew :app:assembleDebug` passes. All prior tests continue to pass.
+  - Files: `app/src/main/java/com/example/hub/session/SessionController.kt`, `app/src/test/java/com/example/hub/session/SessionControllerTest.kt`
+  - Verify: ./gradlew :app:testDebugUnitTest --no-daemon
+</tasks>
+
+## Files Likely Touched
+
+- app/src/main/java/com/example/hub/session/SessionController.kt
+- app/src/test/java/com/example/hub/session/SessionControllerTest.kt
+- app/src/main/java/com/example/hub/database/GameInstance.kt
+- app/src/main/java/com/example/hub/database/GameInstanceDao.kt
+- app/src/main/java/com/example/hub/database/HubDatabase.kt
+- app/src/test/java/com/example/hub/database/GameInstanceDaoTest.kt
+- app/src/main/java/com/example/hub/ui/WebViewHost.kt
+- app/src/test/java/com/example/hub/ui/WebViewHostTest.kt
+<!-- gsd:state-version=134:1 -->

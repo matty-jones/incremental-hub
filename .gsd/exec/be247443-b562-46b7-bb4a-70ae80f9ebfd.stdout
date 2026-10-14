@@ -1,0 +1,15 @@
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:kspDebugKotlin'.
+> Cannot access output property '$1$2' of task ':app:kspDebugKotlin'. Accessing unreadable inputs or outputs is not supported. Declare the task as untracked by using Task.doNotTrackState(). For more information, please refer to https://docs.gradle.org/8.9/userguide/incremental_build.html#sec:disable-state-tracking in the Gradle documentation.
+   > Failed to create MD5 hash for file '/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/generated/ksp/debug/java/com/example/hub/database/HubDatabase_Impl.java' as it does not exist.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 15s
+17 actionable tasks: 1 executed, 16 up-to-date

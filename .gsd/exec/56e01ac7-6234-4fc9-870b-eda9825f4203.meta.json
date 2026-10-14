@@ -1,0 +1,20 @@
+{
+  "id": "56e01ac7-6234-4fc9-870b-eda9825f4203",
+  "runtime": "bash",
+  "purpose": "Find all JSON files",
+  "script_chars": 31,
+  "started_at": "2026-10-13T23:24:43.035Z",
+  "finished_at": "2026-10-13T23:24:43.048Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 13,
+  "stdout_bytes": 22915,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/56e01ac7-6234-4fc9-870b-eda9825f4203.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/56e01ac7-6234-4fc9-870b-eda9825f4203.stderr"
+}

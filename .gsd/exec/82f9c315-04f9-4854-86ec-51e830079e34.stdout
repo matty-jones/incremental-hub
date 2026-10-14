@@ -1,0 +1,50 @@
+package com.example.hub.games
+
+import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.File
+import java.io.FileOutputStream
+
+/**
+ * Unit tests for [GameRegistry].
+ *
+ * Uses Robolectric to obtain a real [android.content.Context] whose `assets/`
+ * directory is populated from the test resource tree (`src/test/resources/games/`).
+ * Robolectric mirrors Android's asset pipeline for files placed under
+ * `src/test/resources/assets/`.
+ *
+ * Tests cover:
+ * - Both known game definitions resolve to valid [RegisteredGame]s.
+ * - Invalid JSON is rejected (validation fails, no [RegisteredGame] produced).
+ * - Deterministic ordering: alphabetical when no DAO data; last-played DESC when present.
+ * - [getGame] lookup by [gameId].
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30], manifest = Config.NONE)
+class GameRegistryTest {
+
+    private lateinit var registry: GameRegistry
+
+    @Before
+    fun setUp() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        registry = GameRegistry(ctx)
+        // Load test definitions from classpath so tests are independent of asset merging.
+        registry.injectDefinitions(
+            listOf(
+                loadTestClasspathJson("shark-incremental.json"),
+                loadTestClasspathJson("fe000000.json")
+            )
+        )
+    }
+
+    // -----------------------------------------------------------------
+    // Positive cases — both known definitions resolve

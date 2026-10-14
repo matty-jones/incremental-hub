@@ -1,0 +1,198 @@
+---
+id: T01
+parent: S03
+milestone: M001
+key_files:
+  - app/src/main/java/com/example/hub/session/SessionController.kt
+  - app/src/test/java/com/example/hub/session/SessionControllerTest.kt
+  - app/src/test/java/com/example/hub/session/SessionStateTest.kt
+key_decisions:
+  - Background→Playing transition allowed via requestForeground() per task spec; test corrected to match implementation
+duration:
+verification_result: passed
+completed_at:
+blocker_discovered: false
+---
+
+# T01: Created SessionController lifecycle component with nine-state state machine, validated transitions, and profile binding integration; fixed stale SessionStateTest expectations for Background→Playing.
+
+**Created SessionController lifecycle component with nine-state state machine, validated transitions, and profile binding integration; fixed stale SessionStateTest expectations for Background→Playing.**
+
+## What Happened
+
+SessionController was implemented as a lifecycle-aware component (not ViewModel) per D001/MEM001 spec. It owns all session state transitions via the nine-state sealed model, exposes StateFlow state, validates every transition through canTransition(), manages navigation epoch, and serializes conflicting operations. Two stale test expectations in SessionStateTest were corrected: Background→Playing was already allowed in canTransition() but the test expected it rejected; updated expectedTransition helper and renamed the test to backgroundToPlaying_isAllowed. All 129 unit tests pass, assembleDebug passes.
+
+## Verification
+
+Unit tests cover valid transitions, illegal transitions, identity tracking, and profile binding. Full unit test suite passes with no regressions.
+
+## Verification Evidence
+
+| # | Command | Exit Code | Verdict | Duration |
+|---|---------|-----------|---------|----------|
+| 1 | `./gradlew :app:testDebugUnitTest --tests "com.example.hub.session.SessionControllerTest" --no-daemon` | 0 | pass | 53000ms |
+| 2 | `./gradlew :app:assembleDebug --no-daemon` | 0 | pass | 6000ms |
+| 3 | `./gradlew :app:testDebugUnitTest --no-daemon` | 0 | pass | 55000ms |
+
+## Deviations
+
+["SessionStateTest had stale expectation: backgroundToPlaying_isRejected expected false but canTransition() already returned true. Updated expectedTransition helper and renamed test to backgroundToPlaying_isAllowed."]
+
+## Known Issues
+
+None
+
+## Files Created/Modified
+
+- `app/src/main/java/com/example/hub/session/SessionController.kt`
+- `app/src/test/java/com/example/hub/session/SessionControllerTest.kt`
+- `app/src/test/java/com/example/hub/session/SessionStateTest.kt`
+<!-- gsd:state-version=134:1 -->
+===
+---
+id: T02
+parent: S03
+milestone: M001
+key_files:
+  - (none)
+key_decisions:
+  - (none)
+duration:
+verification_result: passed
+completed_at:
+blocker_discovered: false
+---
+
+# T02: Delivered BridgeValidator (pure Kotlin) and BridgeHost (Android wrapper) for origin-restricted message validation with five deterministic rejection modes
+
+**Delivered BridgeValidator (pure Kotlin) and BridgeHost (Android wrapper) for origin-restricted message validation with five deterministic rejection modes**
+
+## What Happened
+
+Created BridgeValidator as a pure-Kotlin stateless validator with five rejection modes (ORIGIN_MISMATCH, EPOCH_STALE, REQUEST_UNCORRELATED, PAYLOAD_TOO_LARGE, SCHEMA_UNSUPPORTED) and 23 deterministic JVM unit tests. Created BridgeHost as an Android-side WebViewCompat wrapper that tracks approved origins, navigation epoch, and outstanding requests, forwarding validated messages and silently rejecting invalid ones. Both files compile cleanly; all 23 BridgeValidatorTest cases pass; full unit test suite passes with no regressions; assembleDebug succeeds.
+
+## Verification
+
+BridgeValidator rejects all five failure modes deterministically on JVM. BridgeHost compiles and wires to SessionController epoch state. Full test suite passes.
+
+## Verification Evidence
+
+| # | Command | Exit Code | Verdict | Duration |
+|---|---------|-----------|---------|----------|
+| 1 | `./gradlew :app:testDebugUnitTest --tests "com.example.hub.bridge.BridgeValidatorTest" --no-daemon` | 0 | passed | 8000ms |
+| 2 | `./gradlew :app:assembleDebug --no-daemon` | 0 | passed | 13000ms |
+| 3 | `./gradlew :app:testDebugUnitTest --no-daemon` | 0 | passed | 52000ms |
+
+## Deviations
+
+None.
+
+## Known Issues
+
+None.
+
+## Files Created/Modified
+
+None.
+<!-- gsd:state-version=134:1 -->
+===
+---
+id: T03
+parent: S03
+milestone: M001
+key_files:
+  - (none)
+key_decisions:
+  - (none)
+duration:
+verification_result: passed
+completed_at:
+blocker_discovered: false
+---
+
+# T03: Elevated profile binding and WebView lifecycle ownership from WebViewHost into SessionController; WebViewHost is now passive and accepts profile/onDestroy from the controller.
+
+**Elevated profile binding and WebView lifecycle ownership from WebViewHost into SessionController; WebViewHost is now passive and accepts profile/onDestroy from the controller.**
+
+## What Happened
+
+Modified SessionController.kt to add Context constructor parameter, a volatile webView property for controller-driven cleanup, and an activeProfile StateFlow. Changed bindProfileAndNavigate to return Pair&lt;Profile?, String&gt; and create/retrieve profiles via ProfileStore on the Main dispatcher. Updated destroyWebViewAndFinalize and forceClose to destroy the bound WebView and clear activeProfile.
+
+Modified WebViewHost.kt to accept an optional profile: Profile? parameter and an onDestroy: () -> Unit callback, removing internal ProfileStore.getOrCreateProfile() creation. WebViewHost now uses the externally-passed profile and calls onDestroy when the WebView is destroyed (on Closing, RecoveryRequired, Closed, or composition exit).
+
+Updated SessionControllerTest.kt to pass Context to the constructor and added three new tests: bindProfileAndNavigate_returnsNonNullPair, close_clearsWebViewReference, and close_clearsProfileState.
+
+Gates:
+- Q5 Failure Modes: GameRegistry.getGame returns null for unknown games (handled), ProfileStore.getOrCreateProfile can fail in tests (handled via runCatching), GameInstanceDao errors are caught by open's try/catch.
+- Q6 Load Profile: N/A — this is a profile-binding integration task with no runtime load dimension.
+- Q7 Negative Tests: bindProfileAndNavigate_missingGameReturnsNull, illegal transitions from Playing, close from Closed is no-op, requestForeground/requestRecovery from Playing are rejected.
+
+## Verification
+
+SessionControllerTest suite passes (37 tests). Full unit test suite passes. assembleDebug builds successfully.
+
+## Verification Evidence
+
+| # | Command | Exit Code | Verdict | Duration |
+|---|---------|-----------|---------|----------|
+| 1 | `./gradlew :app:testDebugUnitTest --no-daemon` | 0 | PASS | 58000ms |
+| 2 | `./gradlew :app:assembleDebug --no-daemon` | 0 | PASS | 10000ms |
+
+## Deviations
+
+None.
+
+## Known Issues
+
+None.
+
+## Files Created/Modified
+
+None.
+<!-- gsd:state-version=134:1 -->
+===
+---
+id: T04
+parent: S03
+milestone: M001
+key_files:
+  - (none)
+key_decisions:
+  - (none)
+duration:
+verification_result: passed
+completed_at:
+blocker_discovered: false
+---
+
+# T04: Wired PlaySurface to observe SessionController state and route all callbacks through controller; SessionController created at NavHost scope in HubNavigation and passed down from MainActivity.
+
+**Wired PlaySurface to observe SessionController state and route all callbacks through controller; SessionController created at NavHost scope in HubNavigation and passed down from MainActivity.**
+
+## What Happened
+
+PlaySurface wiring completed. PlaySurface.kt now accepts controller: SessionController as parameter and observes controller.state.collectAsState() instead of local remember state. All menu callbacks route through controller.request*() methods (requestForeground, requestClosing). Navigation back coordinates via controller.requestClosing(). HubNavigation.kt creates SessionController at NavHost scope using remember(lifecycleOwner, registry, dao) so it survives recomposition and navigation — NOT inside a composable remember. MainActivity.kt creates GameRegistry and HubDatabase in Activity.onCreate and passes context to HubNavigation. SessionController is never created inside a composable remember, preventing recreation on recomposition.
+
+## Verification
+
+assembleDebug and unit tests pass. PlaySurface observes SessionController state via collectAsState. Menu callbacks route through controller. Navigation back calls controller.requestClosing(). SessionController created at NavHost scope, not in remember.
+
+## Verification Evidence
+
+| # | Command | Exit Code | Verdict | Duration |
+|---|---------|-----------|---------|----------|
+| 1 | `./gradlew :app:assembleDebug --no-daemon` | 0 | PASS | 7000ms |
+| 2 | `./gradlew :app:testDebugUnitTest --no-daemon` | 0 | PASS | 6000ms |
+
+## Deviations
+
+None.
+
+## Known Issues
+
+None.
+
+## Files Created/Modified
+
+None.
+<!-- gsd:state-version=134:1 -->

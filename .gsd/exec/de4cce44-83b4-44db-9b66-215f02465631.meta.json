@@ -1,0 +1,20 @@
+{
+  "id": "de4cce44-83b4-44db-9b66-215f02465631",
+  "runtime": "bash",
+  "purpose": "Read all UAT files",
+  "script_chars": 234,
+  "started_at": "2026-10-13T23:24:43.026Z",
+  "finished_at": "2026-10-13T23:24:43.056Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 30,
+  "stdout_bytes": 10865,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/de4cce44-83b4-44db-9b66-215f02465631.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/de4cce44-83b4-44db-9b66-215f02465631.stderr"
+}

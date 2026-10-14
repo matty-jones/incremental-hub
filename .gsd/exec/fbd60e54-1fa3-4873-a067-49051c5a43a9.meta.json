@@ -1,0 +1,20 @@
+{
+  "id": "fbd60e54-1fa3-4873-a067-49051c5a43a9",
+  "runtime": "bash",
+  "purpose": "Run full unit test suite",
+  "script_chars": 60,
+  "started_at": "2026-10-09T17:27:49.295Z",
+  "finished_at": "2026-10-09T17:28:00.763Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 11468,
+  "stdout_bytes": 1625,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/fbd60e54-1fa3-4873-a067-49051c5a43a9.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/fbd60e54-1fa3-4873-a067-49051c5a43a9.stderr"
+}

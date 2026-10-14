@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T03",
+  "unitId": "M001/S02/T03",
+  "timestamp": 1791565145786,
+  "passed": true,
+  "discoverySource": "task-plan",
+  "checks": [
+    {
+      "command": "./gradlew :app:testDebugUnitTest --tests \"com.example.hub.ui.NativeMenuTest\" --no-daemon",
+      "exitCode": 0,
+      "durationMs": 5363,
+      "verdict": "pass"
+    }
+  ]
+}

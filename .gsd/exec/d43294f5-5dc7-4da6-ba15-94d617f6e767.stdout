@@ -1,0 +1,11 @@
+12:The repository has validated feasibility implementation (profile isolation, bootstrap, qualification, capture→restore→fresh-profile verification, integrated spike) but no production launcher or session controller. This milestone turns the spike baseline into a shippable Playable Hub.
+125:**Rationale:** Spec explicitly states: Do not create a second competing definition parser or validator. Existing validator is validated and tested.
+154:- **Bridge epoch tracking** — navigation epoch must be correctly incremented and validated; risk of stale callback mutations
+156:- **Game switching isolation** — old session must be fully invalidated before new session becomes authoritative; risk of cross-game leakage
+161:- `app/src/main/java/com/example/hub/games/SharkIncrementalAdapter.kt` — validated adapter to reuse
+162:- `app/src/main/java/com/example/hub/games/Fe000000Adapter.kt` — validated adapter to reuse
+175:- R001 — Game Registry (M001/S01)
+176:- R002 — Minimal GameInstance Persistence (M001/S01)
+177:- R003 — Launcher UI (M001/S01)
+178:- R004 — Navigation Wiring (M001/S01)
+318:10. **Validated baseline preservation**: The spec says "preserve the validated feasibility baseline foundation." Existing spike activities (BootstrapActivity, IntegratedSpikeActivity, GameQualificationActivity) will be preserved but not modified unless required.

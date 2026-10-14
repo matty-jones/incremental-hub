@@ -1,0 +1,20 @@
+{
+  "id": "fb720d4f-e76a-442d-906a-6c3a0c430e34",
+  "runtime": "bash",
+  "purpose": "Fresh WebViewHostTest run",
+  "script_chars": 104,
+  "started_at": "2026-10-09T19:13:28.060Z",
+  "finished_at": "2026-10-09T19:14:01.029Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 32969,
+  "stdout_bytes": 303,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/fb720d4f-e76a-442d-906a-6c3a0c430e34.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/fb720d4f-e76a-442d-906a-6c3a0c430e34.stderr"
+}

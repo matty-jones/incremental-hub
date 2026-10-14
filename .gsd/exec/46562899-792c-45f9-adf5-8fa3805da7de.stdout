@@ -1,0 +1,24 @@
+commit 29d799a0dd38e408736f9ce0885c4bb38246f597
+Author: Matty Jones <mattyl.jones@dunelm.org.uk>
+Date:   Tue Oct 13 16:48:18 2026 -0600
+
+    test: Integrated BootstrapDetector/PreLaunchSnapshot into open() and...
+    
+    GSD context:
+    - Milestone: M001 - Playable Hub
+    - Slice: S04 - SessionController Resilience
+    - Task: T04 - Integrated BootstrapDetector/PreLaunchSnapshot into open() and implemented game-switching isolation via settleActiveSession() with 6 unit tests.
+    
+    GSD-Task: S04/T04
+
+ .gsd/DECISIONS.md                                  |   1 +
+ .gsd/KNOWLEDGE.md                                  |   1 +
+ .../0-mv79v33f/stderr                              |   5 +
+ .../0-mv79v33f/stdout                              |  36 ++
+ .gsd/phases/01-m001/01-CONTINUE.md                 |  12 +-
+ .gsd/phases/01-m001/S04-T04-SUMMARY.md             |  45 ++
+ .gsd/phases/01-m001/S04-T04-VERIFY.json            |  16 +
+ .gsd/safety/evidence-M001-S04-T04.json             | 672 ---------------------
+ .../com/example/hub/session/SessionController.kt   |   7 +-
+ .../example/hub/session/SessionControllerTest.kt   |  17 +-
+ 10 files changed, 124 insertions(+), 688 deletions(-)

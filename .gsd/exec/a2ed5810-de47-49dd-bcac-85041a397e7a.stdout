@@ -1,0 +1,80 @@
+package com.example.hub.ui
+
+import android.util.Log
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.hub.database.HubDatabase
+import com.example.hub.games.DisplayDefaults
+import com.example.hub.games.GameRegistry
+import com.example.hub.games.RegisteredGame
+
+private const val TAG = "LauncherScreen"
+
+/**
+ * Material 3 launcher screen showing registered games as native cards.
+ *
+ * Games are ordered with recently-played-first (by [RegisteredGame.lastPlayedAtMillis]
+ * DESC), then alphabetical by [RegisteredGame.gameId]. Each card shows the game's
+ * [RegisteredGame.displayName], a status label ("Resume" when [lastPlayedAtMillis]
+ * is non-null, "Launch" otherwise), and action buttons.
+ *
+ * Color hints are pulled from [RegisteredGame.displayDefaults]. The composable reads
+ * the DAO via [remember] + [produceState] — no ViewModel per the S01 constraint.
+ *
+ * @param onLaunch callback fired when the user taps "Launch" (no prior session).
+ * @param onResume callback fired when the user taps "Resume" (prior session exists).
+ */
+@Composable
+fun LauncherScreen(
+    onLaunch: (String) -> Unit,
+    onResume: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val registry = remember(context) { GameRegistry(context) }
+
+    // Collect last-played millis from the DAO via produceState.
+    val lastPlayedByGameId by produceState<Map<String, Long>>(initialValue = emptyMap()) {
+        val db = HubDatabase.getInstance(context)
+        val dao = db.gameInstanceDao()
+        dao.getAllOrdered().collect { instances ->
+            value = instances.associate { it.gameId to it.lastPlayedAtMillis }
+        }
+    }
+
+    val games by produceState<List<RegisteredGame>>(initialValue = emptyList()) {
+        val ordered = registry.getGames(lastPlayedByGameId)
+        Log.d(TAG, "LauncherScreen: rendering ${ordered.size} game(s) in order: ${ordered.map { it.gameId }}")
+        value = ordered
+    }

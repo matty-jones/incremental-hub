@@ -1,0 +1,40 @@
+app/src/main/java/com/example/hub/games/GameRegistry.kt:open class GameRegistry(private val context: Context) {
+app/src/main/java/com/example/hub/games/GameRegistry.kt-
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    companion object {
+app/src/main/java/com/example/hub/games/GameRegistry.kt:        private const val TAG = "GameRegistry"
+app/src/main/java/com/example/hub/games/GameRegistry.kt-        private const val GAMES_ASSET_DIR = "games"
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    }
+app/src/main/java/com/example/hub/games/GameRegistry.kt-
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    /** Lazily computed, cached list of all definitions with their validation status. */
+app/src/main/java/com/example/hub/games/GameRegistry.kt-    private var _definitions: List<DefinitionWithStatus>? = null
+--
+app/src/main/java/com/example/hub/games/RegisteredGame.kt: * Used by [GameRegistry.allDefinitions] to surface both valid and invalid
+app/src/main/java/com/example/hub/games/RegisteredGame.kt- * definitions for debugging and error reporting.
+app/src/main/java/com/example/hub/games/RegisteredGame.kt- *
+app/src/main/java/com/example/hub/games/RegisteredGame.kt- * @param definition The raw parsed JSON (as a [String]) for diagnostic dumps.
+app/src/main/java/com/example/hub/games/RegisteredGame.kt- * @param validationResult The result of validating the definition.
+app/src/main/java/com/example/hub/games/RegisteredGame.kt- * @param resolved A non-null [RegisteredGame] when validation passed; null otherwise.
+--
+app/src/main/java/com/example/hub/session/SessionController.kt:import com.example.hub.games.GameRegistry
+app/src/main/java/com/example/hub/session/SessionController.kt-import kotlinx.coroutines.CoroutineScope
+app/src/main/java/com/example/hub/session/SessionController.kt-import kotlinx.coroutines.Dispatchers
+app/src/main/java/com/example/hub/session/SessionController.kt-import kotlinx.coroutines.Job
+app/src/main/java/com/example/hub/session/SessionController.kt-import kotlinx.coroutines.delay
+app/src/main/java/com/example/hub/session/SessionController.kt-import kotlinx.coroutines.flow.MutableStateFlow
+--
+app/src/main/java/com/example/hub/session/SessionController.kt:    private val gameRegistry: GameRegistry,
+app/src/main/java/com/example/hub/session/SessionController.kt-    private val instanceDao: GameInstanceDao,
+app/src/main/java/com/example/hub/session/SessionController.kt-    private val lifecycleOwner: LifecycleOwner,
+app/src/main/java/com/example/hub/session/SessionController.kt-    private val webViewDestroyer: (() -> Unit)? = null,
+app/src/main/java/com/example/hub/session/SessionController.kt-) : LifecycleEventObserver {
+app/src/main/java/com/example/hub/session/SessionController.kt-
+--
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt:import com.example.hub.games.GameRegistry
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt-import com.example.hub.games.RegisteredGame
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt-
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt-private const val TAG = "LauncherScreen"
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt-
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt-/**
+--
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt:    val registry = remember(context) { GameRegistry(context) }
+app/src/main/java/com/example/hub/ui/LauncherScreen.kt-

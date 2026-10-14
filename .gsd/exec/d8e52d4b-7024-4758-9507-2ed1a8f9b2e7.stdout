@@ -1,0 +1,10 @@
+app/src/test/java/com/example/hub/games/GameDefinitionValidatorTest.kt:8
+app/src/test/java/com/example/hub/games/SharkIncrementalAdapterTest.kt:4
+app/src/test/java/com/example/hub/games/GameRegistryTest.kt:8
+app/src/test/java/com/example/hub/games/Fe000000AdapterTest.kt:5
+app/src/test/java/com/example/hub/bridge/BridgeValidatorTest.kt:25
+app/src/test/java/com/example/hub/session/SessionStateTest.kt:30
+app/src/test/java/com/example/hub/session/SessionControllerTest.kt:62
+app/src/test/java/com/example/hub/ui/WebViewHostTest.kt:9
+app/src/test/java/com/example/hub/ui/NativeMenuTest.kt:30
+app/src/test/java/com/example/hub/database/GameInstanceDaoTest.kt:9

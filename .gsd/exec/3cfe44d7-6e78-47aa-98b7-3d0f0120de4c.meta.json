@@ -1,0 +1,20 @@
+{
+  "id": "3cfe44d7-6e78-47aa-98b7-3d0f0120de4c",
+  "runtime": "bash",
+  "purpose": "Find slice files",
+  "script_chars": 77,
+  "started_at": "2026-10-13T23:10:12.858Z",
+  "finished_at": "2026-10-13T23:10:12.865Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 7,
+  "stdout_bytes": 1511,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/3cfe44d7-6e78-47aa-98b7-3d0f0120de4c.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/3cfe44d7-6e78-47aa-98b7-3d0f0120de4c.stderr"
+}

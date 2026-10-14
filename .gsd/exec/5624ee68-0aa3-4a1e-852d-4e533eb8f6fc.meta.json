@@ -1,0 +1,20 @@
+{
+  "id": "5624ee68-0aa3-4a1e-852d-4e533eb8f6fc",
+  "runtime": "bash",
+  "purpose": "Find task summary files",
+  "script_chars": 165,
+  "started_at": "2026-10-13T22:49:13.751Z",
+  "finished_at": "2026-10-13T22:49:13.758Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 7,
+  "stdout_bytes": 156,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/5624ee68-0aa3-4a1e-852d-4e533eb8f6fc.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/5624ee68-0aa3-4a1e-852d-4e533eb8f6fc.stderr"
+}

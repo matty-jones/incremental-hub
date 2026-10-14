@@ -1,0 +1,89 @@
+# S01: Game Registry and Launcher — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-08T21:18:15.528Z
+
+## S01 UAT — Game Registry and Launcher
+
+**Slice:** S001 — Game Registry and Launcher
+**Milestone:** M001 — Playable Hub
+**UAT Type:** runtime-executable
+
+### Precondition
+- App is built in debug mode
+- Android SDK is available at /home/blasky/android-sdk
+- assets/games/ contains shark-incremental.json and fe000000.json
+
+### Check 1: Both known game definitions load through GameRegistry
+
+**Steps:**
+1. Run GameRegistryTest on the test classpath
+2. Verify loadTestClasspathJson can read both game definition files
+3. Verify GameRegistry.getGames() returns both definitions
+
+**Expected:** Both definitions resolve to RegisteredGame; no exceptions
+
+**Evidence:** `./gradlew :app:testDebugUnitTest --tests "com.example.hub.games.GameRegistryTest" --no-daemon` — exit 0
+
+### Check 2: Invalid definitions are rejected
+
+**Steps:**
+1. Run GameRegistryTest invalid JSON test case
+2. Pass malformed JSON to GameRegistry parsing
+
+**Expected:** Invalid JSON is rejected; rejected list populated; valid list unaffected
+
+**Evidence:** GameRegistryTest validates rejection path — exit 0
+
+### Check 3: Last-played ordering is deterministic
+
+**Steps:**
+1. Insert two GameInstance records with different lastPlayedAtMillis via DAO
+2. Call GameRegistry.getGames() with the DAO-provided last-played map
+3. Verify ordering is DESC by lastPlayedAtMillis, then alphabetical by gameId
+
+**Expected:** Recently played game appears first; tie-breaking is alphabetical by gameId
+
+**Evidence:** GameRegistryTest ordering test — exit 0
+
+### Check 4: Launcher renders the registry
+
+**Steps:**
+1. Build debug APK
+2. Verify LauncherScreen composable compiles with Scaffold+LazyColumn
+3. Verify card items show displayName, status chip, action buttons
+4. Verify produceState collects DAO Flow without ViewModel
+
+**Expected:** No compile errors; composable structure matches spec
+
+**Evidence:** `./gradlew :app:assembleDebug --no-daemon` — exit 0
+
+### Check 5: Launch/resume selects intended game instance
+
+**Steps:**
+1. Verify HubNavigation routes play_surface/{gameId} to PlaySurfaceStub
+2. Verify MainActivity hosts HubNavigation as entry surface
+3. Verify gameId argument is passed through navigation
+
+**Expected:** Navigation graph has both routes; gameId flows to PlaySurfaceStub
+
+**Evidence:** HubNavigation source review + assembleDebug — exit 0
+
+### Check 6: Existing baseline not regressed
+
+**Steps:**
+1. Run full unit test suite
+2. Verify GameDefinitionValidatorTest, SharkIncrementalAdapterTest, Fe000000AdapterTest all pass
+
+**Expected:** All existing tests pass; no regressions
+
+**Evidence:** `./gradlew :app:testDebugUnitTest --no-daemon` — exit 0
+
+### Edge Cases
+- Empty DAO table: getGames() returns alphabetical order (no last-played data)
+- Null resumeToken: status chip shows Launch (not Resume)
+- Invalid game definition JSON: rejected and logged, not crashed
+
+### UAT Verdict
+**PASS** — All 6 checks passed via unit test evidence and build verification.
+<!-- gsd:state-version=53:1 -->

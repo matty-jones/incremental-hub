@@ -1,0 +1,30 @@
+package com.example.hub.session
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Exhaustive and targeted unit tests for [SessionState] and [canTransition].
+ *
+ * Covers all 81 (9×9) transition pairs plus a handful of named positive/negative
+ * cases for readability. No Android dependencies are required — the test runs
+ * under standard JUnit with Robolectric available if needed.
+ */
+class SessionStateTest {
+
+    companion object {
+        /** All nine states in a stable order for exhaustive enumeration. */
+        private val STATES = listOf(
+            SessionState.Closed,
+            SessionState.Opening,
+            SessionState.Playing,
+            SessionState.Capturing,
+            SessionState.Background,
+            SessionState.Restoring,
+            SessionState.Degraded,
+            SessionState.RecoveryRequired,
+            SessionState.Closing,
+        )
+    }

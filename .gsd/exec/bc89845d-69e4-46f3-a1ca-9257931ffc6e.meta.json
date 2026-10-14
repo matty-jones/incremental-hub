@@ -1,0 +1,20 @@
+{
+  "id": "bc89845d-69e4-46f3-a1ca-9257931ffc6e",
+  "runtime": "bash",
+  "purpose": "Verify debug assembly",
+  "script_chars": 56,
+  "started_at": "2026-10-09T22:00:00.843Z",
+  "finished_at": "2026-10-09T22:00:07.168Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 6325,
+  "stdout_bytes": 594,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/bc89845d-69e4-46f3-a1ca-9257931ffc6e.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/bc89845d-69e4-46f3-a1ca-9257931ffc6e.stderr"
+}

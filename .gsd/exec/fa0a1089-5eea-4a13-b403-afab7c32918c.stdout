@@ -1,0 +1,30 @@
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/BootstrapActivity.kt:14: * Standalone Activity hosting the native-origin bootstrap spike screen.
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:40:import com.example.hub.bootstrap.BootstrapDetector
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:41:import com.example.hub.bootstrap.DetectorResult
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:42:import com.example.hub.bootstrap.PreLaunchSnapshot
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:43:import com.example.hub.bootstrap.SnapshotResult
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:51: * Host composable for the native-origin bootstrap spike.
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:53: * On launch it runs [BootstrapDetector.test] and [PreLaunchSnapshot.capture] sequentially
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:100:                text = "Proves native-origin bootstrap can read localStorage before game code executes.",
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:177:                            message = "Re-running bootstrap spike …",
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:202:    Log.d(TAG, "Running bootstrap spike")
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:206:        BootstrapDetector(context).test(profileStore)
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/ui/BootstrapScreen.kt:222:        PreLaunchSnapshot(context).capture(profileStore, detectorResult)
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:1:package com.example.hub.bootstrap
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:18: * Result of a [BootstrapDetector] execution.
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:49: * 1. Create a test profile `s02-bootstrap-test` via [ProfileStore.getOrCreateProfile].
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:51: * 3. Navigate to the `WebViewAssetLoader` bootstrap URL and capture `location.origin`.
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:55: * 6. Write a JSON report to `filesDir/bootstrap_report.json`.
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:69:class BootstrapDetector(private val context: Context) {
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:72:        private const val TAG = "BootstrapDetector"
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:73:        private const val TEST_PROFILE = "s02-bootstrap-test"
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:74:        private const val BOOTSTRAP_PATH = "bootstrap/native.html"
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:75:        private const val REPORT_FILENAME = "bootstrap_report.json"
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:85:     * Run the bootstrap detector.
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:93:        Log.d(TAG, "Starting bootstrap origin detector")
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:201:     * Navigate a profile-bound WebView to the [WebViewAssetLoader] bootstrap URL and
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:223:                    .addPathHandler("/bootstrap/*", WebViewAssetLoader.AssetsPathHandler(context))
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:236:                val bootstrapUrl = "https://${WebViewAssetLoader.DEFAULT_DOMAIN}/bootstrap/native.html"
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:237:                Log.d(TAG, "Loading bootstrap via WebViewAssetLoader: $bootstrapUrl")
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:238:                loadUrl(bootstrapUrl)
+/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/main/java/com/example/hub/bootstrap/BootstrapDetector.kt:273:                val baseOrigin = "https://hub.internal/bootstrap"

@@ -1,0 +1,236 @@
+# S01: Game Registry and Launcher — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-08T21:18:15.528Z
+
+## S01 UAT — Game Registry and Launcher
+
+**Slice:** S001 — Game Registry and Launcher
+**Milestone:** M001 — Playable Hub
+**UAT Type:** runtime-executable
+
+### Precondition
+- App is built in debug mode
+- Android SDK is available at /home/blasky/android-sdk
+- assets/games/ contains shark-incremental.json and fe000000.json
+
+### Check 1: Both known game definitions load through GameRegistry
+
+**Steps:**
+1. Run GameRegistryTest on the test classpath
+2. Verify loadTestClasspathJson can read both game definition files
+3. Verify GameRegistry.getGames() returns both definitions
+
+**Expected:** Both definitions resolve to RegisteredGame; no exceptions
+
+**Evidence:** `./gradlew :app:testDebugUnitTest --tests "com.example.hub.games.GameRegistryTest" --no-daemon` — exit 0
+
+### Check 2: Invalid definitions are rejected
+
+**Steps:**
+1. Run GameRegistryTest invalid JSON test case
+2. Pass malformed JSON to GameRegistry parsing
+
+**Expected:** Invalid JSON is rejected; rejected list populated; valid list unaffected
+
+**Evidence:** GameRegistryTest validates rejection path — exit 0
+
+### Check 3: Last-played ordering is deterministic
+
+**Steps:**
+1. Insert two GameInstance records with different lastPlayedAtMillis via DAO
+2. Call GameRegistry.getGames() with the DAO-provided last-played map
+3. Verify ordering is DESC by lastPlayedAtMillis, then alphabetical by gameId
+
+**Expected:** Recently played game appears first; tie-breaking is alphabetical by gameId
+
+**Evidence:** GameRegistryTest ordering test — exit 0
+
+### Check 4: Launcher renders the registry
+
+**Steps:**
+1. Build debug APK
+2. Verify LauncherScreen composable compiles with Scaffold+LazyColumn
+3. Verify card items show displayName, status chip, action buttons
+4. Verify produceState collects DAO Flow without ViewModel
+
+**Expected:** No compile errors; composable structure matches spec
+
+**Evidence:** `./gradlew :app:assembleDebug --no-daemon` — exit 0
+
+### Check 5: Launch/resume selects intended game instance
+
+**Steps:**
+1. Verify HubNavigation routes play_surface/{gameId} to PlaySurfaceStub
+2. Verify MainActivity hosts HubNavigation as entry surface
+3. Verify gameId argument is passed through navigation
+
+**Expected:** Navigation graph has both routes; gameId flows to PlaySurfaceStub
+
+**Evidence:** HubNavigation source review + assembleDebug — exit 0
+
+### Check 6: Existing baseline not regressed
+
+**Steps:**
+1. Run full unit test suite
+2. Verify GameDefinitionValidatorTest, SharkIncrementalAdapterTest, Fe000000AdapterTest all pass
+
+**Expected:** All existing tests pass; no regressions
+
+**Evidence:** `./gradlew :app:testDebugUnitTest --no-daemon` — exit 0
+
+### Edge Cases
+- Empty DAO table: getGames() returns alphabetical order (no last-played data)
+- Null resumeToken: status chip shows Launch (not Resume)
+- Invalid game definition JSON: rejected and logged, not crashed
+
+### UAT Verdict
+**PASS** — All 6 checks passed via unit test evidence and build verification.
+<!-- gsd:state-version=53:1 -->
+===
+# S02: Play Surface and Native Menu — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-09T19:18:39.183Z
+
+## UAT: Play Surface and Native Menu
+
+**Slice:** S02 — Milestone M001
+
+### Pre-conditions
+- App built and installed on device/emulator
+- At least one game registered in GameRegistry (S01 deliverable)
+- local.properties points to valid Android SDK
+
+### UAT Type
+- UAT mode: runtime-executable
+
+### Checks
+
+| # | Description | Expected Outcome | Mode |
+|---|-------------|-----------------|------|
+| U1 | Launch app, navigate to a registered game, enter play surface | WebView renders game content; session state is OPENING then PLAYING | runtime |
+| U2 | Open native menu while game is playing | Menu overlays without recreating WebView; game remains active in background | runtime |
+| U3 | Trigger each of 7 menu actions (Resume, SnapshotNow, Checkpoint, Vault, Reload, Display, ReturnToHub) | Each action fires onAction callback; menu closes after ReturnToHub; no WebView recreation | runtime |
+| U4 | Press Android Back while menu is open | Menu closes; session stays PLAYING; no silent navigation back | runtime |
+| U5 | Press Android Back while menu is closed | App navigates back to launcher; session transitions to CLOSING then CLOSED | runtime |
+| U6 | Rotate device / change window size while menu is open | Layout adapts (compact→bottom sheet, wide→side panel); WebView identity stable | runtime |
+| U7 | Trigger configuration change (IME open/close) while playing | FoldAwareLayout adjusts insets; WebView content not covered by keyboard | runtime |
+| U8 | Run ./gradlew :app:assembleDebug --no-daemon | BUILD SUCCESSFUL | artifact |
+| U9 | Run ./gradlew :app:testDebugUnitTest --tests "com.example.hub.session.SessionStateTest" | 30/30 tests pass | artifact |
+| U10 | Run ./gradlew :app:testDebugUnitTest --tests "com.example.hub.ui.WebViewHostTest" | 4/4 tests pass | artifact |
+| U11 | Run ./gradlew :app:testDebugUnitTest --tests "com.example.hub.ui.NativeMenuTest" | 30/30 tests pass | artifact |
+
+### Edge Cases
+- E1: Menu opened/closed rapidly while game loads — WebView identity must remain stable
+- E2: SessionState is CLOSED — WebViewHost must not create a WebView (early return)
+- E3: Different gameId values — each must produce a distinct AndroidView factory invocation
+- E4: Profile bind must occur before loadUrl in WebViewHost factory
+<!-- gsd:state-version=82:1 -->
+===
+# S03: SessionController Core — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-10T21:21:11.595Z
+
+# S03: SessionController Core — UAT
+
+## Preconditions
+- App builds and installs (assembleDebug passes)
+- At least one game registered in GameRegistry
+- Device has Android SDK with WebView support
+
+## UAT Type
+- UAT mode: artifact-driven
+
+## Checks
+
+### C01: Session transitions unit tested
+- **Mode:** artifact
+- **Check:** SessionControllerTest has ≥15 tests covering valid transitions, illegal transitions, and identity tracking
+- **Evidence:** SessionControllerTest.kt contains 37 @Test annotations covering: open/close lifecycle, requestCapture/requestBackground/requestForeground/requestRestore/requestDegraded/requestRecovery/requestClosing, illegal transitions from every state, navigationEpoch increment, profile identity tracking, bridge validation integration
+
+### C02: Bridge validation rejects all five failure modes
+- **Mode:** artifact
+- **Check:** BridgeValidatorTest has ≥10 tests covering all rejection modes
+- **Evidence:** BridgeValidatorTest.kt contains 25 @Test annotations covering: valid message acceptance, ORIGIN_MISMATCH, EPOCH_STALE, REQUEST_UNCORRELATED, PAYLOAD_TOO_LARGE, SCHEMA_UNSUPPORTED, priority ordering (origin checked before epoch)
+
+### C03: PlaySurface observes controller state
+- **Mode:** artifact
+- **Check:** PlaySurface uses collectAsState on controller.state; no local remember state
+- **Evidence:** PlaySurface.kt line 35: `val state = controller.state.collectAsState().value`; menu callbacks route through controller.requestForeground() and controller.requestClosing()
+
+### C04: SessionController created at NavHost scope
+- **Mode:** artifact
+- **Check:** HubNavigation creates SessionController via remember(lifecycleOwner, registry, dao) — not inside composable remember
+- **Evidence:** HubNavigation.kt line 47: `val controller = remember(lifecycleOwner, registry, dao) { SessionController(...) }`
+
+### C05: No regressions in S01/S02 tests
+- **Mode:** runtime
+- **Check:** Full unit test suite passes
+- **Evidence:** `./gradlew :app:testDebugUnitTest --no-daemon` BUILD SUCCESSFUL; `./gradlew :app:assembleDebug --no-daemon` BUILD SUCCESSFUL
+
+### C06: Stateless bridge validator (JVM-only)
+- **Mode:** artifact
+- **Check:** BridgeValidator has no Android dependencies; runs on JVM
+- **Evidence:** BridgeValidator.kt imports only kotlinx.coroutines and kotlin standard library; no android.* imports
+
+## Edge Cases
+- Illegal transition from Playing directly to Closed (rejected)
+- Stale epoch message from old session (rejected as EPOCH_STALE)
+- Uncorrelated request ID (rejected as REQUEST_UNCORRELATED)
+- Oversized payload (rejected as PAYLOAD_TOO_LARGE)
+- Unknown schema (rejected as SCHEMA_UNSUPPORTED)
+- SessionController lifecycle events (ON_PAUSE does not auto-transition)
+<!-- gsd:state-version=128:1 -->
+===
+# S04: SessionController Resilience — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-13T22:55:03.639Z
+
+## S04 UAT: SessionController Resilience
+
+### Precondition
+- App built and installed (assembleDebug passes)
+- At least one game registered in GameRegistry
+- HubDatabase schema v2 present (migration from v1)
+
+### UAT Type
+- UAT mode: browser-executable
+
+### Check 1: 60-Second Capture Cadence
+- **Steps:**
+  1. Launch app, select a registered game
+  2. Wait until session reaches Playing state
+  3. Observe logcat for capture cadence events
+- **Expected:** Playing→Capturing log appears ~60s after session starts. Subsequent cadence fires every ~60s. Cadence cancels when state leaves Playing.
+- **Edge case:** Pressing back (state→Closing) stops cadence immediately.
+
+### Check 2: Renderer Crash → Recovery UI
+- **Steps:**
+  1. Launch a game, reach Playing state
+  2. Trigger WebView error (e.g., navigate to invalid URL via menu or force error via test hook)
+  3. Observe state transition
+- **Expected:** State transitions Playing→Degraded. Log shows crash error with gameId. RecoveryOverlay is shown. Manual menu action transitions Degraded→RecoveryRequired.
+- **Edge case:** onRenderProcessGone returns true (handled as crash). RecoveryOverlay only shows after user action transitions Degraded→RecoveryRequired.
+
+### Check 3: Process-Death Recovery
+- **Steps:**
+  1. Launch a game, reach Playing state
+  2. Force process death (adb shell am kill or kill -9)
+  3. Relaunch app
+- **Expected:** onAttached() reads DAO for recoveryState. App transits Closed→Opening→Degraded/RecoveryRequired. Profile name restored. RecoveryOverlay available for user to resume.
+- **Edge case:** No prior session → normal Closed start. Schema migration v1→v2 works in test DAO.
+
+### Check 4: Game-Switching Isolation
+- **Steps:**
+  1. Launch Game A, reach Playing state
+  2. Launch Game B while Game A is active
+  3. Verify Game A is settled, Game B activates
+- **Expected:** Old session settles (Playing→Capturing→delay→Playing→Closing→Closed). Epoch increments. New game activates with fresh profile. No cross-game bridge leakage. Late callbacks from Game A do not mutate Game B state.
+- **Edge case:** Switching from Degraded/RecoveryRequired state triggers requestClosing() on old session.
+
+### Check 5: assembleDebug Regression
+- **Steps:** Run ./gradlew :app:assembleDebug --no-daemon
+- **Expected:** BUILD SUCCESSFUL, 0 errors, 0 warnings from S04 changes.

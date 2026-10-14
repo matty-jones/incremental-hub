@@ -1,0 +1,20 @@
+{
+  "id": "cdeb6869-74d0-4171-a887-5cb283e855c8",
+  "runtime": "bash",
+  "purpose": "Read S03 full summary",
+  "script_chars": 40,
+  "started_at": "2026-10-13T23:47:03.025Z",
+  "finished_at": "2026-10-13T23:47:03.050Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 25,
+  "stdout_bytes": 5051,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/cdeb6869-74d0-4171-a887-5cb283e855c8.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/cdeb6869-74d0-4171-a887-5cb283e855c8.stderr"
+}

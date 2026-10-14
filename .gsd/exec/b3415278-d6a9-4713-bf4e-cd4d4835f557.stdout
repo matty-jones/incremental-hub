@@ -1,0 +1,30 @@
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:kspDebugUnitTestKotlin UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/test/java/com/example/hub/games/GameDefinitionValidatorTest.kt:108:16 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.lang.ClassLoader?'.
+w: file:///home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/src/test/java/com/example/hub/games/GameRegistryTest.kt:187:16 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.lang.ClassLoader?'.
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> A build operation failed.
+      Could not write XML test results for com.example.hub.games.GameRegistryTest to file /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameRegistryTest.xml.
+   > Could not write XML test results for com.example.hub.games.GameRegistryTest to file /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/test-results/testDebugUnitTest/TEST-com.example.hub.games.GameRegistryTest.xml.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 16s
+25 actionable tasks: 3 executed, 22 up-to-date

@@ -1,0 +1,20 @@
+{
+  "id": "92de9800-61c5-4101-b3ee-3f043ea604b0",
+  "runtime": "bash",
+  "purpose": "Check unit test results",
+  "script_chars": 100,
+  "started_at": "2026-10-13T23:16:57.145Z",
+  "finished_at": "2026-10-13T23:17:02.481Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 5336,
+  "stdout_bytes": 23,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/92de9800-61c5-4101-b3ee-3f043ea604b0.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/92de9800-61c5-4101-b3ee-3f043ea604b0.stderr"
+}

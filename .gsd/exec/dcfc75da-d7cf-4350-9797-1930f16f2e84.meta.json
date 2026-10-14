@@ -1,0 +1,20 @@
+{
+  "id": "dcfc75da-d7cf-4350-9797-1930f16f2e84",
+  "runtime": "bash",
+  "purpose": "Compute test source sha256",
+  "script_chars": 79,
+  "started_at": "2026-10-13T23:49:27.685Z",
+  "finished_at": "2026-10-13T23:49:27.740Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 55,
+  "stdout_bytes": 68,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/dcfc75da-d7cf-4350-9797-1930f16f2e84.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/dcfc75da-d7cf-4350-9797-1930f16f2e84.stderr"
+}

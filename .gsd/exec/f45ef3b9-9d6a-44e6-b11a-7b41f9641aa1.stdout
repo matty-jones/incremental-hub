@@ -1,0 +1,20 @@
+> Task :app:mergeExtDexDebug
+> Task :app:compileDebugJavaWithJavac
+> Task :app:dexBuilderDebug FAILED
+w: Detected multiple Kotlin daemon sessions at 
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:dexBuilderDebug'.
+> Cannot access output property 'projectOutputs.dex' of task ':app:dexBuilderDebug'. Accessing unreadable inputs or outputs is not supported. Declare the task as untracked by using Task.doNotTrackState(). For more information, please refer to https://docs.gradle.org/8.9/userguide/incremental_build.html#sec:disable-state-tracking in the Gradle documentation.
+   > java.nio.file.NoSuchFileException: /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/project_dex_archive/debug/dexBuilderDebug/out/com/example/hub/games/Fe000000Adapter$verifyLoaded$writeOk$wv$1.dex
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 24s
+32 actionable tasks: 31 executed, 1 up-to-date

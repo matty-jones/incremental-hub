@@ -1,0 +1,20 @@
+{
+  "id": "8cb7f922-8039-4fbc-a4cf-f8f7c0bf563b",
+  "runtime": "bash",
+  "purpose": "Build debug APK to check for compilation errors after fixing SDK path",
+  "script_chars": 45,
+  "started_at": "2026-10-09T17:04:32.903Z",
+  "finished_at": "2026-10-09T17:04:44.254Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 11351,
+  "stdout_bytes": 5886,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/8cb7f922-8039-4fbc-a4cf-f8f7c0bf563b.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/8cb7f922-8039-4fbc-a4cf-f8f7c0bf563b.stderr"
+}

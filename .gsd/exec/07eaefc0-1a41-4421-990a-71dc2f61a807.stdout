@@ -1,0 +1,14 @@
+# Decisions Register
+
+<!-- Append-only. Never edit or remove existing rows.
+     To reverse a decision, add a new row that supersedes it.
+     Read this file at the start of any planning or research phase. -->
+
+| # | When | Scope | Decision | Choice | Rationale | Revisable? | Made By |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| D001 |  | M001 | SessionController architecture | SessionController as sole owner of session lifecycle via sealed state machine with nine states | Single ownership prevents race conditions, illegal transitions, and cross-game leakage. Compose callbacks request actions from SessionController rather than mutating state independently. | Yes — if runtime evidence shows state machine complexity is unnecessary | agent |
+| D002 |  | M001 | WebView lifecycle ownership | AndroidView host outside transient Compose branches; Activity-bound WebView not retained in ViewModel; explicit disposal owned by session lifecycle | Spec explicitly prohibits storing Activity-bound WebView in long-lived ViewModel. AndroidView with remember/DisposableEffect provides stable identity across recomposition. | No | agent |
+| D003 |  | M001 | Room persistence scope | Minimal GameInstance schema only: game identity, profile/session identity, last-played/resume metadata. No archive/vault/history schemas. | Spec explicitly limits persistence to Playable Hub scope. Adding broader schemas now would inflate scope without immediate need. | Yes — if later milestone requires migration path | agent |
+| D004 |  | M001 | Capture cadence implementation | Lifecycle-owned coroutine on 60-second cadence; no WorkManager for foreground cadence | Spec explicitly prohibits WorkManager for foreground cadence. Lifecycle-owned coroutine cancels cleanly when session closes or changes games. | No | agent |
+| D005 |  | M001 | Bridge validation approach | Origin-restricted WebMessageListener with navigation epoch tracking; late callbacks rejected | Spec requires origin restriction and epoch-based validation. Native addJavascriptInterface is forbidden per SPEC.md section 7.3. | No | agent |
+| D006 |  | M001 | Seven menu actions | Resume, Snapshot now, Checkpoint, Vault, Reload, Display, Return to hub — exactly as specified in SPEC.md section 4.2 | Spec requires all seven actions exactly as specified. No substitutes or omissions. | No | agent |

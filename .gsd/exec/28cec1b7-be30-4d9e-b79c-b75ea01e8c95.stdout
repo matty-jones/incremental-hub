@@ -1,0 +1,20 @@
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugJavaResource
+> Task :app:mergeExtDexDebug
+> Task :app:packageDebug FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:packageDebug'.
+> A failure occurred while executing com.android.build.gradle.tasks.PackageAndroidArtifact$IncrementalSplitterRunnable
+   > java.lang.RuntimeException: java.nio.file.NoSuchFileException: /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/dex/debug/mergeExtDexDebug/classes.dex
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 30s
+37 actionable tasks: 9 executed, 28 up-to-date

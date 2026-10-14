@@ -1,0 +1,20 @@
+{
+  "id": "9cf82887-50a4-40db-af6f-5e999d4c651a",
+  "runtime": "bash",
+  "purpose": "Force clean test run to verify all tests pass",
+  "script_chars": 115,
+  "started_at": "2026-10-08T21:12:28.854Z",
+  "finished_at": "2026-10-08T21:12:36.579Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 7725,
+  "stdout_bytes": 2337,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9cf82887-50a4-40db-af6f-5e999d4c651a.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9cf82887-50a4-40db-af6f-5e999d4c651a.stderr"
+}

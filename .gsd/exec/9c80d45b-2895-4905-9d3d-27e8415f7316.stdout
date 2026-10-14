@@ -1,0 +1,15 @@
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> Cannot access input property 'javaSources' of task ':app:compileDebugKotlin'. Accessing unreadable inputs or outputs is not supported. Declare the task as untracked by using Task.doNotTrackState(). For more information, please refer to https://docs.gradle.org/8.9/userguide/incremental_build.html#sec:disable-state-tracking in the Gradle documentation.
+   > Failed to normalize content of '/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/generated/ksp/debug/java/com/example/hub/database/GameInstanceDao_Impl.java'.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 24s
+30 actionable tasks: 3 executed, 27 up-to-date

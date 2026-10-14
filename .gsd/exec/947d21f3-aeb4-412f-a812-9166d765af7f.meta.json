@@ -1,0 +1,20 @@
+{
+  "id": "947d21f3-aeb4-412f-a812-9166d765af7f",
+  "runtime": "bash",
+  "purpose": "Clean build and re-run all unit tests",
+  "script_chars": 66,
+  "started_at": "2026-10-09T18:59:53.150Z",
+  "finished_at": "2026-10-09T19:00:04.942Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 11792,
+  "stdout_bytes": 1574,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/947d21f3-aeb4-412f-a812-9166d765af7f.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/947d21f3-aeb4-412f-a812-9166d765af7f.stderr"
+}

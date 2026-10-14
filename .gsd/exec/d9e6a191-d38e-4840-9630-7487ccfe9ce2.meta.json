@@ -1,0 +1,20 @@
+{
+  "id": "d9e6a191-d38e-4840-9630-7487ccfe9ce2",
+  "runtime": "bash",
+  "purpose": "Parse test counts properly",
+  "script_chars": 286,
+  "started_at": "2026-10-13T22:52:43.537Z",
+  "finished_at": "2026-10-13T22:52:43.641Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 104,
+  "stdout_bytes": 679,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/d9e6a191-d38e-4840-9630-7487ccfe9ce2.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/d9e6a191-d38e-4840-9630-7487ccfe9ce2.stderr"
+}

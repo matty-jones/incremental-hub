@@ -1,0 +1,20 @@
+{
+  "id": "1af963e3-8109-4bbb-b960-ca2ef5fd8b4d",
+  "runtime": "bash",
+  "purpose": "List all test class names",
+  "script_chars": 127,
+  "started_at": "2026-10-13T22:52:29.741Z",
+  "finished_at": "2026-10-13T22:52:29.750Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 9,
+  "stdout_bytes": 1639,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/1af963e3-8109-4bbb-b960-ca2ef5fd8b4d.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/1af963e3-8109-4bbb-b960-ca2ef5fd8b4d.stderr"
+}

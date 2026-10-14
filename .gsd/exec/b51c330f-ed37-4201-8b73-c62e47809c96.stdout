@@ -1,0 +1,30 @@
+> Task :app:parseDebugLocalResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+A problem was found with the configuration of task ':app:processDebugResources' (type 'LinkApplicationAndroidResourcesTask').
+  - In plugin 'com.android.internal.version-check' type 'com.android.build.gradle.internal.res.LinkApplicationAndroidResourcesTask' property 'localResourcesFile' specifies file '/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/app/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt' which doesn't exist.
+    
+    Reason: An input file was expected to be present but it doesn't exist.
+    
+    Possible solutions:
+      1. Make sure the file exists before the task is called.
+      2. Make sure that the task which produces the file is declared as an input.
+    
+    For more information, please refer to https://docs.gradle.org/8.9/userguide/validation_problems.html#input_file_does_not_exist in the Gradle documentation.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 11s
+14 actionable tasks: 8 executed, 6 up-to-date

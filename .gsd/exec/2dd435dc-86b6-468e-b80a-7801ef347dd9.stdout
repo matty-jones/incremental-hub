@@ -1,0 +1,30 @@
+package com.example.hub.games
+
+import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.Base64
+import java.util.zip.GZIPOutputStream
+
+/**
+ * Unit tests for Fe000000Adapter format logic.
+ * Tests marker stripping, gzip round-trip, and validate without a WebView.
+ */
+class Fe000000AdapterTest {
+
+    private val adapter = Fe000000Adapter()
+
+    @Test
+    fun `capture payload round-trip preserves data`() = runBlocking {
+        val saveData = JSONObject().apply {
+            put("player", JSONObject().apply {
+                put("money", 5000)
+                put("level", 12)
+            })
+            put("version", "2.1.0")

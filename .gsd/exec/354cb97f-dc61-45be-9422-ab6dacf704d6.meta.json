@@ -1,0 +1,20 @@
+{
+  "id": "354cb97f-dc61-45be-9422-ab6dacf704d6",
+  "runtime": "bash",
+  "purpose": "Verify assembleDebug after daemon restart",
+  "script_chars": 45,
+  "started_at": "2026-10-12T16:20:13.771Z",
+  "finished_at": "2026-10-12T16:20:24.346Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 10575,
+  "stdout_bytes": 2892,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/354cb97f-dc61-45be-9422-ab6dacf704d6.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/354cb97f-dc61-45be-9422-ab6dacf704d6.stderr"
+}

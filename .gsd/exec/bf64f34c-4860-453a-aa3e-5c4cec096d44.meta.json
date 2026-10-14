@@ -1,0 +1,20 @@
+{
+  "id": "bf64f34c-4860-453a-aa3e-5c4cec096d44",
+  "runtime": "bash",
+  "purpose": "Read T02 plan",
+  "script_chars": 69,
+  "started_at": "2026-10-08T21:11:24.091Z",
+  "finished_at": "2026-10-08T21:11:24.105Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 14,
+  "stdout_bytes": 2511,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/bf64f34c-4860-453a-aa3e-5c4cec096d44.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/bf64f34c-4860-453a-aa3e-5c4cec096d44.stderr"
+}

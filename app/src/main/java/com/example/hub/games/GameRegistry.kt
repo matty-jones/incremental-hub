@@ -1,0 +1,157 @@
+package com.example.hub.games
+
+import android.content.Context
+import android.util.Log
+import org.json.JSONObject
+
+/**
+ * Enumerates, validates, and resolves game definitions from the app's assets.
+ *
+ * Reads every `*.json` file under `assets/games/`, validates each with
+ * [GameDefinitionValidator], and caches the results. Exposes:
+ * - [getGames] — ordered list of resolved [RegisteredGame]s
+ * - [getGame] — lookup by [gameId]
+ * - [allDefinitions] — all definitions with their validation status (for diagnostics)
+ *
+ * Ordering is deterministic:
+ * - When the DAO has zero rows, games are sorted alphabetically by [RegisteredGame.gameId].
+ * - When the DAO has rows, games with [RegisteredGame.lastPlayedAtMillis] non-null are
+ *   sorted DESC by that value; unresolved games follow in alphabetical order.
+ *
+ * **Thread safety:** The cache is built lazily on the first call to [getGames].
+ * Subsequent calls return the cached list. The cache is not refreshed — call
+ * [reload] to re-scan assets.
+ *
+ * @param context Android [Context] used to open `assets/games/`.
+ */
+open class GameRegistry(private val context: Context) {
+
+    companion object {
+        private const val TAG = "GameRegistry"
+        private const val GAMES_ASSET_DIR = "games"
+    }
+
+    /** Lazily computed, cached list of all definitions with their validation status. */
+    private var _definitions: List<DefinitionWithStatus>? = null
+    private val definitions: List<DefinitionWithStatus> get() = _definitions ?: loadDefinitions().also { _definitions = it }
+
+    /** Lazily computed, cached list of resolved (valid) games. */
+    private var _resolvedGames: List<RegisteredGame>? = null
+    private val resolvedGames: List<RegisteredGame> get() = _resolvedGames ?: buildResolvedGames(definitions).also { _resolvedGames = it }
+
+    /**
+     * Inject pre-loaded JSON strings for testing. Call before [getGames] to override
+     * the default asset-based loading.
+     */
+    fun injectDefinitions(jsons: List<String>) {
+        _definitions = jsons.map { json ->
+            val validator = GameDefinitionValidator()
+            val validation = validator.validate(json)
+            val resolved = if (validation.valid) parseRegisteredGameFromJson(json) else null
+            DefinitionWithStatus(json, validation, resolved)
+        }
+        _resolvedGames = null
+    }
+
+    /**
+     * Returns the list of all game definitions paired with their validation status.
+     * Valid and invalid definitions are both included for diagnostic purposes.
+     */
+    open val allDefinitions: List<DefinitionWithStatus> get() = definitions
+
+    /**
+     * Returns the list of resolved (valid) games, ordered deterministically.
+     *
+     * When [com.example.hub.database.GameInstance] DAO data exists, games with
+     * a non-null [RegisteredGame.lastPlayedAtMillis] are sorted DESC by that value.
+     * Games without last-played data follow in alphabetical order by [gameId].
+     *
+     * @param lastPlayedByGameId map from gameId to last-played epoch millis; can be null
+     *   when the DAO is unavailable (e.g. in unit tests without a Room database).
+     */
+    fun getGames(lastPlayedByGameId: Map<String, Long>? = null): List<RegisteredGame> {
+        val base = resolvedGames
+        if (lastPlayedByGameId == null || lastPlayedByGameId.isEmpty()) {
+            return base.sortedBy { it.gameId }
+        }
+        val withHistory = base.filter { lastPlayedByGameId[it.gameId] != null }
+            .sortedByDescending { lastPlayedByGameId[it.gameId]!! }
+        val withoutHistory = base.filter { lastPlayedByGameId[it.gameId] == null }
+            .sortedBy { it.gameId }
+        return withHistory + withoutHistory
+    }
+
+    /**
+     * Returns the [RegisteredGame] for [gameId], or null if not found or invalid.
+     */
+    open fun getGame(gameId: String): RegisteredGame? =
+        resolvedGames.firstOrNull { it.gameId == gameId }
+
+    /**
+     * Reloads all definitions from assets. Call after assets change (rare).
+     */
+    fun reload() {
+        _definitions = null
+        _resolvedGames = null
+    }
+
+    // -----------------------------------------------------------------
+    // Internal
+    // -----------------------------------------------------------------
+
+    private fun loadDefinitions(): List<DefinitionWithStatus> {
+        return runCatching {
+            context.assets.list(GAMES_ASSET_DIR)?.filter { it.endsWith(".json") }
+                ?.map { fileName ->
+                    val json = context.assets.open("$GAMES_ASSET_DIR/$fileName")
+                        .bufferedReader().use { it.readText() }
+                    loadSingleDefinition(fileName, json)
+                } ?: emptyList()
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to load game definitions from assets/$GAMES_ASSET_DIR", e)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun loadSingleDefinition(fileName: String, json: String): DefinitionWithStatus {
+        val validator = GameDefinitionValidator()
+        val validation = validator.validate(json)
+        val resolved = if (validation.valid) parseRegisteredGame(json) else null
+        return DefinitionWithStatus(
+            definition = json,
+            validationResult = validation,
+            resolved = resolved,
+        )
+    }
+
+    private fun parseRegisteredGame(json: String): RegisteredGame {
+        val root = JSONObject(json)
+        val gameId = root.getString("gameId")
+        val displayName = root.getString("displayName")
+        val launchUrl = root.getString("launchUrl")
+        val adapterId = root.getString("adapterId")
+        val displayDefaults = parseDisplayDefaults(root.optJSONObject("displayDefaults"))
+        return RegisteredGame(
+            gameId = gameId,
+            displayName = displayName,
+            launchUrl = launchUrl,
+            adapterId = adapterId,
+            displayDefaults = displayDefaults,
+        )
+    }
+
+    fun parseRegisteredGameFromJson(json: String): RegisteredGame = parseRegisteredGame(json)
+
+    private fun parseDisplayDefaults(obj: JSONObject?): DisplayDefaults {
+        if (obj == null) return DisplayDefaults()
+        return DisplayDefaults(
+            showIcon = obj.optBoolean("showIcon", false),
+            iconResId = if (obj.has("iconResId")) obj.getString("iconResId") else null,
+            colorPrimary = if (obj.has("colorPrimary")) obj.getString("colorPrimary") else null,
+            colorSecondary = if (obj.has("colorSecondary")) obj.getString("colorSecondary") else null,
+            badgeText = if (obj.has("badgeText")) obj.getString("badgeText") else null,
+        )
+    }
+
+    protected fun buildResolvedGames(definitions: List<DefinitionWithStatus>): List<RegisteredGame> =
+        definitions.mapNotNull { it.resolved }
+}

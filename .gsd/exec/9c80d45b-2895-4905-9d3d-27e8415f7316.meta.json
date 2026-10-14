@@ -1,0 +1,20 @@
+{
+  "id": "9c80d45b-2895-4905-9d3d-27e8415f7316",
+  "runtime": "bash",
+  "purpose": "Clean rebuild to verify S02 deliverables",
+  "script_chars": 155,
+  "started_at": "2026-10-09T19:06:28.893Z",
+  "finished_at": "2026-10-09T19:06:53.602Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 24709,
+  "stdout_bytes": 936,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9c80d45b-2895-4905-9d3d-27e8415f7316.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/9c80d45b-2895-4905-9d3d-27e8415f7316.stderr"
+}

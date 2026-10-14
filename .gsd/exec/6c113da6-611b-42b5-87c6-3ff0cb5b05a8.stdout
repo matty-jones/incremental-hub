@@ -1,0 +1,16 @@
+SessionControllerTest > activeGameIdTracksCurrentGame FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > open_withUnknownGame_transitionsToRecoveryRequired FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestRecoveryFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > bindProfileAndNavigate_resolvesGame FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestDegradedFromClosed_isRejected FAILED
+    java.lang.IllegalStateException at SessionControllerTest.kt:40
+
+SessionControllerTest > requestForeground_restoresCapturingToPlaying FAILED

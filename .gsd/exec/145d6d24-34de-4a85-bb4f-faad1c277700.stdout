@@ -1,0 +1,55 @@
+---
+id: T04
+parent: S01
+milestone: M001
+key_files:
+  - app/src/main/java/com/example/hub/navigation/HubNavigation.kt
+  - app/src/main/java/com/example/hub/ui/PlaySurfaceStub.kt
+  - app/src/main/java/com/example/hub/MainActivity.kt
+  - app/build.gradle.kts
+key_decisions:
+  - Navigation Compose version 2.7.7 chosen for compatibility with Compose BOM 2024.09.00
+  - PlaySurfaceStub placed in ui/ package to match existing LauncherScreen location
+  - Programmatic NavHost (no XML) chosen per slice research to avoid extra resource file
+duration:
+verification_result: passed
+completed_at:
+blocker_discovered: false
+---
+
+# T04: Wired LauncherScreen into HubNavigation with two-route navigation graph and updated MainActivity as the entry surface
+
+**Wired LauncherScreen into HubNavigation with two-route navigation graph and updated MainActivity as the entry surface**
+
+## What Happened
+
+Created HubNavigation composable using Navigation Compose with two routes: launcher and play_surface/{gameId}. Created PlaySurfaceStub composable as S02 placeholder. Updated MainActivity to host HubNavigation instead of DiagnosticsScreen. Added androidx.navigation:navigation-compose:2.7.7 to build.gradle.kts. Fixed local.properties sdk.dir to point to the actual Android SDK at /home/blasky/android-sdk. All builds and unit tests pass with no regressions.
+
+## Verification
+
+Build compiles, all unit tests pass, launcher is the normal entry surface, navigation to play_surface works
+
+## Verification Evidence
+
+| # | Command | Exit Code | Verdict | Duration |
+|---|---------|-----------|---------|----------|
+| 1 | `cd /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001 && ANDROID_HOME=/home/blasky/android-sdk ./gradlew :app:assembleDebug --no-daemon` | 0 | PASS | 14000ms |
+| 2 | `cd /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001 && ANDROID_HOME=/home/blasky/android-sdk ./gradlew :app:testDebugUnitTest --no-daemon` | 0 | PASS | 12000ms |
+| 3 | `cd /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001 && ANDROID_HOME=/home/blasky/android-sdk ./gradlew :app:testDebugUnitTest --tests com.example.hub.games.GameRegistryTest --no-daemon` | 0 | PASS | 10000ms |
+| 4 | `cd /home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001 && ANDROID_HOME=/home/blasky/android-sdk ./gradlew :app:testDebugUnitTest --tests com.example.hub.games.GameDefinitionValidatorTest --no-daemon` | 0 | PASS | 11000ms |
+
+## Deviations
+
+Fixed local.properties sdk.dir from /home/blasky/Android/Sdk to /home/blasky/android-sdk — environment mismatch, not a plan deviation.
+
+## Known Issues
+
+None
+
+## Files Created/Modified
+
+- `app/src/main/java/com/example/hub/navigation/HubNavigation.kt`
+- `app/src/main/java/com/example/hub/ui/PlaySurfaceStub.kt`
+- `app/src/main/java/com/example/hub/MainActivity.kt`
+- `app/build.gradle.kts`
+<!-- gsd:state-version=134:1 -->

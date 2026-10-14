@@ -1,0 +1,20 @@
+{
+  "id": "77e4cbe5-f712-4811-b256-4754c5afe87f",
+  "runtime": "bash",
+  "purpose": "Rebuild after fixing compilation errors",
+  "script_chars": 45,
+  "started_at": "2026-10-09T17:06:56.226Z",
+  "finished_at": "2026-10-09T17:07:02.042Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 5816,
+  "stdout_bytes": 5361,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/77e4cbe5-f712-4811-b256-4754c5afe87f.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/77e4cbe5-f712-4811-b256-4754c5afe87f.stderr"
+}

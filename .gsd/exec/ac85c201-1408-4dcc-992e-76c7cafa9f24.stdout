@@ -1,0 +1,3 @@
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:testDebugUnitTest UP-TO-DATE
+BUILD SUCCESSFUL in 7s

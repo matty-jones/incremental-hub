@@ -1,0 +1,20 @@
+{
+  "id": "dbf110a4-6b44-4c24-9b95-a3c0b8ceeb47",
+  "runtime": "bash",
+  "purpose": "Get detailed exception output",
+  "script_chars": 142,
+  "started_at": "2026-10-09T21:57:00.537Z",
+  "finished_at": "2026-10-09T21:57:22.737Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 22200,
+  "stdout_bytes": 5470,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/dbf110a4-6b44-4c24-9b95-a3c0b8ceeb47.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/dbf110a4-6b44-4c24-9b95-a3c0b8ceeb47.stderr"
+}

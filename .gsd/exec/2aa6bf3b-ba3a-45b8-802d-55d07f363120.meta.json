@@ -1,0 +1,20 @@
+{
+  "id": "2aa6bf3b-ba3a-45b8-802d-55d07f363120",
+  "runtime": "bash",
+  "purpose": "Find existing game infrastructure patterns",
+  "script_chars": 146,
+  "started_at": "2026-10-07T22:14:28.067Z",
+  "finished_at": "2026-10-07T22:14:28.074Z",
+  "exit_code": 2,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 7,
+  "stdout_bytes": 0,
+  "stderr_bytes": 31,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/2aa6bf3b-ba3a-45b8-802d-55d07f363120.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/2aa6bf3b-ba3a-45b8-802d-55d07f363120.stderr"
+}

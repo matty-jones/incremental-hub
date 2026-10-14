@@ -1,0 +1,20 @@
+{
+  "id": "1f7d32b8-8c11-4b56-be3b-5d101e447606",
+  "runtime": "bash",
+  "purpose": "Read S03 verification JSONs",
+  "script_chars": 262,
+  "started_at": "2026-10-13T23:21:37.720Z",
+  "finished_at": "2026-10-13T23:21:37.752Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "aborted": false,
+  "force_resolved": false,
+  "duration_ms": 32,
+  "stdout_bytes": 1588,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/1f7d32b8-8c11-4b56-be3b-5d101e447606.stdout",
+  "stderr_path": "/home/blasky/Projects/incremental-hub-restored/.gsd-worktrees/M001/.gsd/exec/1f7d32b8-8c11-4b56-be3b-5d101e447606.stderr"
+}

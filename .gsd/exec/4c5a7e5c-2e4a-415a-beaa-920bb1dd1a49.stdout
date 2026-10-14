@@ -1,0 +1,8 @@
+ .gsd/KNOWLEDGE.md                      |   1 +
+ .gsd/REQUIREMENTS.md                   | 101 +++++++++++++++++----------------
+ .gsd/graphs/graph.json                 |  75 +++++++++++++++++++++++-
+ .gsd/hook-state.json                   |   2 +-
+ .gsd/phases/01-m001/01-04-PLAN.md      |   4 +-
+ .gsd/phases/01-m001/01-ROADMAP.md      |   4 +-
+ .gsd/phases/01-m001/S04-T04-SUMMARY.md |   2 +-
+ 7 files changed, 132 insertions(+), 57 deletions(-)

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": 1,
+  "gameId": "fe000000",
+  "displayName": "FE000000",
+  "sourceUrl": "https://dan-simon.github.io",
+  "launchUrl": "https://dan-simon.github.io/misc/fe000000/",
+  "navigationRules": {
+    "maxDepth": 1,
+    "allowSameOriginNavigation": true,
+    "blockCrossOriginNavigation": false
+  },
+  "storageContext": {
+    "origin": "https://dan-simon.github.io",
+    "type": "top-level",
+    "keys": [
+      {
+        "name": "fe000000-save",
+        "format": "gzip-base64-with-markers",
+        "freshness": "persisted-only",
+        "description": "Primary player save state, gzip-compressed base64-encoded JSON wrapped in FE000000SaveStart/FE000000SaveEnd markers"
+      }
+    ]
+  },
+  "adapterId": "fe000000-adapter",
+  "adapterVersion": "1.0.0",
+  "saveCoverage": {
+    "mode": "persisted-only",
+    "autosaveIntervalMs": null,
+    "explicitSaveRequired": true,
+    "keys": ["fe000000-save"],
+    "coverage": "complete"
+  },
+  "displayDefaults": {
+    "showIcon": true,
+    "iconResId": "ic_fe000000",
+    "colorPrimary": "#4A148C",
+    "colorSecondary": "#311B92",
+    "badgeText": "F"
+  },
+  "versionProbe": {
+    "enabled": true,
+    "minVersion": null,
+    "field": null,
+    "javascript": "return typeof saveData !== 'undefined' ? saveData : null;"
+  },
+  "compatibility": {
+    "minSdkVersion": 30,
+    "features": ["MULTI_PROFILE", "WEB_MESSAGE_LISTENER"],
+    "notes": "Requires Android 13+ for disposable profile support. Gzip decompression handled by standard java.util.zip.GzipInputStream."
+  },
+  "resourceObservations": [
+    {
+      "type": "localStorage-key",
+      "url": "https://dan-simon.github.io/misc/fe000000/",
+      "observed": "Key fe000000-save contains FE000000SaveStart + gzip(base64) + FE000000SaveEnd"
+    },
+    {
+      "type": "save-button",
+      "url": "https://dan-simon.github.io/misc/fe000000/",
+      "observed": "Explicit Import/Load UI button; no automatic autosave detected"
+    }
+  ]
+}

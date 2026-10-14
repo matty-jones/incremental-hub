@@ -1,0 +1,55 @@
+# S03: SessionController Core — UAT
+
+**Milestone:** M001
+**Written:** 2026-10-10T21:21:11.595Z
+
+# S03: SessionController Core — UAT
+
+## Preconditions
+- App builds and installs (assembleDebug passes)
+- At least one game registered in GameRegistry
+- Device has Android SDK with WebView support
+
+## UAT Type
+- UAT mode: artifact-driven
+
+## Checks
+
+### C01: Session transitions unit tested
+- **Mode:** artifact
+- **Check:** SessionControllerTest has ≥15 tests covering valid transitions, illegal transitions, and identity tracking
+- **Evidence:** SessionControllerTest.kt contains 37 @Test annotations covering: open/close lifecycle, requestCapture/requestBackground/requestForeground/requestRestore/requestDegraded/requestRecovery/requestClosing, illegal transitions from every state, navigationEpoch increment, profile identity tracking, bridge validation integration
+
+### C02: Bridge validation rejects all five failure modes
+- **Mode:** artifact
+- **Check:** BridgeValidatorTest has ≥10 tests covering all rejection modes
+- **Evidence:** BridgeValidatorTest.kt contains 25 @Test annotations covering: valid message acceptance, ORIGIN_MISMATCH, EPOCH_STALE, REQUEST_UNCORRELATED, PAYLOAD_TOO_LARGE, SCHEMA_UNSUPPORTED, priority ordering (origin checked before epoch)
+
+### C03: PlaySurface observes controller state
+- **Mode:** artifact
+- **Check:** PlaySurface uses collectAsState on controller.state; no local remember state
+- **Evidence:** PlaySurface.kt line 35: `val state = controller.state.collectAsState().value`; menu callbacks route through controller.requestForeground() and controller.requestClosing()
+
+### C04: SessionController created at NavHost scope
+- **Mode:** artifact
+- **Check:** HubNavigation creates SessionController via remember(lifecycleOwner, registry, dao) — not inside composable remember
+- **Evidence:** HubNavigation.kt line 47: `val controller = remember(lifecycleOwner, registry, dao) { SessionController(...) }`
+
+### C05: No regressions in S01/S02 tests
+- **Mode:** runtime
+- **Check:** Full unit test suite passes
+- **Evidence:** `./gradlew :app:testDebugUnitTest --no-daemon` BUILD SUCCESSFUL; `./gradlew :app:assembleDebug --no-daemon` BUILD SUCCESSFUL
+
+### C06: Stateless bridge validator (JVM-only)
+- **Mode:** artifact
+- **Check:** BridgeValidator has no Android dependencies; runs on JVM
+- **Evidence:** BridgeValidator.kt imports only kotlinx.coroutines and kotlin standard library; no android.* imports
+
+## Edge Cases
+- Illegal transition from Playing directly to Closed (rejected)
+- Stale epoch message from old session (rejected as EPOCH_STALE)
+- Uncorrelated request ID (rejected as REQUEST_UNCORRELATED)
+- Oversized payload (rejected as PAYLOAD_TOO_LARGE)
+- Unknown schema (rejected as SCHEMA_UNSUPPORTED)
+- SessionController lifecycle events (ON_PAUSE does not auto-transition)
+<!-- gsd:state-version=128:1 -->
