@@ -316,4 +316,4 @@ The repository has validated feasibility implementation (profile isolation, boot
 9. **Capture cadence testing**: The spec says "Tests should use deterministic clocks/triggers where possible rather than sleeping for real 60-second intervals." Test hooks will use a configurable cadence or test clock.
 
 10. **Validated baseline preservation**: The spec says "preserve the validated feasibility baseline foundation." Existing spike activities (BootstrapActivity, IntegratedSpikeActivity, GameQualificationActivity) will be preserved but not modified unless required.
-<!-- gsd:state-version=191:1 -->
+<!-- gsd:state-version=204:1 -->

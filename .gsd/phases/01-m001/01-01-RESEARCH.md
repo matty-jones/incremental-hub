@@ -237,4 +237,4 @@ If GameRegistry works, all downstream (launcher UI, DAO integration, navigation)
 - `IntegratedSpike.kt` — existing
 - `assets/games/*.json` — existing definitions
 - All existing tests — preserved, not regressed
-<!-- gsd:state-version=53:1 -->
+<!-- gsd:state-version=204:1 -->

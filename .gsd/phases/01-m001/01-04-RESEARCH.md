@@ -336,4 +336,4 @@ Closed → Opening → resolve game → create/retrieve profile
 ## Conclusion
 
 S04 is a focused resilience slice. The state machine, bridge validation, and WebView host are solid from S01–S03. S04 adds operational capabilities on top: periodic capture, bootstrap-verified opening, crash detection, process recovery, and safe switching. The work is well-scoped with clear boundaries. The highest risk is bootstrap integration in the test environment; the mitigation is a stub detector. All five requirements can be delivered with targeted modifications to 5 production files and ~31 new tests.
-<!-- gsd:state-version=191:1 -->
+<!-- gsd:state-version=204:1 -->

@@ -89,4 +89,4 @@ Consumes from S03:
 - SessionController → crash handling integration
 - SessionController → process recovery integration
 - SessionController → game switching orchestration
-<!-- gsd:state-version=191:1 -->
+<!-- gsd:state-version=204:1 -->

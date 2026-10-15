@@ -268,4 +268,4 @@ The controller must:
 - `GameInstanceDao.kt` — existing, preserved
 - `GameDefinitionValidator.kt` — existing, preserved
 - All existing tests — preserved, not regressed
-<!-- gsd:state-version=128:1 -->
+<!-- gsd:state-version=204:1 -->

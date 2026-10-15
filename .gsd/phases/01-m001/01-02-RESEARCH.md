@@ -322,4 +322,4 @@ Check if `androidx.window` is already available or needs addition to build.gradl
 - GameQualifier.kt (validated profile binding pattern)
 - AndroidX WebKit docs: ProfileStore, WebViewCompat.setProfile
 - Android Compose docs: AndroidView, BackHandler, WindowInsets
-<!-- gsd:state-version=82:1 -->
+<!-- gsd:state-version=204:1 -->
