@@ -342,9 +342,9 @@ class GameQualifier(private val context: Context) {
      */
     private fun buildReadSaveJs(adapter: GameAdapter): String =
         when (adapter) {
-            is SharkIncrementalAdapter -> "return localStorage.getItem('shark_inc_save') || null"
-            is Fe000000Adapter -> "return localStorage.getItem('fe000000-save') || null"
-            else -> "return JSON.stringify(localStorage)"
+            is SharkIncrementalAdapter -> SharkIncrementalAdapter.JS_READ_SAVE
+            is Fe000000Adapter -> Fe000000Adapter.JS_FLUSH_AND_READ
+            else -> "(function(){ return JSON.stringify(localStorage); })()"
         }
 
     /**

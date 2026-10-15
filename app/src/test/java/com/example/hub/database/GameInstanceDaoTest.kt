@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
@@ -167,6 +168,67 @@ class GameInstanceDaoTest {
         val recovered = dao.getActiveWithRecovery()
         assertNotNull(recovered)
         assertEquals("new-game", recovered!!.gameId)
+    }
+
+    @Test
+    fun migration2to3_keepsExistingRowAndAddsCaptureColumns() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "migration-2-3-test"
+        context.deleteDatabase(name)
+        val helper = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(
+            androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(name)
+                .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(2) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            """
+                            CREATE TABLE game_instances (
+                                gameId TEXT NOT NULL PRIMARY KEY,
+                                profile_name TEXT NOT NULL,
+                                session_identity TEXT NOT NULL,
+                                last_played_at_millis INTEGER NOT NULL,
+                                resume_token TEXT,
+                                recovery_state TEXT,
+                                last_capture_at_millis INTEGER NOT NULL
+                            )
+                            """.trimIndent()
+                        )
+                    }
+
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int,
+                    ) = Unit
+                })
+                .build()
+        )
+        val db = helper.writableDatabase
+        db.execSQL(
+            """
+            INSERT INTO game_instances (
+                gameId, profile_name, session_identity, last_played_at_millis,
+                resume_token, recovery_state, last_capture_at_millis
+            ) VALUES ('shark-incremental', 'hub-game-shark-incremental', 'keep-me', 42, 'tok', NULL, 7)
+            """.trimIndent()
+        )
+        HubDatabase.MIGRATION_2_3.migrate(db)
+        val cursor = db.query(
+            """
+            SELECT session_identity, last_capture_at_millis, snapshot_payload,
+                   last_capture_success_at_millis, last_capture_failure_at_millis
+            FROM game_instances WHERE gameId = 'shark-incremental'
+            """.trimIndent()
+        )
+        assertTrue(cursor.moveToFirst())
+        assertEquals("keep-me", cursor.getString(0))
+        assertEquals(7L, cursor.getLong(1))
+        assertTrue(cursor.isNull(2))
+        assertEquals(0L, cursor.getLong(3))
+        assertEquals(0L, cursor.getLong(4))
+        cursor.close()
+        helper.close()
+        context.deleteDatabase(name)
     }
 
     @Test

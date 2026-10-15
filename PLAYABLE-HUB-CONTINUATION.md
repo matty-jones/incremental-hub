@@ -37,6 +37,16 @@ Existing code already proves the critical WebView feasibility assumptions requir
 
 The validated runtime environment is **PixelFold_x64, x86_64, Android API 36, WebView 133.0.6943.137**.
 
+That M001 evidence is the feasibility spike. It is not evidence that the
+production launcher path was already finished. The production path was
+repaired after the source audit in
+`TEMP/incremental_hub_audit_cursor_implementation.md`. Device evidence for
+that repair is in `PROGRESS.md`: both registered games open their real URLs
+with named profiles bound before navigation, validated snapshots survive
+background, activity recreate, and `am force-stop`, and Vault/Display remain
+disabled rather than logging as if they worked. Renderer-process kill and a
+physical hinge change were not reproduced on this emulator image.
+
 ARM64 hardware is **not** an acceptance requirement.
 
 Do not weaken production security or manifest settings merely to simplify ADB/debug testing.

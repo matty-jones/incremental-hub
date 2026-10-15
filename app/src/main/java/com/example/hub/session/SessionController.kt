@@ -1,20 +1,21 @@
 package com.example.hub.session
 
 import android.content.Context
+import android.os.Looper
 import android.util.Log
 import android.webkit.WebView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.webkit.Profile
 import androidx.webkit.ProfileStore
+import com.example.hub.bootstrap.DetectorResult
 import com.example.hub.database.GameInstance
 import com.example.hub.database.GameInstanceDao
-import com.example.hub.bootstrap.BootstrapDetector
-import com.example.hub.bootstrap.DetectorResult
-import com.example.hub.bootstrap.PreLaunchSnapshot
+import com.example.hub.games.GameAdapter
+import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
+import com.example.hub.games.QualificationResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,29 +27,16 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 
 /**
- * Lifecycle-aware session controller that owns all session state transitions
- * via the nine-state sealed [SessionState] model.
+ * Lifecycle-aware session controller that owns session transitions.
  *
- * Implements [LifecycleEventObserver] so the controller can be attached to
- * an [LifecycleOwner] (typically an Activity) and receive lifecycle events.
- * Per the architecture decision (D001/MEM001), this is intentionally NOT a
- * ViewModel — the spec prohibits storing Activity-bound WebView in a long-lived
- * ViewModel.
- *
- * State transitions are serialized through a mutex so that conflicting
- * operations (e.g., open while closing) are handled deterministically.
- * All non-suspend transition methods dispatch through the controller's
- * [scope] to acquire the mutex safely.
- *
- * @param gameRegistry    Resolves game definitions by [gameId].
- * @param instanceDao     Persists [GameInstance] rows for session identity.
- * @param lifecycleOwner  The owner that drives [onStateChanged] callbacks.
- * @param webViewDestroyer Callback invoked when the WebView must be destroyed.
- *                         Called on close; null means no WebView to destroy.
+ * Opening reaches [SessionState.Playing] only after the real launch URL has
+ * finished loading and the game adapter reports readiness. Capture writes a
+ * validated snapshot or records a failure without replacing the last good one.
  */
 class SessionController(
     private val context: Context,
@@ -59,561 +47,672 @@ class SessionController(
     private val onError: ((String) -> Unit)? = null,
     private val profileStore: ProfileStore = ProfileStore.getInstance(),
     /**
-     * Test hook: when non-null, invoked instead of the real [BootstrapDetector]
-     * during [open]. Allows tests to control the bootstrap outcome without
-     * requiring a real WebView in Robolectric.
+     * Test hook for the bootstrap capability gate. Production leaves this null
+     * and waits for the real document instead of a detector timer.
      */
     internal val bootstrapTest: ((ProfileStore) -> DetectorResult)? = null,
+    /**
+     * When non-null, unit tests complete or fail opening without a live page.
+     * Production leaves this null so [onMainFrameFinished] is required.
+     */
+    internal val documentReadyTest: (suspend (String) -> Boolean)? = null,
+    internal val readinessCheck: (suspend (WebView, GameAdapter) -> Boolean)? = null,
+    internal val restoreCheck: (suspend (WebView, GameAdapter, String) -> Boolean)? = null,
+    internal val captureClient: (suspend (WebView?, GameAdapter) -> String?)? = null,
 ) : LifecycleEventObserver {
 
     companion object {
         private const val TAG = "SessionController"
-        private const val OPENING_TIMEOUT_MS = 2_000L
         private const val CAPTURE_CADENCE_MS = 60_000L
-        private const val CAPTURE_WINDOW_MS = 65_000L
     }
 
-    // -----------------------------------------------------------------
-    // Public StateFlow API
-    // -----------------------------------------------------------------
-
     private val _state = MutableStateFlow<SessionState>(SessionState.Closed)
-    /** Current session state. Observers should use [collectAsState] in Compose. */
     val state: StateFlow<SessionState> = _state.asStateFlow()
 
     private val _activeGameId = MutableStateFlow<String?>(null)
-    /** Active game identifier, null when no session is open. */
     val activeGameId: StateFlow<String?> = _activeGameId.asStateFlow()
 
     private val _activeProfileName = MutableStateFlow<String?>(null)
-    /** Active profile name, null when no session is open. */
     val activeProfileName: StateFlow<String?> = _activeProfileName.asStateFlow()
 
-    private val _navigationEpoch = MutableStateFlow<Int>(0)
-    /**
-     * Navigation epoch — incremented on each successful [open] call.
-     * Used by [BridgeHost] to reject stale messages from old WebViews.
-     */
+    private val _navigationEpoch = MutableStateFlow(0)
     val navigationEpoch: StateFlow<Int> = _navigationEpoch.asStateFlow()
 
-    // -----------------------------------------------------------------
-    // Internal state
-    // -----------------------------------------------------------------
-
-    /** Coroutine scope attached to the lifecycle owner. */
-    private val scope = CoroutineScope(Dispatchers.Main + Job())
-    private val mutex = Mutex()
-
-    /** Lifecycle-owned coroutine that fires a capture cadence every 60 s while in Playing. */
-    private var captureJob: Job? = null
-
-    /**
-     * The currently bound WebView, set by WebViewHost when created.
-     * The controller uses this to destroy the WebView during close.
-     */
-    @Volatile var webView: WebView? = null
-
     private val _activeProfile = MutableStateFlow<Profile?>(null)
-    /** Active profile, null when no session is open. */
     val activeProfile: StateFlow<Profile?> = _activeProfile.asStateFlow()
 
-    /**
-     * Returns true if the controller is currently in an active (non-closed) state.
-     */
-    val isActive: Boolean get() = _state.value !is SessionState.Closed
+    private val _launchUrl = MutableStateFlow<String?>(null)
+    val launchUrl: StateFlow<String?> = _launchUrl.asStateFlow()
 
-    // -----------------------------------------------------------------
-    // Lifecycle
-    // -----------------------------------------------------------------
+    private val _sessionError = MutableStateFlow<String?>(null)
+    val sessionError: StateFlow<String?> = _sessionError.asStateFlow()
+
+    private val _subresourceDiagnostic = MutableStateFlow<String?>(null)
+    val subresourceDiagnostic: StateFlow<String?> = _subresourceDiagnostic.asStateFlow()
+
+    private val _webViewGeneration = MutableStateFlow(0)
+    val webViewGeneration: StateFlow<Int> = _webViewGeneration.asStateFlow()
+
+    private val _reloadEpoch = MutableStateFlow(0)
+    val reloadEpoch: StateFlow<Int> = _reloadEpoch.asStateFlow()
+
+    private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private val mutex = Mutex()
+    private var captureJob: Job? = null
+    private var captureRunning = false
+    private var pendingDocumentUrl: String? = null
+    private var activeAdapter: GameAdapter? = null
+
+    internal var cadenceStartCount: Int = 0
+        private set
+
+    @Volatile var webView: WebView? = null
+
+    val isActive: Boolean get() = _state.value !is SessionState.Closed
 
     override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
         when (event) {
             Lifecycle.Event.ON_DESTROY -> {
-                Log.d(TAG, "Lifecycle ON_DESTROY — initiating force-close")
                 scope.launch {
-                    mutex.withLock {
-                        forceClose()
-                    }
+                    mutex.withLock { forceClose() }
                 }
             }
             Lifecycle.Event.ON_PAUSE -> {
-                // Best-effort capture before suspension so the cadence has a
-                // recent snapshot even if the app is backgrounded.
-                if (_state.value is SessionState.Playing) {
-                    scope.launch {
-                        mutex.withLock {
-                            transitionTo(SessionState.Capturing, _activeGameId.value)
-                            Log.d(TAG, "Lifecycle ON_PAUSE — best-effort capture fired")
+                scope.launch {
+                    mutex.withLock {
+                        if (_state.value is SessionState.Playing) {
+                            performCaptureLocked("background")
+                            if (_state.value is SessionState.Playing) {
+                                transitionTo(SessionState.Background, _activeGameId.value)
+                            }
                         }
                     }
-                } else {
-                    Log.d(TAG, "Lifecycle ON_PAUSE — no auto-action (user must call requestBackground)")
                 }
             }
-            else -> {
-                Log.d(TAG, "Lifecycle $event — no auto-action")
+            Lifecycle.Event.ON_RESUME -> {
+                scope.launch {
+                    mutex.withLock {
+                        if (_state.value is SessionState.Background) {
+                            transitionTo(SessionState.Playing, _activeGameId.value)
+                        }
+                    }
+                }
             }
+            else -> Log.d(TAG, "Lifecycle $event — no auto-action")
         }
     }
 
-    /** Attaches the controller to a lifecycle owner. */
-    fun attach(lifecycleOwner: LifecycleOwner) {
-        lifecycleOwner.lifecycle.addObserver(this)
-        // Call onAttached() synchronously so cold-start recovery is visible
-        // immediately (important for tests where Dispatchers.Main is Unconfined).
-        runBlocking { onAttached() }
-        Log.d(TAG, "Attached to lifecycle $lifecycleOwner")
+    fun attach(owner: LifecycleOwner) {
+        owner.lifecycle.addObserver(this)
+        scope.launch { onAttached() }
+        Log.d(TAG, "Attached to lifecycle $owner")
     }
 
     /**
-     * Called after attach to check for cold-start recovery.
-     * Queries the DAO for an active instance with a non-null recoveryState;
-     * if found, restores the session to Degraded or RecoveryRequired and
-     * restores the profile name so the UI surface can display it.
+     * Restores a cold-start recovery row with its named profile and launch URL.
+     * Does not mark the session playable until a new page load succeeds.
      */
-    /**
-     * Called after attach to check for cold-start recovery.
-     * Queries the DAO for an active instance with a non-null recoveryState;
-     * if found, restores the session to Degraded or RecoveryRequired and
-     * restores the profile name so the UI surface can display it.
-     */
-    fun onAttached() {
-        // Use Unconfined to ensure the coroutine runs inline during tests
-        // where Dispatchers.Main is set to Unconfined, making cold-start
-        // recovery synchronous from the caller's perspective.
-        scope.launch(Dispatchers.Unconfined) {
-            val activeInstance = instanceDao.getActiveWithRecovery()
-            if (activeInstance != null) {
-                Log.d(TAG, "onAttached: found recoveryState=${activeInstance.recoveryState} for game=${activeInstance.gameId}")
-                _activeGameId.value = activeInstance.gameId
-                _activeProfileName.value = activeInstance.profileName
-                // Must transit through Opening — Closed → Degraded/RecoveryRequired
-                // is not a legal transition per the state machine.
-                transitionTo(SessionState.Opening, activeInstance.gameId)
-                when (activeInstance.recoveryState) {
-                    "Degraded" -> transitionTo(SessionState.Degraded, activeInstance.gameId)
-                    else -> transitionTo(SessionState.RecoveryRequired, activeInstance.gameId)
-                }
-            } else {
-                Log.d(TAG, "onAttached: no active recovery instance")
-            }
+    suspend fun onAttached() {
+        val activeInstance = instanceDao.getActiveWithRecovery()
+        if (activeInstance == null) {
+            Log.d(TAG, "onAttached: no active recovery instance")
+            return
+        }
+        Log.d(TAG, "onAttached: recoveryState=${activeInstance.recoveryState} game=${activeInstance.gameId}")
+        _activeGameId.value = activeInstance.gameId
+        _activeProfileName.value = activeInstance.profileName
+        val game = gameRegistry.getGame(activeInstance.gameId)
+        if (game != null) {
+            _launchUrl.value = game.launchUrl
+            activeAdapter = GameAdapters.create(game.adapterId)
+            _activeProfile.value = obtainProfile(activeInstance.profileName)
+        } else {
+            _sessionError.value = "Recovery row ${activeInstance.gameId} is not in the registry"
+        }
+        transitionTo(SessionState.Opening, activeInstance.gameId)
+        when (activeInstance.recoveryState) {
+            "Degraded" -> transitionTo(SessionState.Degraded, activeInstance.gameId)
+            else -> transitionTo(SessionState.RecoveryRequired, activeInstance.gameId)
         }
     }
 
-    /** Detaches the controller from its lifecycle owner. */
     fun detach() {
         lifecycleOwner.lifecycle.removeObserver(this)
         Log.d(TAG, "Detached from lifecycle")
     }
 
-    // -----------------------------------------------------------------
-    // Public API — transitions
-    // -----------------------------------------------------------------
-
-    /**
-     * Opens a session for [gameId].
-     *
-     * Transitions: Closed → Opening → Playing (or RecoveryRequired on failure).
-     * If already in Opening, the call is a no-op (idempotent).
-     * If in any other non-Closed state, the call is rejected with a warning.
-     */
-    /**
-     * Opens a session for [gameId].
-     *
-     * Transitions: Closed → Opening → Playing (or RecoveryRequired on failure).
-     * If already in a non-Closed state, settles the active session first then opens.
-     * Runs [BootstrapDetector] after profile binding; if no qualified mechanism
-     * is found, transitions to RecoveryRequired. Fires [PreLaunchSnapshot.capture]
-     * asynchronously (fire-and-forget) after successful navigation.
-     */
     suspend fun open(gameId: String) {
         mutex.withLock {
-            val current = _state.value
-            if (current !is SessionState.Closed) {
-                Log.w(TAG, "open($gameId): already in $current — settling active session first")
+            if (_state.value !is SessionState.Closed) {
+                Log.w(TAG, "open($gameId): settling ${_state.value}")
                 settleActiveSession()
-                val stillActive = _state.value
-                if (stillActive !is SessionState.Closed) {
-                    Log.w(TAG, "open($gameId): still not Closed after settling (state=$stillActive) — rejected")
+                if (_state.value !is SessionState.Closed) {
+                    Log.w(TAG, "open($gameId): rejected, still ${_state.value}")
                     return
                 }
             }
             transitionTo(SessionState.Opening, gameId)
-            Log.d(TAG, "open($gameId): state=Opening — resolving game and binding profile")
-            try {
-                resolveGameAndBindProfile(gameId)
-                // Run bootstrap detector to determine qualified mechanism.
-                val detectorResult = bootstrapTest?.invoke(profileStore)
-                    ?: BootstrapDetector(context).test(profileStore)
-                val qualifiedMechanism = detectorResult.qualifiedMechanism
-                if (detectorResult.qualifiedMechanism != null) {
-                    // Simulate async opening work (in production this would await
-                    // WebView creation + profile bind + navigation).
-                    withContext(Dispatchers.Default) {
-                        delay(OPENING_TIMEOUT_MS)
-                    }
+            _sessionError.value = null
+            Log.d(TAG, "open($gameId): Opening")
+            val bound = bindProfileAndNavigate(gameId)
+            if (bound == null) {
+                failOpenLocked(gameId, "Game $gameId is not in the registry")
+                return
+            }
+            if (activeAdapter == null) {
+                failOpenLocked(gameId, "No adapter for $gameId (${bound.second})")
+                return
+            }
+            val bootstrap = bootstrapTest?.invoke(profileStore)
+            if (bootstrap != null && bootstrap.qualifiedMechanism == null) {
+                failOpenLocked(gameId, bootstrap.message)
+                return
+            }
+            when (documentReadyTest?.invoke(gameId)) {
+                true -> {
                     transitionTo(SessionState.Playing, gameId)
-                    startCaptureCadence()
-                    // Fire PreLaunchSnapshot asynchronously (fire-and-forget).
-                    scope.launch {
-                        PreLaunchSnapshot(context).capture(profileStore, detectorResult)
-                        Log.d(TAG, "PreLaunchSnapshot captured for $gameId")
-                    }
-                    Log.d(TAG, "open($gameId): state=Playing — session active")
-                } else {
-                    Log.e(TAG, "open($gameId): bootstrap failed — no qualified mechanism")
-                    transitionTo(SessionState.RecoveryRequired, gameId)
+                    Log.d(TAG, "open($gameId): Playing via explicit readiness hook")
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "open($gameId): failed — transitioning to RecoveryRequired", e)
-                transitionTo(SessionState.RecoveryRequired, gameId)
+                false -> failOpenLocked(gameId, "Document readiness failed for ${bound.second}")
+                null -> Log.d(TAG, "open($gameId): waiting for ${bound.second}")
             }
         }
     }
 
-    /**
-     * Closes the active session.
-     *
-     * Transitions: Playing → Closing → Closed.
-     * If not in Playing, falls back to requestClosing() which handles
-     * any active state.
-     */
     suspend fun close() {
-        mutex.withLock {
-            val current = _state.value
-            when {
-                current is SessionState.Playing -> {
-                    Log.d(TAG, "close(): state=Playing → Closing")
-                    transitionTo(SessionState.Closing, _activeGameId.value)
-                    destroyWebViewAndFinalize()
-                }
-                else -> {
-                    Log.d(TAG, "close(): not Playing (state=$current) — delegating to requestClosing")
-                    requestClosing()
-                }
-            }
-        }
+        mutex.withLock { closeLocked() }
     }
 
-    /**
-     * Starts the lifecycle-bound 60-second capture cadence.
-     * Called automatically when state enters Playing.
-     */
-    private fun startCaptureCadence() {
-        stopCaptureCadence()
-        captureJob = scope.launch {
-            while (isActive) {
-                delay(CAPTURE_CADENCE_MS)
-                val current = _state.value
-                if (current is SessionState.Playing) {
-                    transitionTo(SessionState.Capturing, _activeGameId.value)
-                    Log.d(TAG, "cadence: state=Capturing (60s elapsed)")
-                    delay(CAPTURE_WINDOW_MS)
-                    if (_state.value is SessionState.Capturing) {
-                        transitionTo(SessionState.Playing, _activeGameId.value)
-                        Log.d(TAG, "cadence: state=Playing (capture window complete)")
-                    }
-                }
-            }
-        }
-        Log.d(TAG, "cadence: captureJob started")
-    }
-
-    /** Cancels the active capture cadence coroutine. */
-    private fun stopCaptureCadence() {
-        captureJob?.cancel()
-        captureJob = null
-        Log.d(TAG, "cadence: captureJob stopped")
-    }
-
-    /**
-     * Requests a one-shot foreground capture. Transitions Playing → Capturing.
-     * No-op if not currently Playing.
-     */
-    fun requestForegroundCapture() {
-        scope.launch {
-            mutex.withLock {
-                val current = _state.value
-                if (current !is SessionState.Playing) {
-                    Log.w(TAG, "requestForegroundCapture() rejected: not Playing (state=$current)")
-                    return@withLock
-                }
-                transitionTo(SessionState.Capturing, _activeGameId.value)
-                Log.d(TAG, "requestForegroundCapture(): state=Capturing (one-shot)")
-            }
-        }
-    }
-
-    /**
-     * Requests a capture. Transitions Playing → Capturing.
-     * No-op if not currently Playing.
-     */
     fun requestCapture() {
         scope.launch {
             mutex.withLock {
-                val current = _state.value
-                if (current !is SessionState.Playing) {
-                    Log.w(TAG, "requestCapture() rejected: not Playing (state=$current)")
+                if (_state.value !is SessionState.Playing) {
+                    Log.w(TAG, "requestCapture() rejected: ${_state.value}")
                     return@withLock
                 }
-                transitionTo(SessionState.Capturing, _activeGameId.value)
-                Log.d(TAG, "requestCapture(): state=Capturing")
+                performCaptureLocked("request")
             }
         }
     }
 
-    /**
-     * Requests backgrounding. Transitions Playing → Background.
-     * No-op if not currently Playing.
-     */
+    fun requestForegroundCapture() {
+        requestCapture()
+    }
+
     fun requestBackground() {
         scope.launch {
             mutex.withLock {
-                val current = _state.value
-                if (current !is SessionState.Playing) {
-                    Log.w(TAG, "requestBackground() rejected: not Playing (state=$current)")
-                    return@withLock
+                if (_state.value !is SessionState.Playing) return@withLock
+                performCaptureLocked("background")
+                if (_state.value is SessionState.Playing) {
+                    transitionTo(SessionState.Background, _activeGameId.value)
                 }
-                transitionTo(SessionState.Background, _activeGameId.value)
-                Log.d(TAG, "requestBackground(): state=Background")
             }
         }
     }
 
-    /**
-     * Requests foregrounding.
-     * - Background → Playing
-     * - Capturing → Playing
-     * No-op if not in Background or Capturing.
-     */
     fun requestForeground() {
         scope.launch {
             mutex.withLock {
-                val current = _state.value
-                when {
-                    current is SessionState.Background -> {
+                when (_state.value) {
+                    is SessionState.Background ->
                         transitionTo(SessionState.Playing, _activeGameId.value)
-                        Log.d(TAG, "requestForeground(): state=Playing (from Background)")
-                    }
-                    current is SessionState.Capturing -> {
-                        transitionTo(SessionState.Playing, _activeGameId.value)
-                        Log.d(TAG, "requestForeground(): state=Playing (from Capturing)")
-                    }
-                    else -> {
-                        Log.w(TAG, "requestForeground() rejected: not Background/Capturing (state=$current)")
-                    }
+                    is SessionState.Capturing ->
+                        Log.w(TAG, "requestForeground() ignored during capture")
+                    else -> Log.w(TAG, "requestForeground() rejected: ${_state.value}")
                 }
             }
         }
     }
 
-    /**
-     * Requests a restore. Transitions to Restoring.
-     * Valid from: Playing, Capturing, Background, Degraded, RecoveryRequired.
-     */
     fun requestRestore() {
         scope.launch {
-            mutex.withLock {
-                val current = _state.value
-                val allowed = current is SessionState.Playing ||
-                    current is SessionState.Capturing ||
-                    current is SessionState.Background ||
-                    current is SessionState.Degraded ||
-                    current is SessionState.RecoveryRequired
-                if (!allowed) {
-                    Log.w(TAG, "requestRestore() rejected: $current")
-                    return@withLock
-                }
-                transitionTo(SessionState.Restoring, _activeGameId.value)
-                Log.d(TAG, "requestRestore(): state=Restoring")
-            }
+            val url = _launchUrl.value ?: return@launch
+            onMainFrameFinished(url)
         }
     }
 
-    /**
-     * Requests degradation. Transitions Playing → Degraded.
-     * No-op if not currently Playing.
-     */
     fun requestDegraded() {
         scope.launch {
             mutex.withLock {
-                val current = _state.value
-                if (current !is SessionState.Playing) {
-                    Log.w(TAG, "requestDegraded() rejected: not Playing (state=$current)")
-                    return@withLock
-                }
+                if (_state.value !is SessionState.Playing) return@withLock
                 transitionTo(SessionState.Degraded, _activeGameId.value)
-                Log.d(TAG, "requestDegraded(): state=Degraded")
             }
         }
     }
 
-    /**
-     * Requests recovery. Transitions Degraded → RecoveryRequired.
-     * No-op if not currently Degraded.
-     */
     fun requestRecovery() {
         scope.launch {
             mutex.withLock {
-                val current = _state.value
-                if (current !is SessionState.Degraded) {
-                    Log.w(TAG, "requestRecovery() rejected: not Degraded (state=$current)")
-                    return@withLock
-                }
+                if (_state.value !is SessionState.Degraded) return@withLock
                 transitionTo(SessionState.RecoveryRequired, _activeGameId.value)
-                Log.d(TAG, "requestRecovery(): state=RecoveryRequired")
             }
         }
     }
 
-    /**
-     * Requests closing from any active state.
-     * Transitions the current active state → Closing → Closed.
-     */
     fun requestClosing() {
         scope.launch {
+            mutex.withLock { closeLocked() }
+        }
+    }
+
+    fun requestReload() {
+        if (_state.value is SessionState.Playing && webView != null) {
+            _reloadEpoch.value = _reloadEpoch.value + 1
+            Log.d(TAG, "requestReload epoch=${_reloadEpoch.value}")
+        } else {
+            _sessionError.value = "Reload is unavailable until the page is playing"
+        }
+    }
+
+    fun retryRecovery() {
+        scope.launch {
             mutex.withLock {
-                val current = _state.value
-                if (current is SessionState.Closed) {
-                    Log.w(TAG, "requestClosing() rejected: already Closed")
+                val gameId = _activeGameId.value ?: return@withLock
+                if (_state.value is SessionState.Degraded) {
+                    transitionTo(SessionState.RecoveryRequired, gameId)
+                }
+                if (_state.value !is SessionState.RecoveryRequired) return@withLock
+                val dead = webView
+                webView = null
+                dead?.let { runCatching { it.destroy() } }
+                _webViewGeneration.value = _webViewGeneration.value + 1
+                _sessionError.value = null
+                pendingDocumentUrl = null
+                transitionTo(SessionState.Opening, gameId)
+                val bound = bindProfileAndNavigate(gameId)
+                if (bound == null) {
+                    failOpenLocked(gameId, "Retry failed: $gameId is not in the registry")
                     return@withLock
                 }
-                Log.d(TAG, "requestClosing(): state=$current → Closing")
-                transitionTo(SessionState.Closing, _activeGameId.value)
-                destroyWebViewAndFinalize()
+                when (documentReadyTest?.invoke(gameId)) {
+                    true -> transitionTo(SessionState.Playing, gameId)
+                    false -> failOpenLocked(gameId, "Retry readiness failed for ${bound.second}")
+                    null -> Log.d(TAG, "retryRecovery($gameId): waiting for ${bound.second}")
+                }
             }
         }
     }
 
-    // -----------------------------------------------------------------
-    // Profile binding
-    // -----------------------------------------------------------------
+    fun registerWebView(view: WebView) {
+        webView = view
+        val pending = pendingDocumentUrl
+        if (pending != null) {
+            pendingDocumentUrl = null
+            onMainFrameFinished(pending)
+        }
+    }
 
-    /**
-     * Binds a profile and navigates to the game URL for [gameId].
-     *
-     * Resolves the game from the registry, creates or retrieves a [Profile]
-     * via [ProfileStore], and persists the game instance. Returns the profile
-     * and the resolved navigation URL.
-     *
-     * The create → setProfile → loadUrl ordering invariant is enforced by
-     * this method — callers must invoke it before the WebView is created.
-     * Profile creation runs on [Dispatchers.Main] as required by [ProfileStore].
-     *
-     * @return Pair of (profile, url) or null if the game is not found.
-     */
-    suspend fun bindProfileAndNavigate(gameId: String): Pair<Profile?, String>? {
-        return withContext(Dispatchers.Default) {
-            val game = gameRegistry.getGame(gameId)
-                ?: run {
-                    Log.e(TAG, "bindProfileAndNavigate($gameId): game not found in registry")
-                    return@withContext null
+    fun releaseWebView(view: WebView) {
+        if (webView === view) {
+            webView = null
+            runCatching { view.destroy() }
+        }
+    }
+
+    fun onMainFrameFinished(url: String) {
+        scope.launch { handleDocument(url) }
+    }
+
+    fun onMainFrameFailed(message: String) {
+        Log.e(TAG, message)
+        onError?.invoke(message)
+        scope.launch {
+            mutex.withLock {
+                val gameId = _activeGameId.value
+                _sessionError.value = message
+                when (_state.value) {
+                    is SessionState.Opening ->
+                        transitionTo(SessionState.RecoveryRequired, gameId)
+                    is SessionState.Playing -> {
+                        transitionTo(SessionState.Degraded, gameId)
+                        transitionTo(SessionState.RecoveryRequired, gameId)
+                    }
+                    else -> Unit
                 }
-            val profileName = "hub-game-$gameId"
-            val url = game.launchUrl
-            // Create/retrieve profile on UI thread (required by ProfileStore)
-            val profile = withContext(Dispatchers.Main) {
-                runCatching { ProfileStore.getInstance().getOrCreateProfile(profileName) }.getOrNull()
             }
-            val now = System.currentTimeMillis()
-            val existing = instanceDao.get(gameId)
-            val instance = existing?.copy(
-                profileName = profileName,
-                lastPlayedAtMillis = now,
-            ) ?: com.example.hub.database.GameInstance(
+        }
+    }
+
+    fun onSubresourceFailed(message: String) {
+        Log.w(TAG, message)
+        _subresourceDiagnostic.value = message
+    }
+
+    fun onRendererGone(message: String) {
+        scope.launch {
+            mutex.withLock {
+                val gameId = _activeGameId.value
+                _sessionError.value = message
+                onError?.invoke(message)
+                if (gameId != null) {
+                    writeCaptureResult(
+                        gameId,
+                        successPayload = null,
+                        error = "Renderer gone; a safe capture is impossible. Last good snapshot was kept.",
+                    )
+                }
+                val dead = webView
+                webView = null
+                dead?.let { runCatching { it.destroy() } }
+                _webViewGeneration.value = _webViewGeneration.value + 1
+                when (_state.value) {
+                    is SessionState.Capturing -> transitionTo(SessionState.Playing, gameId)
+                    else -> Unit
+                }
+                when (_state.value) {
+                    is SessionState.Playing -> transitionTo(SessionState.Degraded, gameId)
+                    else -> Unit
+                }
+                when (_state.value) {
+                    is SessionState.Degraded, is SessionState.Opening ->
+                        transitionTo(SessionState.RecoveryRequired, gameId)
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    fun createErrorHandler(): (String) -> Unit = { error ->
+        onMainFrameFailed(error)
+    }
+
+    suspend fun bindProfileAndNavigate(gameId: String): Pair<Profile?, String>? {
+        val game = gameRegistry.getGame(gameId) ?: run {
+            Log.e(TAG, "bindProfileAndNavigate($gameId): game not found")
+            return null
+        }
+        val profileName = "hub-game-$gameId"
+        val profile = obtainProfile(profileName)
+        val now = System.currentTimeMillis()
+        val existing = instanceDao.get(gameId)
+        val instance = if (existing == null) {
+            GameInstance(
                 gameId = gameId,
                 profileName = profileName,
-                sessionIdentity = java.util.UUID.randomUUID().toString(),
+                sessionIdentity = UUID.randomUUID().toString(),
                 lastPlayedAtMillis = now,
                 lastCaptureAtMillis = 0L,
             )
-            instanceDao.upsert(instance)
-            _activeProfile.value = profile
+        } else {
+            existing.copy(
+                profileName = profileName,
+                lastPlayedAtMillis = now,
+            )
+        }
+        instanceDao.upsert(instance)
+        _activeProfile.value = profile
+        _activeProfileName.value = profileName
+        _launchUrl.value = game.launchUrl
+        _activeGameId.value = gameId
+        activeAdapter = GameAdapters.create(game.adapterId)
+        Log.d(TAG, "bindProfileAndNavigate($gameId): profile=$profileName url=${game.launchUrl} profileNull=${profile == null}")
+        return Pair(profile, game.launchUrl)
+    }
 
-            Log.d(TAG, "bindProfileAndNavigate($gameId): profile=$profileName, url=$url")
-            Pair(profile, url)
+    internal suspend fun forceCloseForTest() {
+        mutex.withLock { forceClose() }
+    }
+
+    internal val isCaptureCadenceActive: Boolean get() = captureJob?.isActive == true
+
+    private suspend fun handleDocument(url: String) {
+        if (url.isBlank() || url == "about:blank") return
+        val work = mutex.withLock {
+            if (_state.value !is SessionState.Opening) return
+            val gameId = _activeGameId.value ?: return
+            val launch = _launchUrl.value
+            if (launch.isNullOrBlank()) return
+            val adapter = activeAdapter ?: run {
+                failOpenLocked(gameId, "No adapter for $gameId ($launch)")
+                return
+            }
+            val view = webView ?: run {
+                pendingDocumentUrl = url
+                return
+            }
+            ReadyWork(
+                gameId = gameId,
+                adapter = adapter,
+                view = view,
+                payload = instanceDao.get(gameId)?.snapshotPayload,
+                url = url,
+            )
+        }
+        val ready = try {
+            readinessCheck?.invoke(work.view, work.adapter) ?: work.adapter.awaitReady(work.view, 30_000L)
+        } catch (e: Exception) {
+            Log.e(TAG, "readiness failed", e)
+            false
+        }
+        if (!ready) {
+            mutex.withLock {
+                if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
+                    failOpenLocked(work.gameId, "Adapter was not ready after loading ${work.url}")
+                }
+            }
+            return
+        }
+        val live = try {
+            when {
+                captureClient != null -> captureClient.invoke(work.view, work.adapter)
+                readinessCheck != null -> null
+                else -> withTimeoutOrNull(8_000L) {
+                    work.adapter.capture(
+                        work.view,
+                        QualificationResult(gameId = work.gameId, displayName = work.gameId, stages = emptyList()),
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "live capture before play failed", e)
+            null
+        }
+        val liveValid = live != null && try {
+            work.adapter.validate(live)
+        } catch (e: Exception) {
+            false
+        }
+        if (!liveValid) {
+            val payload = work.payload
+            if (!payload.isNullOrBlank() && work.adapter.validate(payload)) {
+                val restored = try {
+                    val prepared = work.adapter.prepareRestore(payload)
+                    restoreCheck?.invoke(work.view, work.adapter, prepared)
+                        ?: work.adapter.verifyLoaded(work.view, prepared)
+                } catch (e: Exception) {
+                    Log.e(TAG, "restore failed", e)
+                    false
+                }
+                if (!restored) {
+                    mutex.withLock {
+                        if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
+                            failOpenLocked(
+                                work.gameId,
+                                "Restore failed for ${work.gameId}; last good snapshot was kept",
+                            )
+                        }
+                    }
+                    return
+                }
+            }
+        }
+        mutex.withLock {
+            if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
+                transitionTo(SessionState.Playing, work.gameId)
+                Log.d(TAG, "handleDocument: Playing ${work.gameId} url=${work.url}")
+            }
         }
     }
 
-    // -----------------------------------------------------------------
-    // Game switching
-    // -----------------------------------------------------------------
+    private suspend fun closeLocked() {
+        when (val current = _state.value) {
+            is SessionState.Closed -> {
+                _activeProfile.value = null
+                _activeProfileName.value = null
+                _launchUrl.value = null
+                activeAdapter = null
+            }
+            is SessionState.Playing -> {
+                performCaptureLocked("close")
+                if (_state.value is SessionState.Playing) {
+                    transitionTo(SessionState.Closing, _activeGameId.value)
+                    destroyWebViewAndFinalize()
+                }
+            }
+            is SessionState.Background -> {
+                transitionTo(SessionState.Playing, _activeGameId.value)
+                performCaptureLocked("close")
+                if (_state.value is SessionState.Playing) {
+                    transitionTo(SessionState.Closing, _activeGameId.value)
+                    destroyWebViewAndFinalize()
+                }
+            }
+            is SessionState.Opening -> {
+                transitionTo(SessionState.RecoveryRequired, _activeGameId.value)
+                transitionTo(SessionState.Closing, _activeGameId.value)
+                destroyWebViewAndFinalize()
+            }
+            is SessionState.Degraded, is SessionState.RecoveryRequired -> {
+                transitionTo(SessionState.Closing, _activeGameId.value)
+                destroyWebViewAndFinalize()
+            }
+            else -> Log.w(TAG, "close(): no safe path from $current")
+        }
+    }
 
-    /**
-     * Settles the currently active session before a new [open] call proceeds.
-     *
-     * - Playing → requestCapture() then requestClosing()
-     * - Background → requestForeground() then requestClosing()
-     * - Degraded/RecoveryRequired → requestClosing()
-     *
-     * Called internally from [open] while the mutex is already held, so it uses
-     * internal transition methods directly to avoid deadlock.
-     */
     private suspend fun settleActiveSession() {
-        val current = _state.value
-        when {
-            current is SessionState.Playing -> {
-                // Best-effort capture before closing: Playing → Capturing → Playing → Closing.
-                // The intermediate Playing completes the capture window so the cadence
-                // does not immediately re-fire after the close.
-                transitionTo(SessionState.Capturing, _activeGameId.value)
-                Log.d(TAG, "settleActiveSession: Playing → Capturing")
-                delay(50)
-                transitionTo(SessionState.Playing, _activeGameId.value)
-                transitionTo(SessionState.Closing, _activeGameId.value)
-                destroyWebViewAndFinalize()
-                Log.d(TAG, "settleActiveSession: Playing → Capturing → Playing → Closing → Closed")
+        val gameId = _activeGameId.value
+        when (_state.value) {
+            is SessionState.Playing -> {
+                performCaptureLocked("switch")
+                if (_state.value is SessionState.Playing) {
+                    transitionTo(SessionState.Closing, gameId)
+                    destroyWebViewAndFinalize()
+                }
             }
-            current is SessionState.Background -> {
-                transitionTo(SessionState.Playing, _activeGameId.value)
-                Log.d(TAG, "settleActiveSession: Background → Playing")
-                delay(50)
-                transitionTo(SessionState.Closing, _activeGameId.value)
-                destroyWebViewAndFinalize()
-                Log.d(TAG, "settleActiveSession: Playing → Closing → Closed")
+            is SessionState.Background -> {
+                transitionTo(SessionState.Playing, gameId)
+                performCaptureLocked("switch")
+                if (_state.value is SessionState.Playing) {
+                    transitionTo(SessionState.Closing, gameId)
+                    destroyWebViewAndFinalize()
+                }
             }
-            current is SessionState.Degraded || current is SessionState.RecoveryRequired -> {
-                transitionTo(SessionState.Closing, _activeGameId.value)
+            is SessionState.Degraded, is SessionState.RecoveryRequired -> {
+                transitionTo(SessionState.Closing, gameId)
                 destroyWebViewAndFinalize()
-                Log.d(TAG, "settleActiveSession: ${current} → Closing → Closed")
+            }
+            is SessionState.Opening -> {
+                transitionTo(SessionState.RecoveryRequired, gameId)
+                transitionTo(SessionState.Closing, gameId)
+                destroyWebViewAndFinalize()
+            }
+            else -> Log.d(TAG, "settleActiveSession: no action from ${_state.value}")
+        }
+    }
+
+    private suspend fun performCaptureLocked(reason: String): Boolean {
+        if (captureRunning) {
+            Log.w(TAG, "capture overlap rejected ($reason)")
+            return false
+        }
+        val gameId = _activeGameId.value ?: return false
+        if (_state.value !is SessionState.Playing) {
+            writeCaptureResult(
+                gameId,
+                successPayload = null,
+                error = "Safe capture is impossible in ${_state.value} ($reason). Last good snapshot was kept.",
+            )
+            return false
+        }
+        val adapter = activeAdapter
+        val view = webView
+        if (adapter == null || (view == null && captureClient == null)) {
+            writeCaptureResult(
+                gameId,
+                successPayload = null,
+                error = "Safe capture is impossible: no live WebView ($reason). Last good snapshot was kept.",
+            )
+            _sessionError.value = "Capture failed ($reason): no live WebView. Last good snapshot was kept."
+            return false
+        }
+        captureRunning = true
+        try {
+            transitionTo(SessionState.Capturing, gameId)
+            val payload = try {
+                captureClient?.invoke(view, adapter)
+                    ?: adapter.capture(
+                        view!!,
+                        QualificationResult(gameId = gameId, displayName = gameId, stages = emptyList()),
+                    )
+            } catch (e: Exception) {
+                Log.e(TAG, "capture threw ($reason)", e)
+                null
+            }
+            val valid = payload != null && try {
+                adapter.validate(payload)
+            } catch (e: Exception) {
+                false
+            }
+            if (payload == null || !valid) {
+                writeCaptureResult(
+                    gameId,
+                    successPayload = null,
+                    error = "Capture failed validation ($reason). Last good snapshot was kept.",
+                )
+                _sessionError.value = "Capture failed ($reason). Last good snapshot was kept."
+                if (_state.value is SessionState.Capturing) {
+                    transitionTo(SessionState.Playing, gameId)
+                }
+                return false
+            }
+            writeCaptureResult(gameId, payload, null)
+            if (_sessionError.value?.startsWith("Capture failed") == true) {
+                _sessionError.value = null
+            }
+            if (_state.value is SessionState.Capturing) {
+                transitionTo(SessionState.Playing, gameId)
+            }
+            Log.d(TAG, "capture succeeded ($reason) bytes=${payload.length}")
+            return true
+        } finally {
+            captureRunning = false
+        }
+    }
+
+    private fun startCaptureCadence() {
+        if (captureJob?.isActive == true) return
+        cadenceStartCount += 1
+        captureJob = scope.launch {
+            while (isActive) {
+                delay(CAPTURE_CADENCE_MS)
+                mutex.withLock {
+                    if (_state.value is SessionState.Playing) {
+                        performCaptureLocked("cadence")
+                    }
+                }
             }
         }
     }
 
-    // -----------------------------------------------------------------
-    // Internal
-    // -----------------------------------------------------------------
+    private fun stopCaptureCadence() {
+        captureJob?.cancel()
+        captureJob = null
+    }
 
-    /**
-     * Transitions from the current state to [target], after validating with
-     * [canTransition]. Logs the transition with gameId + from/to state.
-     */
-    private fun transitionTo(target: SessionState, gameId: String?) {
+    private suspend fun transitionTo(target: SessionState, gameId: String?) {
         val current = _state.value
         if (!canTransition(current, target)) {
-            Log.w(TAG, "illegal transition $current → $target (gameId=$gameId) — rejected")
+            Log.w(TAG, "illegal transition $current → $target (gameId=$gameId)")
             return
         }
         Log.d(TAG, "transition $current → $target (gameId=$gameId)")
-        // Stop the cadence when leaving Playing (the cadence itself handles
-        // Playing→Capturing→Playing internally; we only stop when the user
-        // or an error path moves away from Playing).
         if (current is SessionState.Playing && target !is SessionState.Capturing) {
             stopCaptureCadence()
         }
-        // Start the cadence when entering Playing from any non-Capturing state.
-        if (target is SessionState.Playing) {
+        if (target is SessionState.Playing && current !is SessionState.Capturing) {
             startCaptureCadence()
-        }
-        // Persist or clear durable recovery metadata alongside state transitions.
-        if (gameId != null) {
-            scope.launch {
-                when {
-                    target is SessionState.Degraded -> persistRecoveryState(gameId, "Degraded")
-                    target is SessionState.RecoveryRequired -> persistRecoveryState(gameId, "RecoveryRequired")
-                    target is SessionState.Playing -> clearRecoveryState(gameId)
-                }
-            }
         }
         _state.value = target
         if (target is SessionState.Opening || target is SessionState.Playing ||
@@ -628,105 +727,108 @@ class SessionController(
         ) {
             _activeProfileName.value = gameId?.let { "hub-game-$it" }
         }
-    }
-
-    /** Persists [recoveryState] on the current GameInstance row for [gameId]. */
-    private suspend fun persistRecoveryState(gameId: String, state: String) {
-        val instance = instanceDao.get(gameId) ?: run {
-            Log.w(TAG, "persistRecoveryState($gameId): instance not found")
-            return
+        if (gameId != null) {
+            when (target) {
+                is SessionState.Degraded -> persistRecoveryState(gameId, "Degraded")
+                is SessionState.RecoveryRequired -> persistRecoveryState(gameId, "RecoveryRequired")
+                is SessionState.Playing -> clearRecoveryState(gameId)
+                else -> Unit
+            }
         }
-        val updated = instance.copy(
-            recoveryState = state,
-            lastCaptureAtMillis = System.currentTimeMillis(),
-        )
-        instanceDao.upsert(updated)
-        Log.d(TAG, "persisted recoveryState=$state for game=$gameId (lastCaptureAtMillis=${updated.lastCaptureAtMillis})")
     }
 
-    /** Clears [recoveryState] and updates lastCaptureAtMillis on the current row. */
+    private suspend fun persistRecoveryState(gameId: String, recovery: String) {
+        val instance = instanceDao.get(gameId) ?: return
+        instanceDao.upsert(instance.copy(recoveryState = recovery))
+    }
+
     private suspend fun clearRecoveryState(gameId: String) {
-        val instance = instanceDao.get(gameId) ?: run {
-            Log.w(TAG, "clearRecoveryState($gameId): instance not found")
-            return
-        }
-        val updated = instance.copy(
-            recoveryState = null,
-            lastCaptureAtMillis = System.currentTimeMillis(),
-        )
-        instanceDao.upsert(updated)
-        Log.d(TAG, "cleared recoveryState for game=$gameId (lastCaptureAtMillis=${updated.lastCaptureAtMillis})")
+        val instance = instanceDao.get(gameId) ?: return
+        if (instance.recoveryState == null) return
+        instanceDao.upsert(instance.copy(recoveryState = null))
     }
 
-    /**
-     * Resolves the game from the registry, creates/retrieves the profile,
-     * and persists the game instance row. Called during [open].
-     */
-    private suspend fun resolveGameAndBindProfile(gameId: String) {
-        val game = gameRegistry.getGame(gameId)
-            ?: throw IllegalStateException("Game $gameId not found in registry")
-        val profileName = "hub-game-$gameId"
-        val sessionIdentity = java.util.UUID.randomUUID().toString()
-        instanceDao.upsert(
-            GameInstance(
-                gameId = gameId,
-                profileName = profileName,
-                sessionIdentity = sessionIdentity,
-                lastPlayedAtMillis = System.currentTimeMillis(),
-                lastCaptureAtMillis = 0L,
+    private suspend fun writeCaptureResult(gameId: String, successPayload: String?, error: String?) {
+        val instance = instanceDao.get(gameId) ?: return
+        val now = System.currentTimeMillis()
+        val updated = if (successPayload != null) {
+            instance.copy(
+                lastCaptureAttemptAtMillis = now,
+                lastCaptureSuccessAtMillis = now,
+                lastCaptureAtMillis = now,
+                lastCaptureError = null,
+                snapshotPayload = successPayload,
             )
-        )
-        Log.d(TAG, "resolveGameAndBindProfile($gameId): persisted instance profile=$profileName")
+        } else {
+            instance.copy(
+                lastCaptureAttemptAtMillis = now,
+                lastCaptureFailureAtMillis = now,
+                lastCaptureError = error ?: "capture failed",
+            )
+        }
+        instanceDao.upsert(updated)
     }
 
-    /**
-     * Destroys the WebView (via callback) and resets state to Closed.
-     * Called after any Closing transition completes.
-     */
+    private suspend fun failOpenLocked(gameId: String, message: String) {
+        Log.e(TAG, message)
+        _sessionError.value = message
+        if (_state.value is SessionState.Opening) {
+            transitionTo(SessionState.RecoveryRequired, gameId)
+        }
+    }
+
     private suspend fun destroyWebViewAndFinalize() {
         stopCaptureCadence()
-        webView?.destroy()
+        val gameId = _activeGameId.value
+        if (gameId != null) {
+            clearRecoveryState(gameId)
+        }
+        val view = webView
         webView = null
+        view?.let { runCatching { it.destroy() } }
         webViewDestroyer?.invoke()
-        // Reset active identity.
+        activeAdapter = null
+        pendingDocumentUrl = null
         _activeGameId.value = null
         _activeProfileName.value = null
         _activeProfile.value = null
-        // Increment navigation epoch so stale bridge callbacks are rejected.
+        _launchUrl.value = null
         _navigationEpoch.value = _navigationEpoch.value + 1
         transitionTo(SessionState.Closed, null)
-        Log.d(TAG, "destroyWebViewAndFinalize(): state=Closed epoch=${_navigationEpoch.value}")
-    }
-
-    /**
-     * Force-closes the session regardless of current state. Called on
-     * ON_DESTROY lifecycle event.
-     */
-    internal suspend fun forceCloseForTest() = forceClose()
-
-    /** Exposed for test verification of the capture cadence job state. */
-    internal val isCaptureCadenceActive: Boolean get() = captureJob?.isActive == true
-
-    /**
-     * Creates a crash handler lambda that logs the error, triggers a
-     * Playing→Degraded transition, and delegates to the external onError callback.
-     * Intended to be passed to [WebViewHost] as its onError parameter.
-     */
-    fun createErrorHandler(): (String) -> Unit = { error ->
-        Log.e(TAG, "renderer error: $error — requesting Degraded")
-        requestDegraded()
-        onError?.invoke(error)
     }
 
     private suspend fun forceClose() {
-        webView?.destroy()
+        stopCaptureCadence()
+        val view = webView
         webView = null
+        view?.let { runCatching { it.destroy() } }
         webViewDestroyer?.invoke()
+        activeAdapter = null
+        pendingDocumentUrl = null
         _activeGameId.value = null
         _activeProfileName.value = null
         _activeProfile.value = null
+        _launchUrl.value = null
         _navigationEpoch.value = _navigationEpoch.value + 1
         _state.value = SessionState.Closed
-        Log.d(TAG, "forceClose(): state=Closed epoch=${_navigationEpoch.value}")
     }
+
+    private suspend fun obtainProfile(profileName: String): Profile? {
+        val load = {
+            runCatching { profileStore.getOrCreateProfile(profileName) }.getOrNull()
+        }
+        return if (Looper.myLooper() == Looper.getMainLooper()) {
+            load()
+        } else {
+            withContext(Dispatchers.Main) { load() }
+        }
+    }
+
+    private data class ReadyWork(
+        val gameId: String,
+        val adapter: GameAdapter,
+        val view: WebView,
+        val payload: String?,
+        val url: String,
+    )
 }

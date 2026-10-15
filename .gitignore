@@ -68,6 +68,7 @@ tmp/
 .gsd/milestones/**/continue.md
 
 .gradle/
+local.properties
 
 # ── GSD baseline (auto-generated) ──
 .gsd/.compat.json

@@ -1,130 +1,152 @@
 package com.example.hub.ui
 
-import androidx.compose.foundation.layout.padding
-
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.example.hub.session.SessionController
 import com.example.hub.session.SessionState
-import com.example.hub.session.canTransition
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "PlaySurface"
 
 /**
- * Play-surface composable wired to a [SessionController] as the sole owner
- * of session lifecycle. No local remember state — all state is observed from
- * [SessionController.state] via collectAsState.
- *
- * Menu callbacks route through [SessionController] request*() methods.
- * Navigation back coordinates with [SessionController.close()].
+ * Play surface. Session lifecycle stays on [SessionController]. Leaving the
+ * surface captures when possible, then asks the navigator to pop.
  */
 @Composable
 fun PlaySurface(
     gameId: String,
     controller: SessionController,
+    onExit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Log.d(TAG, "PlaySurface: created for gameId=$gameId (state=${controller.state.value})")
+    val state by controller.state.collectAsState()
+    val profile by controller.activeProfile.collectAsState()
+    val launchUrl by controller.launchUrl.collectAsState()
+    val sessionError by controller.sessionError.collectAsState()
+    val subresource by controller.subresourceDiagnostic.collectAsState()
+    val generation by controller.webViewGeneration.collectAsState()
+    val reloadEpoch by controller.reloadEpoch.collectAsState()
+    val scope = rememberCoroutineScope()
+    var menuOpen by remember(gameId) { mutableStateOf(false) }
 
-    val state = controller.state.collectAsState().value
+    fun exitSession() {
+        scope.launch {
+            controller.close()
+            withContext(Dispatchers.Main.immediate) {
+                onExit()
+            }
+        }
+    }
 
-    // Back handler: close session via controller, then pop navigation.
-    BackHandler(
-        enabled = state !is SessionState.Closed && state !is SessionState.RecoveryRequired
-    ) {
-        Log.d(TAG, "PlaySurface: back pressed (state=$state)")
-        controller.requestClosing()
+    BackHandler(enabled = !menuOpen && state !is SessionState.Closed && state !is SessionState.RecoveryRequired) {
+        Log.d(TAG, "PlaySurface: back pressed state=$state")
+        exitSession()
     }
 
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
-        FoldAwareLayout(
-            state = state,
-            content = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                ) {
-                    // WebView host: stable across recomposition, profile bound by controller.
+        FoldAwareLayout(state = state, content = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+            ) {
+                androidx.compose.runtime.key(gameId, generation) {
                     WebViewHost(
                         gameId = gameId,
+                        launchUrl = launchUrl,
                         state = state,
-                        profile = controller.activeProfile.value,
-                        onError = controller.createErrorHandler(),
+                        profile = profile,
+                        reloadEpoch = reloadEpoch,
+                        onWebViewCreated = controller::registerWebView,
+                        onPageFinished = controller::onMainFrameFinished,
+                        onMainFrameError = controller::onMainFrameFailed,
+                        onSubresourceError = controller::onSubresourceFailed,
+                        onRendererGone = controller::onRendererGone,
+                        onRelease = controller::releaseWebView,
                         modifier = Modifier.fillMaxSize(),
-                        onDestroy = { controller.webView = null },
                     )
+                }
 
-                    // NativeMenu is a sibling overlay — it sits on top of WebViewHost
-                    // without wrapping it, preserving WebView identity across menu cycles.
-                    if (state !is SessionState.Opening &&
-                        state !is SessionState.Closed &&
-                        state !is SessionState.Closing &&
-                        state !is SessionState.RecoveryRequired
+                if (state is SessionState.Opening) {
+                    OpeningStatus(gameId = gameId, launchUrl = launchUrl)
+                }
+
+                if (!menuOpen && state !is SessionState.Closed && state !is SessionState.Opening) {
+                    TextButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier.align(Alignment.TopEnd),
                     ) {
-                        NativeMenu(
-                            state = state,
-                            onAction = { action ->
-                                Log.d(TAG, "PlaySurface: menu action=${action.label} (state=$state)")
-                                when (action) {
-                                    is MenuAction.Resume -> {
-                                        if (state is SessionState.Playing) {
-                                            Log.d(TAG, "Resume is no-op (already Playing)")
-                                        } else if (canTransition(state, SessionState.Playing)) {
-                                            controller.requestForeground()
-                                        } else {
-                                            Log.w(TAG, "Resume rejected from $state")
-                                        }
-                                    }
-                                    is MenuAction.SnapshotNow -> {
-                                        Log.d(TAG, "SnapshotNow side-effect (state=$state)")
-                                    }
-                                    is MenuAction.Checkpoint -> {
-                                        Log.d(TAG, "Checkpoint side-effect (state=$state)")
-                                    }
-                                    is MenuAction.Vault -> {
-                                        Log.d(TAG, "Vault side-effect (state=$state)")
-                                    }
-                                    is MenuAction.Reload -> {
-                                        Log.d(TAG, "Reload side-effect (state=$state)")
-                                    }
-                                    is MenuAction.Display -> {
-                                        Log.d(TAG, "Display side-effect (state=$state)")
-                                    }
-                                    is MenuAction.ReturnToHub -> {
-                                        Log.d(TAG, "ReturnToHub — requesting closing")
-                                        controller.requestClosing()
-                                    }
-                                }
-                            },
-                            onBack = {
-                                Log.d(TAG, "PlaySurface: menu back pressed (state=$state)")
-                                controller.requestClosing()
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-
-                    // Recovery overlay: shown only when session is in RecoveryRequired state.
-                    if (state is SessionState.RecoveryRequired) {
-                        RecoveryOverlay(
-                            gameId = gameId,
-                            onRetry = { /* controller.open() called from hub */ },
-                            onClose = {
-                                Log.d(TAG, "PlaySurface: close from RecoveryRequired")
-                                controller.requestClosing()
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        Text("Menu")
                     }
                 }
+
+                if (menuOpen && state !is SessionState.Closed && state !is SessionState.Closing) {
+                    NativeMenu(
+                        state = state,
+                        expanded = true,
+                        onExpandedChange = { menuOpen = it },
+                        onAction = { action ->
+                            Log.d(TAG, "PlaySurface: menu action=${action.label} state=$state")
+                            when (action) {
+                                MenuAction.Resume -> {
+                                    menuOpen = false
+                                    controller.requestForeground()
+                                }
+                                MenuAction.SnapshotNow, MenuAction.Checkpoint -> controller.requestCapture()
+                                MenuAction.Reload -> controller.requestReload()
+                                MenuAction.Vault, MenuAction.Display -> Unit
+                                MenuAction.ReturnToHub -> exitSession()
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+
+                if (state is SessionState.RecoveryRequired) {
+                    RecoveryOverlay(
+                        gameId = gameId,
+                        launchUrl = launchUrl,
+                        detail = sessionError,
+                        onRetry = { controller.retryRecovery() },
+                        onClose = { exitSession() },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+
+                if (subresource != null && state is SessionState.Playing) {
+                    Text(
+                        text = subresource!!,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp),
+                    )
+                }
             }
-        )
+        })
+    }
+}
+
+@Composable
+private fun OpeningStatus(gameId: String, launchUrl: String?) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(text = "Opening $gameId\n${launchUrl ?: "resolving launch URL"}")
     }
 }

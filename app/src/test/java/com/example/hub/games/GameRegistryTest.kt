@@ -127,7 +127,9 @@ class GameRegistryTest {
         )
         val games = registry.getGames(lastPlayedByGameId = lastPlayed)
         assertEquals("shark-incremental", games[0].gameId)
+        assertEquals(9000L, games[0].lastPlayedAtMillis)
         assertEquals("fe000000", games[1].gameId)
+        assertEquals(5000L, games[1].lastPlayedAtMillis)
     }
 
     @Test

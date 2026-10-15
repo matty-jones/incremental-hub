@@ -6,11 +6,19 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.window.layout.FoldingFeature
+import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowMetricsCalculator
 import com.example.hub.session.SessionState
 
@@ -38,18 +46,24 @@ fun FoldAwareLayout(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-
-    // Use WindowMetricsCalculator to get the current window metrics — this
-    // accounts for fold state and multi-window mode.
-    val metrics = WindowMetricsCalculator.getOrCreate()
-        .computeCurrentWindowMetrics(context)
-    val widthDp = with(density) {
-        metrics.bounds.width().toFloat() / 160f
+    val foldingFeature by produceState<FoldingFeature?>(initialValue = null, context) {
+        val activity = context.findActivity() ?: return@produceState
+        runCatching {
+            WindowInfoTracker.getOrCreate(activity)
+                .windowLayoutInfo(activity)
+                .collect { info ->
+                    value = info.displayFeatures.filterIsInstance<FoldingFeature>().firstOrNull()
+                }
+        }
     }
-    val isFoldedWide = widthDp >= 840.dp.value // large foldable unfolded width
 
-    // Hinge-aware inset: reserve extra horizontal padding on the hinge side.
-    val hingePadding = if (isFoldedWide) 24.dp else 0.dp
+    val hingePadding: Dp = foldingFeature?.let { feature ->
+        if (feature.orientation == FoldingFeature.Orientation.VERTICAL) {
+            with(density) { feature.bounds.width().toDp() }
+        } else {
+            0.dp
+        }
+    } ?: 0.dp
 
     val baseModifier = if (state is SessionState.Closed) {
         // No IME when session is closed — no WebView to cover.
@@ -90,5 +104,20 @@ fun isWideWindow(): Boolean {
     val context = LocalContext.current
     val metrics = WindowMetricsCalculator.getOrCreate()
         .computeMaximumWindowMetrics(context)
-    return metrics.bounds.width() / 160f >= 600.dp.value
+    val widthDp = with(LocalDensity.current) { metrics.bounds.width().toDp() }
+    return widthDp >= 600.dp
+}
+
+internal fun pxToDp(px: Int, density: Float): Float {
+    if (density <= 0f) return px.toFloat()
+    return px / density
+}
+
+internal fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }

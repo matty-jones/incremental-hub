@@ -23,12 +23,12 @@ class SharkIncrementalAdapter : GameAdapter {
     companion object {
         private const val SAVE_KEY = "shark_inc_save"
         private const val MIN_VERSION = 3
-        private const val JS_PLAYER_EXISTS =
-            "typeof player !== 'undefined' && player !== null"
-        private const val JS_READ_SAVE =
-            "localStorage.getItem('$SAVE_KEY')"
+        internal const val JS_PLAYER_EXISTS =
+            "(function(){ return typeof player !== 'undefined' && player !== null; })()"
+        internal const val JS_READ_SAVE =
+            "(function(){ if (typeof save === 'function') { save(); } return localStorage.getItem('$SAVE_KEY'); })()"
         private const val JS_SET_SAVE =
-            "localStorage.setItem('$SAVE_KEY', __PAYLOAD__); true"
+            "(function(){ localStorage.setItem('$SAVE_KEY', __PAYLOAD__); return true; })()"
     }
 
     override val adapterId = "shark-incremental-adapter"
@@ -44,14 +44,12 @@ class SharkIncrementalAdapter : GameAdapter {
 
     // ── awaitReady ─────────────────────────────────────────────────────────
     override suspend fun awaitReady(webView: WebView, timeoutMs: Long): Boolean {
-        val timeout: Long = timeoutMs
-        var tries = 0
-        while (tries < 20) {
-            tries++
-            val val0: String? = withTimeoutOrNull(500L) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val ready: String? = withTimeoutOrNull(500L) {
                 evaluateJs(webView, JS_PLAYER_EXISTS)
-            } ?: "false"
-            if (val0 == "true") return true
+            }
+            if (ready == "true") return true
             kotlinx.coroutines.delay(500L)
         }
         return false
@@ -64,8 +62,7 @@ class SharkIncrementalAdapter : GameAdapter {
         }
         if (raw.isNullOrEmpty() || raw == "null") return null
 
-        // Unescape JSON-string-wrapped value (evaluateJavascript wraps in quotes).
-        val unquoted = raw.removeSurrounding("\"")
+        val unquoted = unwrapJsResult(raw) ?: return null
 
         // Decode base64 and verify valid JSON.
         val decoded: String = try {
@@ -129,8 +126,7 @@ class SharkIncrementalAdapter : GameAdapter {
 
         // Read back and compare.
         val restored: String? = try {
-            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_READ_SAVE) }
-                ?.removeSurrounding("\"")
+            unwrapJsResult(withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_READ_SAVE) })
         } catch (e: Exception) {
             null
         }
@@ -145,9 +141,11 @@ class SharkIncrementalAdapter : GameAdapter {
         return deferred.await()
     }
 
+    internal fun setSaveScript(payload: String): String =
+        JS_SET_SAVE.replace("__PAYLOAD__", JSONObject.quote(payload))
+
     private suspend fun evaluateJsArg(webView: WebView, js: String, arg: String): String? {
-        // Embed arg into the JS string (same pattern as ProfileIsolationTest).
-        val jsWithArg = js.replace("__PAYLOAD__", JSONObject.quote(arg))
+        val jsWithArg = if (js == JS_SET_SAVE) setSaveScript(arg) else js.replace("__PAYLOAD__", JSONObject.quote(arg))
         val deferred = CompletableDeferred<String?>()
         val cb: ValueCallback<String?> = ValueCallback { deferred.complete(it) }
         webView.evaluateJavascript(jsWithArg, cb)

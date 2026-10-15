@@ -2,6 +2,8 @@ package com.example.hub.session
 
 import android.webkit.WebView
 import androidx.test.core.app.ApplicationProvider
+import org.json.JSONObject
+import java.util.Base64
 import com.example.hub.database.GameInstance
 import com.example.hub.database.GameInstanceDao
 import com.example.hub.games.GameRegistry
@@ -74,6 +76,7 @@ class SessionControllerTest {
             webViewDestroyer = { destroyedWebViews.add("destroyed") },
             profileStore = profileStore,
             bootstrapTest = bootstrapSuccess,
+            documentReadyTest = { true },
         )
     }
 
@@ -110,10 +113,17 @@ class SessionControllerTest {
     }
 
     @Test
-    fun requestCapture_transitionsPlayingToCapturing() = runTest {
+    fun requestCapture_recordsFailureWithoutLeavingPlayingWhenNoWebView() = runTest {
         controller.open("shark-incremental")
         controller.requestCapture()
-        assertEquals(SessionState.Capturing, controller.state.value)
+        assertEquals(SessionState.Playing, controller.state.value)
+        val instance = dao.get("shark-incremental")
+        assertNotNull(instance)
+        assertNull(instance!!.snapshotPayload)
+        assertTrue(instance.lastCaptureAttemptAtMillis > 0)
+        assertTrue(instance.lastCaptureFailureAtMillis > 0)
+        assertEquals(0L, instance.lastCaptureSuccessAtMillis)
+        assertTrue(instance.lastCaptureError!!.contains("Last good snapshot was kept"))
     }
 
     @Test
@@ -450,10 +460,11 @@ class SessionControllerTest {
     }
 
     @Test
-    fun requestForegroundCapture_transitionsPlayingToCapturing() = runTest {
+    fun requestForegroundCapture_recordsAttemptAndReturnsToPlaying() = runTest {
         controller.open("shark-incremental")
         controller.requestForegroundCapture()
-        assertEquals(SessionState.Capturing, controller.state.value)
+        assertEquals(SessionState.Playing, controller.state.value)
+        assertTrue(dao.get("shark-incremental")!!.lastCaptureAttemptAtMillis > 0)
     }
 
     // -----------------------------------------------------------------
@@ -470,10 +481,11 @@ class SessionControllerTest {
 
         runCurrent()
         assertEquals(
-            "crash handler should transition Playing→Degraded",
-            SessionState.Degraded,
+            "main-frame failure should reach RecoveryRequired",
+            SessionState.RecoveryRequired,
             controller.state.value
         )
+        assertTrue(controller.sessionError.value!!.contains("renderer crashed"))
     }
 
     @Test
@@ -506,6 +518,7 @@ class SessionControllerTest {
             webViewDestroyer = { destroyedWebViews.add("destroyed") },
             profileStore = profileStore,
             bootstrapTest = bootstrapSuccess,
+            documentReadyTest = { true },
             onError = { receivedErrors.add(it) },
         )
         controllerWithObserver.open("shark-incremental")
@@ -528,7 +541,8 @@ class SessionControllerTest {
         val errorHandler = controller.createErrorHandler()
         errorHandler("test-log-error")
         runCurrent()
-        assertEquals(SessionState.Degraded, controller.state.value)
+        assertEquals(SessionState.RecoveryRequired, controller.state.value)
+        assertTrue(controller.sessionError.value!!.contains("test-log-error"))
     }
 
     @Test
@@ -542,11 +556,15 @@ class SessionControllerTest {
         controller.open("shark-incremental")
         assertEquals(SessionState.Playing, controller.state.value)
         controller.onStateChanged(StubLifecycleOwner(), Lifecycle.Event.ON_PAUSE)
+        val instance = dao.get("shark-incremental")
         assertEquals(
-            "ON_PAUSE while Playing should fire best-effort capture",
-            SessionState.Capturing,
+            "ON_PAUSE while Playing should capture then background",
+            SessionState.Background,
             controller.state.value
         )
+        assertNotNull(instance)
+        assertTrue(instance!!.lastCaptureAttemptAtMillis > 0)
+        assertEquals(0L, instance.lastCaptureSuccessAtMillis)
     }
 
     @Test
@@ -649,7 +667,8 @@ class SessionControllerTest {
         val instance = dao.get("shark-incremental")
         assertNotNull(instance)
         assertEquals("Degraded", instance!!.recoveryState)
-        assertTrue(instance.lastCaptureAtMillis > 0)
+        assertEquals(0L, instance.lastCaptureAtMillis)
+        assertEquals(0L, instance.lastCaptureSuccessAtMillis)
     }
 
     @Test
@@ -664,6 +683,7 @@ class SessionControllerTest {
         controller.close()
         assertEquals(SessionState.Closed, controller.state.value)
         // Re-seed with Degraded so the new open() clears it.
+        val preservedCapture = 4_321L
         dao.upsert(
             GameInstance(
                 gameId = "shark-incremental",
@@ -671,14 +691,18 @@ class SessionControllerTest {
                 sessionIdentity = "session-clear",
                 lastPlayedAtMillis = System.currentTimeMillis(),
                 recoveryState = "Degraded",
-                lastCaptureAtMillis = System.currentTimeMillis() - 1000L,
+                lastCaptureAtMillis = preservedCapture,
+                snapshotPayload = "keep-snapshot",
+                lastCaptureSuccessAtMillis = preservedCapture,
             )
         )
         controller.open("shark-incremental")
         assertEquals(SessionState.Playing, controller.state.value)
         val instanceAfterPlaying = dao.get("shark-incremental")
         assertNull("recoveryState should be cleared when entering Playing", instanceAfterPlaying!!.recoveryState)
-        assertTrue("lastCaptureAtMillis should be updated on clear", instanceAfterPlaying.lastCaptureAtMillis > 0)
+        assertEquals(preservedCapture, instanceAfterPlaying.lastCaptureAtMillis)
+        assertEquals(preservedCapture, instanceAfterPlaying.lastCaptureSuccessAtMillis)
+        assertEquals("keep-snapshot", instanceAfterPlaying.snapshotPayload)
     }
 
     @Test
@@ -698,7 +722,8 @@ class SessionControllerTest {
         assertEquals(SessionState.Playing, controller.state.value)
         val instance = dao.get("shark-incremental")
         assertNull("recoveryState should be cleared when entering Playing", instance!!.recoveryState)
-        assertTrue("lastCaptureAtMillis should be updated", instance.lastCaptureAtMillis > 0)
+        assertEquals(2000L, instance.lastCaptureAtMillis)
+        assertNull(instance.snapshotPayload)
     }
 
     @Test
@@ -859,6 +884,177 @@ class SessionControllerTest {
         // The old game should not be accessible as active.
         // Note: activeGameId is cleared on close, so after switching the
         // new game is active and the old one is gone.
+    }
+
+    // -----------------------------------------------------------------
+    // Production path: real URL, profile, readiness, durable capture
+    // -----------------------------------------------------------------
+
+    @Test
+    fun open_staysOpeningUntilDocumentReadyAndBindsNamedProfile() = runTest {
+        val waiting = controllerWithoutDocumentHook(readiness = { _, _ -> true })
+        waiting.open("shark-incremental")
+        assertEquals(SessionState.Opening, waiting.state.value)
+        assertEquals("https://mrredshark77.github.io", waiting.launchUrl.value)
+        assertNotNull(waiting.activeProfile.value)
+        assertEquals("hub-game-shark-incremental", waiting.activeProfile.value!!.name)
+        assertFalse(waiting.launchUrl.value!!.contains("hub.local"))
+
+        waiting.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        waiting.onMainFrameFinished("https://mrredshark77.github.io")
+        assertEquals(SessionState.Playing, waiting.state.value)
+    }
+
+    @Test
+    fun open_secondGameUsesItsOwnLaunchUrl() = runTest {
+        val waiting = controllerWithoutDocumentHook(readiness = { _, _ -> true })
+        waiting.open("fe000000")
+        assertEquals("https://dan-simon.github.io/misc/fe000000/", waiting.launchUrl.value)
+        assertEquals("hub-game-fe000000", waiting.activeProfile.value!!.name)
+    }
+
+    @Test
+    fun captureSuccessPersistsSnapshot_failureDoesNotOverwriteIt() = runTest {
+        val payload = sharkPayload(gold = 7)
+        var mode = "ok"
+        val capturing = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> if (mode == "ok") payload else "not-a-save" },
+        )
+        capturing.open("shark-incremental")
+        capturing.webView = WebView(ApplicationProvider.getApplicationContext())
+        capturing.requestCapture()
+        val saved = dao.get("shark-incremental")
+        assertEquals(payload, saved!!.snapshotPayload)
+        assertEquals(saved.lastCaptureSuccessAtMillis, saved.lastCaptureAtMillis)
+        assertTrue(saved.lastCaptureSuccessAtMillis > 0)
+        assertEquals(0L, saved.lastCaptureFailureAtMillis)
+        assertNull(saved.lastCaptureError)
+
+        mode = "bad"
+        capturing.requestCapture()
+        val afterFailure = dao.get("shark-incremental")
+        assertEquals(payload, afterFailure!!.snapshotPayload)
+        assertEquals(saved.lastCaptureSuccessAtMillis, afterFailure.lastCaptureSuccessAtMillis)
+        assertTrue(afterFailure.lastCaptureFailureAtMillis > 0)
+        assertNotNull(afterFailure.lastCaptureError)
+        assertEquals(SessionState.Playing, capturing.state.value)
+    }
+
+    @Test
+    fun reopenRestoresPersistedSnapshot() = runTest {
+        val payload = sharkPayload(gold = 11)
+        var restored: String? = null
+        var liveSave = false
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            restore = { _, _, prepared ->
+                restored = prepared
+                true
+            },
+            capture = { _, _ -> if (liveSave) payload else null },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io")
+        assertEquals(SessionState.Playing, session.state.value)
+        liveSave = true
+        session.requestCapture()
+        liveSave = false
+        session.close()
+        assertEquals(SessionState.Closed, session.state.value)
+
+        session.open("shark-incremental")
+        assertEquals(SessionState.Opening, session.state.value)
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertNotNull(restored)
+        assertTrue(com.example.hub.games.SharkIncrementalAdapter().validate(restored!!))
+    }
+
+    @Test
+    fun rendererGoneKeepsSnapshotAndDoesNotStayOnDeadWebView() = runTest {
+        val payload = sharkPayload(gold = 3)
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> payload },
+        )
+        session.open("shark-incremental")
+        val view = WebView(ApplicationProvider.getApplicationContext())
+        session.webView = view
+        session.requestCapture()
+        val generation = session.webViewGeneration.value
+        session.onRendererGone("onRenderProcessGone: didCrash=true (gameId=shark-incremental)")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(payload, dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(dao.get("shark-incremental")!!.lastCaptureError!!.contains("safe capture is impossible"))
+        assertTrue(session.webViewGeneration.value > generation)
+        assertNull(session.webView)
+        assertTrue(session.sessionError.value!!.contains("onRenderProcessGone"))
+    }
+
+    @Test
+    fun cadenceDoesNotRestartWhenCaptureReturnsToPlaying() = runTest {
+        controller.open("shark-incremental")
+        val starts = controller.cadenceStartCount
+        controller.requestCapture()
+        assertEquals(starts, controller.cadenceStartCount)
+        assertTrue(controller.isCaptureCadenceActive)
+    }
+
+    @Test
+    fun openPreservesExistingSessionIdentityAndSnapshot() = runTest {
+        dao.upsert(
+            GameInstance(
+                gameId = "shark-incremental",
+                profileName = "hub-game-shark-incremental",
+                sessionIdentity = "original-session",
+                lastPlayedAtMillis = 10L,
+                lastCaptureAtMillis = 9L,
+                snapshotPayload = "original-snapshot",
+                lastCaptureSuccessAtMillis = 9L,
+            )
+        )
+        controller.open("shark-incremental")
+        val instance = dao.get("shark-incremental")
+        assertEquals("original-session", instance!!.sessionIdentity)
+        assertEquals("original-snapshot", instance.snapshotPayload)
+        assertEquals(9L, instance.lastCaptureAtMillis)
+    }
+
+    @Test
+    fun subresourceFailureDoesNotLeavePlaying() = runTest {
+        controller.open("shark-incremental")
+        controller.onSubresourceFailed("onReceivedError: image 404")
+        assertEquals(SessionState.Playing, controller.state.value)
+        assertEquals("onReceivedError: image 404", controller.subresourceDiagnostic.value)
+    }
+
+    private fun sharkPayload(gold: Int): String {
+        val json = JSONObject().put("VERSION", 3).put("gold", gold).toString()
+        return Base64.getEncoder().encodeToString(json.toByteArray(Charsets.UTF_8))
+    }
+
+    private fun controllerWithoutDocumentHook(
+        documentReady: (suspend (String) -> Boolean)? = null,
+        readiness: (suspend (WebView, com.example.hub.games.GameAdapter) -> Boolean)? = null,
+        restore: (suspend (WebView, com.example.hub.games.GameAdapter, String) -> Boolean)? = null,
+        capture: (suspend (WebView?, com.example.hub.games.GameAdapter) -> String?)? = null,
+    ): SessionController {
+        return SessionController(
+            context = ApplicationProvider.getApplicationContext(),
+            gameRegistry = registry,
+            instanceDao = dao,
+            lifecycleOwner = StubLifecycleOwner(),
+            webViewDestroyer = { destroyedWebViews.add("destroyed") },
+            profileStore = profileStore,
+            bootstrapTest = bootstrapSuccess,
+            documentReadyTest = documentReady,
+            readinessCheck = readiness,
+            restoreCheck = restore,
+            captureClient = capture,
+        )
     }
 
     // -----------------------------------------------------------------

@@ -27,11 +27,13 @@ private const val TAG = "RecoveryOverlay"
 @Composable
 fun RecoveryOverlay(
     gameId: String,
+    launchUrl: String? = null,
+    detail: String? = null,
     onRetry: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId")
+    Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId url=$launchUrl detail=$detail")
     Box(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
@@ -48,7 +50,19 @@ fun RecoveryOverlay(
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = "The session for \"$gameId\" entered a recovery state. Choose an action below.",
+                text = buildString {
+                    append("The session for ")
+                    append(gameId)
+                    append(" needs recovery.")
+                    if (!launchUrl.isNullOrBlank()) {
+                        append("\n")
+                        append(launchUrl)
+                    }
+                    if (!detail.isNullOrBlank()) {
+                        append("\n")
+                        append(detail)
+                    }
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 8.dp),

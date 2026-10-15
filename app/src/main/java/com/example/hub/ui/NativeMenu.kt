@@ -92,10 +92,8 @@ internal val MenuAction.label: String
  * ensuring the WebView identity is preserved across menu open/close cycles.
  *
  * Back behavior is deterministic:
- * - When the menu is closed, Android Back opens the menu (instead of silently
- *   navigating back).
- * - When the menu is open, Android Back closes the menu.
- * - Back never silently navigates back to the hub while the menu is open.
+ * - When the menu is open, Android Back closes the menu and leaves the game running.
+ * - Closing the menu does not end the session.
  *
  * Touch targets are 48dp minimum via [Modifier.minimumHeight].
  *
@@ -103,63 +101,49 @@ internal val MenuAction.label: String
  * - Compact windows (< 600dp): bottom-sheet-style column.
  * - Wider windows (>= 600dp): side panel row.
  */
+/**
+ * Session state does not force the menu open. Visibility is owned by the caller.
+ */
+internal fun sessionStateForcesMenuOpen(state: SessionState): Boolean = false
+
 @Composable
 fun NativeMenu(
     state: SessionState,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onAction: (MenuAction) -> Unit,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val menuOpen = state is SessionState.Playing ||
-        state is SessionState.Capturing ||
-        state is SessionState.Background ||
-        state is SessionState.Degraded ||
-        state is SessionState.Restoring ||
-        state is SessionState.RecoveryRequired ||
-        state is SessionState.Opening
-
-    // Use a local toggle so we can track the open state for BackHandler.
-    var isOpen by remember { mutableStateOf(false) }
-
-    // Sync with session state: open when session is active, close when closed.
-    if (state is SessionState.Closed) {
-        if (isOpen) isOpen = false
-    } else if (!isOpen) {
-        isOpen = true
+    if (sessionStateForcesMenuOpen(state)) {
+        onExpandedChange(true)
     }
 
-    // BackHandler: deterministic behavior.
-    BackHandler(enabled = isOpen) {
-        Log.d(TAG, "NativeMenu: BackHandler triggered — closing menu (state=$state)")
-        isOpen = false
-        onBack()
+    BackHandler(enabled = expanded) {
+        Log.d(TAG, "NativeMenu: BackHandler closing menu (state=$state)")
+        onExpandedChange(false)
     }
 
-    if (!isOpen) return
+    if (!expanded) return
 
     // Measure available width to branch between compact and wide layouts.
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val isCompact = maxWidth < 600.dp
+        val dismiss = {
+            Log.d(TAG, "NativeMenu: close requested (state=$state)")
+            onExpandedChange(false)
+        }
         if (isCompact) {
             CompactMenu(
                 state = state,
                 onAction = onAction,
-                onClose = {
-                    Log.d(TAG, "NativeMenu: compact menu close requested (state=$state)")
-                    isOpen = false
-                    onBack()
-                },
+                onClose = dismiss,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             WideMenu(
                 state = state,
                 onAction = onAction,
-                onClose = {
-                    Log.d(TAG, "NativeMenu: wide menu close requested (state=$state)")
-                    isOpen = false
-                    onBack()
-                },
+                onClose = dismiss,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -322,23 +306,17 @@ private fun MenuItems(
  * capturing — e.g., Resume when already playing is a no-op but still enabled
  * for convenience; ReturnToHub is always enabled.
  */
-private fun isActionEnabled(action: MenuAction, state: SessionState): Boolean {
+internal fun isActionEnabled(action: MenuAction, state: SessionState): Boolean {
     return when (action) {
         is MenuAction.Resume -> state is SessionState.Playing ||
-            state is SessionState.Capturing ||
-            state is SessionState.Degraded ||
-            state is SessionState.Restoring ||
-            state is SessionState.RecoveryRequired
-        is MenuAction.SnapshotNow -> state is SessionState.Playing ||
+            state is SessionState.Background ||
             state is SessionState.Degraded
-        is MenuAction.Checkpoint -> state is SessionState.Playing ||
-            state is SessionState.Capturing ||
-            state is SessionState.Degraded
-        is MenuAction.Vault -> true // always available
-        is MenuAction.Reload -> state is SessionState.Playing ||
-            state is SessionState.Degraded
-        is MenuAction.Display -> true // always available
-        is MenuAction.ReturnToHub -> true // always available
+        is MenuAction.SnapshotNow -> state is SessionState.Playing
+        is MenuAction.Checkpoint -> state is SessionState.Playing
+        is MenuAction.Vault -> false
+        is MenuAction.Reload -> state is SessionState.Playing
+        is MenuAction.Display -> false
+        is MenuAction.ReturnToHub -> true
     }
 }
 

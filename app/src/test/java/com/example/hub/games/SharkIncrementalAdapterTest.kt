@@ -67,6 +67,17 @@ class SharkIncrementalAdapterTest {
     }
 
     @Test
+    fun `read script flushes save and write script quotes payload`() {
+        assertTrue(SharkIncrementalAdapter.JS_READ_SAVE.contains("save()"))
+        assertFalse(SharkIncrementalAdapter.JS_READ_SAVE.trimStart().startsWith("return"))
+        assertTrue(SharkIncrementalAdapter.JS_PLAYER_EXISTS.startsWith("(function()"))
+        val nasty = "quote\"slash\\newline\n"
+        val script = SharkIncrementalAdapter().setSaveScript(nasty)
+        assertTrue(script.contains(JSONObject.quote(nasty)))
+        assertFalse(script.contains("\n"))
+    }
+
+    @Test
     fun `prepareRestore handles malformed input gracefully`() = runBlocking {
         val malformed = "not-base64!!!"
         val result = adapter.prepareRestore(malformed)

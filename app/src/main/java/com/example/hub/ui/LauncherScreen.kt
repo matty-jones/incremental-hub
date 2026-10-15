@@ -26,16 +26,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.hub.database.HubDatabase
 import com.example.hub.games.DisplayDefaults
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.RegisteredGame
@@ -58,22 +56,18 @@ private const val TAG = "LauncherScreen"
  */
 @Composable
 fun LauncherScreen(
+    registry: GameRegistry,
+    instanceDao: com.example.hub.database.GameInstanceDao,
     onLaunch: (String) -> Unit,
     onResume: (String) -> Unit,
 ) {
-    val context = LocalContext.current
-    val registry = remember(context) { GameRegistry(context) }
-
-    // Collect last-played millis from the DAO via produceState.
-    val lastPlayedByGameId by produceState<Map<String, Long>>(initialValue = emptyMap()) {
-        val db = HubDatabase.getInstance(context)
-        val dao = db.gameInstanceDao()
-        dao.getAllOrdered().collect { instances ->
+    val lastPlayedByGameId by produceState<Map<String, Long>>(initialValue = emptyMap(), instanceDao) {
+        instanceDao.getAllOrdered().collect { instances ->
             value = instances.associate { it.gameId to it.lastPlayedAtMillis }
         }
     }
 
-    val games by produceState<List<RegisteredGame>>(initialValue = emptyList()) {
+    val games by produceState<List<RegisteredGame>>(initialValue = emptyList(), lastPlayedByGameId, registry) {
         val ordered = registry.getGames(lastPlayedByGameId)
         Log.d(TAG, "LauncherScreen: rendering ${ordered.size} game(s) in order: ${ordered.map { it.gameId }}")
         value = ordered
@@ -241,7 +235,9 @@ private fun GameCard(
             ) {
                 if (hasSession) {
                     TextButton(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("resume-${game.gameId}"),
                         onClick = { onResume(game.gameId) },
                         colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                             contentColor = accentColor,
@@ -251,7 +247,9 @@ private fun GameCard(
                     }
                 }
                 TextButton(
-                    modifier = Modifier.weight(if (hasSession) 1f else 2f),
+                    modifier = Modifier
+                        .weight(if (hasSession) 1f else 2f)
+                        .testTag("launch-${game.gameId}"),
                     onClick = { onLaunch(game.gameId) },
                     colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                         contentColor = if (hasSession) MaterialTheme.colorScheme.onSurfaceVariant else accentColor,

@@ -70,7 +70,10 @@ open class GameRegistry(private val context: Context) {
      *   when the DAO is unavailable (e.g. in unit tests without a Room database).
      */
     fun getGames(lastPlayedByGameId: Map<String, Long>? = null): List<RegisteredGame> {
-        val base = resolvedGames
+        val base = resolvedGames.map { game ->
+            val playedAt = lastPlayedByGameId?.get(game.gameId)
+            if (playedAt != null) game.copy(lastPlayedAtMillis = playedAt) else game
+        }
         if (lastPlayedByGameId == null || lastPlayedByGameId.isEmpty()) {
             return base.sortedBy { it.gameId }
         }

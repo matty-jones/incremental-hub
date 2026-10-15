@@ -3,7 +3,10 @@ package com.example.hub.navigation
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -19,38 +22,31 @@ import com.example.hub.ui.PlaySurface
 private const val TAG = "HubNavigation"
 
 /**
- * Navigation host for the Playable Hub app.
- *
- * Two routes:
- * - `"launcher"` — the main launcher screen ([LauncherScreen]).
- * - `"play_surface/{gameId}"` — the play surface ([PlaySurface]),
- *   wired with [SessionController] as the sole session lifecycle owner.
- *
- * The [SessionController] is created once at NavHost scope and shared across
- * all play-surface routes so it survives navigation.
+ * Navigation host. [gameRegistry] and [database] are created once by the
+ * activity and shared with the launcher and the session controller.
  */
 @Composable
 fun HubNavigation(
     context: Context,
-    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    gameRegistry: GameRegistry,
+    database: HubDatabase,
+    modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
     val lifecycleOwner = LocalLifecycleOwner.current
-
-    // Create dependencies once at NavHost scope so they survive recomposition.
-    val registry = remember(context) { GameRegistry(context) }
-    val database = remember(context) { HubDatabase.getInstance(context) }
     val dao = database.gameInstanceDao()
-
-    // SessionController created once at NavHost scope — NOT inside a composable
-    // remember, so it survives recomposition and navigation.
-    val controller = remember(lifecycleOwner, registry, dao) {
+    val controller = remember(lifecycleOwner, gameRegistry, dao) {
         SessionController(
             context = context,
-            gameRegistry = registry,
+            gameRegistry = gameRegistry,
             instanceDao = dao,
             lifecycleOwner = lifecycleOwner,
         )
+    }
+
+    DisposableEffect(lifecycleOwner, controller) {
+        controller.attach(lifecycleOwner)
+        onDispose { controller.detach() }
     }
 
     NavHost(
@@ -60,12 +56,14 @@ fun HubNavigation(
     ) {
         composable("launcher") {
             LauncherScreen(
+                registry = gameRegistry,
+                instanceDao = dao,
                 onLaunch = { gameId ->
-                    Log.d(TAG, "HubNavigation: navigate to play_surface/$gameId (launch)")
+                    Log.d(TAG, "navigate to play_surface/$gameId (launch)")
                     navController.navigate("play_surface/$gameId")
                 },
                 onResume = { gameId ->
-                    Log.d(TAG, "HubNavigation: navigate to play_surface/$gameId (resume)")
+                    Log.d(TAG, "navigate to play_surface/$gameId (resume)")
                     navController.navigate("play_surface/$gameId")
                 },
             )
@@ -76,8 +74,18 @@ fun HubNavigation(
         ) { backStackEntry ->
             val gameId = backStackEntry.arguments?.getString("gameId")
                 ?: throw IllegalArgumentException("gameId is required for play_surface route")
-            Log.d(TAG, "HubNavigation: play_surface displayed for gameId=$gameId")
-            PlaySurface(gameId = gameId, controller = controller)
+            LaunchedEffect(gameId) {
+                Log.d(TAG, "opening session for gameId=$gameId")
+                controller.open(gameId)
+            }
+            PlaySurface(
+                gameId = gameId,
+                controller = controller,
+                onExit = {
+                    Log.d(TAG, "return to launcher from $gameId")
+                    navController.popBackStack()
+                },
+            )
         }
     }
 }

@@ -14,7 +14,7 @@ import androidx.room.migration.Migration
  */
 @Database(
     entities = [GameInstance::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class HubDatabase : RoomDatabase() {
@@ -44,12 +44,27 @@ abstract class HubDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE game_instances ADD COLUMN snapshot_payload TEXT")
+                db.execSQL(
+                    "ALTER TABLE game_instances ADD COLUMN last_capture_attempt_at_millis INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE game_instances ADD COLUMN last_capture_success_at_millis INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE game_instances ADD COLUMN last_capture_failure_at_millis INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL("ALTER TABLE game_instances ADD COLUMN last_capture_error TEXT")
+            }
+        }
+
         private fun buildDatabase(context: Context) = Room.databaseBuilder(
             context.applicationContext,
             HubDatabase::class.java,
             DATABASE_NAME,
-        ).fallbackToDestructiveMigration()
-            .addMigrations(MIGRATION_1_2)
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 }

@@ -4,13 +4,8 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.util.Base64
-import java.util.zip.GZIPOutputStream
 
 /**
  * Unit tests for Fe000000Adapter format logic.
@@ -21,29 +16,45 @@ class Fe000000AdapterTest {
     private val adapter = Fe000000Adapter()
 
     @Test
-    fun `capture payload round-trip preserves data`() = runBlocking {
-        val saveData = JSONObject().apply {
-            put("player", JSONObject().apply {
-                put("money", 5000)
-                put("level", 12)
-            })
-            put("version", "2.1.0")
-        }
-        val jsonStr = saveData.toString()
-        val compressed = compressGzip(jsonStr)
-        val b64 = Base64.getEncoder().encodeToString(compressed)
-        val wrapped = "FE000000SaveStart" + b64 + "FE000000SaveEnd"
+    fun `live zlib save round-trip preserves required fields`() = runBlocking {
+        val json = JSONObject()
+            .put("boost", 4)
+            .put("currentTab", "main")
+            .put("generators", org.json.JSONArray(listOf(1, 2)))
+            .put("lastUpdate", 99)
+            .put("prestigePower", 8)
+            .put("stars", "1.5e3")
+            .toString()
+        val wrapped = Fe000000Adapter.encodeSave(json)
+        assertTrue(adapter.validate(wrapped))
+        assertEquals(wrapped, adapter.prepareRestore(wrapped))
+        val decoded = JSONObject(Fe000000Adapter.decodeSave(wrapped))
+        assertEquals(4, decoded.getInt("boost"))
+        assertEquals("1.5e3", decoded.getString("stars"))
+    }
 
-        val validated = adapter.validate(wrapped)
-        assertTrue("valid gzip-base64 payload should pass validation", validated)
+    @Test
+    fun `python zlib fixture matches pako deflate alphabet`() = runBlocking {
+        val fixture = "FE000000SaveStarteJwVyzEOQEAQBdC70cHoKS7enUFCJYjARCbubmRGFuDv6925MOZsjBsJ8qkryjidEHLwlEFZJouxZDXEII2Fn874s7PKdilBUzLdV2nyJItYEc0c41Gjwv2TAfBQFE000000SaveEnd"
+        assertTrue(adapter.validate(fixture))
+        val decoded = JSONObject(Fe000000Adapter.decodeSave(fixture))
+        assertEquals(1, decoded.getInt("boost"))
+        assertEquals("main", decoded.getString("currentTab"))
+        assertEquals("3", decoded.getString("stars"))
+    }
 
-        val restored = adapter.prepareRestore(wrapped)
-        val inner = stripMarkers(restored)
-        assertNotNull("markers should be stripped", inner)
-        val decompressed = decompressGzip(Base64.getDecoder().decode(inner!!))
-        val restoredJson = JSONObject(String(decompressed, Charsets.UTF_8))
-        assertEquals(5000, restoredJson.getJSONObject("player").getInt("money"))
-        assertEquals(12, restoredJson.getJSONObject("player").getInt("level"))
+    @Test
+    fun `scripts are invoked functions and quote payload characters`() {
+        assertFalse(Fe000000Adapter.JS_PLAYER_READY.trimStart().startsWith("return"))
+        assertFalse(Fe000000Adapter.JS_FLUSH_AND_READ.trimStart().startsWith("return"))
+        assertTrue(Fe000000Adapter.JS_FLUSH_AND_READ.contains("Saving.saveGame(true, false)"))
+        assertTrue(Fe000000Adapter.JS_FLUSH_AND_READ.contains("fe000000-save"))
+        val nasty = "a\"b\\c\n\u2028</script>"
+        val script = Fe000000Adapter.setSaveScript(nasty)
+        assertTrue(script.startsWith("(function()"))
+        assertTrue(script.contains(JSONObject.quote(nasty)))
+        assertFalse(script.contains("arguments[0]"))
+        assertFalse(script.contains("\n"))
     }
 
     @Test
@@ -53,10 +64,9 @@ class Fe000000AdapterTest {
     }
 
     @Test
-    fun `validate rejects invalid gzip content`() = runBlocking {
-        val b64 = Base64.getEncoder().encodeToString("not-gzip".toByteArray(Charsets.UTF_8))
-        val wrapped = "FE000000SaveStart" + b64 + "FE000000SaveEnd"
-        assertFalse("invalid gzip should fail validation", adapter.validate(wrapped))
+    fun `validate rejects payload that is not zlib deflate`() = runBlocking {
+        val wrapped = "FE000000SaveStartnot-a-saveFE000000SaveEnd"
+        assertFalse(adapter.validate(wrapped))
     }
 
     @Test
@@ -80,21 +90,5 @@ class Fe000000AdapterTest {
         val endIdx = afterStart.indexOf("FE000000SaveEnd")
         if (endIdx < 0) return null
         return afterStart.substring(0, endIdx)
-    }
-
-    private fun compressGzip(data: String): ByteArray {
-        val baos = ByteArrayOutputStream()
-        GZIPOutputStream(baos).use { gos ->
-            gos.write(data.toByteArray(Charsets.UTF_8))
-        }
-        return baos.toByteArray()
-    }
-
-    private fun decompressGzip(data: ByteArray): ByteArray {
-        val baos = ByteArrayOutputStream()
-        java.util.zip.GZIPInputStream(ByteArrayInputStream(data)).use { gis ->
-            gis.copyTo(baos)
-        }
-        return baos.toByteArray()
     }
 }

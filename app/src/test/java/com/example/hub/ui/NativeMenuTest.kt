@@ -166,43 +166,13 @@ class NativeMenuTest {
     // -----------------------------------------------------------------
 
     @Test
-    fun menuOpen_whenPlaying() {
-        assertTrue("Menu should be open when Playing", isMenuOpen(SessionState.Playing))
-    }
-
-    @Test
-    fun menuOpen_whenCapturing() {
-        assertTrue("Menu should be open when Capturing", isMenuOpen(SessionState.Capturing))
-    }
-
-    @Test
-    fun menuOpen_whenBackground() {
-        assertTrue("Menu should be open when Background", isMenuOpen(SessionState.Background))
-    }
-
-    @Test
-    fun menuOpen_whenDegraded() {
-        assertTrue("Menu should be open when Degraded", isMenuOpen(SessionState.Degraded))
-    }
-
-    @Test
-    fun menuOpen_whenRestoring() {
-        assertTrue("Menu should be open when Restoring", isMenuOpen(SessionState.Restoring))
-    }
-
-    @Test
-    fun menuOpen_whenRecoveryRequired() {
-        assertTrue("Menu should be open when RecoveryRequired", isMenuOpen(SessionState.RecoveryRequired))
-    }
-
-    @Test
-    fun menuOpen_whenOpening() {
-        assertTrue("Menu should be open when Opening", isMenuOpen(SessionState.Opening))
-    }
-
-    @Test
-    fun menuClosed_whenClosed() {
-        assertFalse("Menu should be closed when Closed", isMenuOpen(SessionState.Closed))
+    fun sessionStateDoesNotForceMenuOpen() {
+        for (state in allStates()) {
+            assertFalse(
+                "Session state $state must not force the menu open",
+                sessionStateForcesMenuOpen(state),
+            )
+        }
     }
 
     // -----------------------------------------------------------------
@@ -220,22 +190,10 @@ class NativeMenuTest {
     }
 
     @Test
-    fun displayAlwaysEnabled() {
+    fun displayAndVaultStayDisabled() {
         for (state in allStates()) {
-            assertTrue(
-                "Display should be enabled in $state",
-                isActionEnabled(MenuAction.Display, state),
-            )
-        }
-    }
-
-    @Test
-    fun vaultAlwaysEnabled() {
-        for (state in allStates()) {
-            assertTrue(
-                "Vault should be enabled in $state",
-                isActionEnabled(MenuAction.Vault, state),
-            )
+            assertFalse(isActionEnabled(MenuAction.Display, state))
+            assertFalse(isActionEnabled(MenuAction.Vault, state))
         }
     }
 
@@ -299,40 +257,4 @@ class NativeMenuTest {
         )
     }
 
-    /**
-     * Mirrors the composable's internal `isMenuOpen` logic.
-     * Returns true when the session state indicates the menu should be visible.
-     */
-    private fun isMenuOpen(state: SessionState): Boolean {
-        return state is SessionState.Playing ||
-            state is SessionState.Capturing ||
-            state is SessionState.Background ||
-            state is SessionState.Degraded ||
-            state is SessionState.Restoring ||
-            state is SessionState.RecoveryRequired ||
-            state is SessionState.Opening
-    }
-
-    /**
-     * Mirrors the composable's internal `isActionEnabled` logic.
-     */
-    private fun isActionEnabled(action: MenuAction, state: SessionState): Boolean {
-        return when (action) {
-            is MenuAction.Resume -> state is SessionState.Playing ||
-                state is SessionState.Capturing ||
-                state is SessionState.Degraded ||
-                state is SessionState.Restoring ||
-                state is SessionState.RecoveryRequired
-            is MenuAction.SnapshotNow -> state is SessionState.Playing ||
-                state is SessionState.Degraded
-            is MenuAction.Checkpoint -> state is SessionState.Playing ||
-                state is SessionState.Capturing ||
-                state is SessionState.Degraded
-            is MenuAction.Vault -> true
-            is MenuAction.Reload -> state is SessionState.Playing ||
-                state is SessionState.Degraded
-            is MenuAction.Display -> true
-            is MenuAction.ReturnToHub -> true
-        }
-    }
 }
