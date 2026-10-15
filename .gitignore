@@ -3,6 +3,7 @@
 .gsd-worktrees/
 .gsd-backups/
 .gsd-id
+.gsd/
 .mcp.json
 .bg-shell/
 .claude/settings.local.json
