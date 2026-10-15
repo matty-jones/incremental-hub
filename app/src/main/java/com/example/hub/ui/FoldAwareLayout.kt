@@ -3,9 +3,7 @@ package com.example.hub.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -21,21 +19,15 @@ import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowMetricsCalculator
 import com.example.hub.session.SessionState
+import com.example.hub.ui.theme.HubWideWidth
 
 /**
- * Fold-aware layout composable that applies insets for status bar,
- * navigation bar, IME, and display cutout (safe-area).
- *
- * Uses modifier-based inset application ([statusBarsPadding],
- * [navigationBarsPadding], [imePadding]) which are guaranteed to be
- * available across all Compose foundation versions.
- *
- * Branches between compact and wide layouts using [WindowMetricsCalculator]
- * (which accounts for fold state). In folded/foldable-device state the WebView
- * content is shifted away from the hinge line by reserving space.
+ * Fold-aware layout. The WebView stays full-bleed; status and navigation
+ * bars are left to the chrome drawn on top. IME padding still applies while
+ * a session is open, and a vertical hinge still reserves start padding.
  *
  * @param state the current session state — used to skip IME when closed
- * @param content the content to lay out inside the safe-area insets
+ * @param content the content to lay out
  * @param modifier modifier for the outer box
  */
 @Composable
@@ -66,16 +58,10 @@ fun FoldAwareLayout(
     } ?: 0.dp
 
     val baseModifier = if (state is SessionState.Closed) {
-        // No IME when session is closed — no WebView to cover.
-        Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
+        Modifier.fillMaxSize()
     } else {
         Modifier
             .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
             .imePadding()
     }
 
@@ -96,8 +82,7 @@ fun FoldAwareLayout(
  * Returns true when the current window is wide enough to host a side-panel
  * menu alongside the WebView without crowding.
  *
- * Mirrors the width threshold in [com.example.hub.ui.NativeMenu] (600dp) but
- * uses actual window metrics — more robust in multi-window scenarios.
+ * Uses [HubWideWidth], the same threshold as the in-game sheet.
  */
 @Composable
 fun isWideWindow(): Boolean {
@@ -105,7 +90,7 @@ fun isWideWindow(): Boolean {
     val metrics = WindowMetricsCalculator.getOrCreate()
         .computeMaximumWindowMetrics(context)
     val widthDp = with(LocalDensity.current) { metrics.bounds.width().toDp() }
-    return widthDp >= 600.dp
+    return widthDp >= HubWideWidth
 }
 
 internal fun pxToDp(px: Int, density: Float): Float {

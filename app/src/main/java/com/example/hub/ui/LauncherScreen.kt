@@ -4,7 +4,6 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,11 +15,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,36 +25,32 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.hub.games.DisplayDefaults
+import com.example.hub.R
+import com.example.hub.database.GameInstanceDao
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.RegisteredGame
+import com.example.hub.ui.chrome.AccentCard
+import com.example.hub.ui.chrome.HubScaffold
+import com.example.hub.ui.chrome.HubTopBar
+import com.example.hub.ui.chrome.StatusChip
+import com.example.hub.ui.chrome.hubAccentColor
+import com.example.hub.ui.chrome.onAccentColor
 
 private const val TAG = "LauncherScreen"
 
 /**
- * Material 3 launcher screen showing registered games as native cards.
- *
- * Games are ordered with recently-played-first (by [RegisteredGame.lastPlayedAtMillis]
- * DESC), then alphabetical by [RegisteredGame.gameId]. Each card shows the game's
- * [RegisteredGame.displayName], a status label ("Resume" when [lastPlayedAtMillis]
- * is non-null, "Launch" otherwise), and action buttons.
- *
- * Color hints are pulled from [RegisteredGame.displayDefaults]. The composable reads
- * the DAO via [remember] + [produceState] — no ViewModel per the S01 constraint.
- *
- * @param onLaunch callback fired when the user taps "Launch" (no prior session).
- * @param onResume callback fired when the user taps "Resume" (prior session exists).
+ * Launcher of registered games. Recently played games come first.
+ * Color hints come from each game's display defaults.
  */
 @Composable
 fun LauncherScreen(
     registry: GameRegistry,
-    instanceDao: com.example.hub.database.GameInstanceDao,
+    instanceDao: GameInstanceDao,
     onLaunch: (String) -> Unit,
     onResume: (String) -> Unit,
 ) {
@@ -73,9 +66,8 @@ fun LauncherScreen(
         value = ordered
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+    HubScaffold(
+        topBar = { HubTopBar(title = stringResource(R.string.app_name)) },
     ) { padding ->
         if (games.isEmpty()) {
             Box(
@@ -116,13 +108,6 @@ fun LauncherScreen(
     }
 }
 
-/**
- * A single game card rendered with color hints from [RegisteredGame.displayDefaults].
- *
- * Shows [RegisteredGame.displayName], a status label ("Resume" / "Launch"),
- * and action buttons. When [DisplayDefaults.colorPrimary] is non-null, the card
- * uses it as an accent stripe.
- */
 @Composable
 private fun GameCard(
     game: RegisteredGame,
@@ -131,152 +116,114 @@ private fun GameCard(
 ) {
     val hasSession = game.lastPlayedAtMillis != null
     val statusText = if (hasSession) "Resume" else "Launch"
-    val accentColor = parseColorOrNull(game.displayDefaults.colorPrimary)
+    val accentColor = hubAccentColor(game.displayDefaults.colorPrimary)
         ?: MaterialTheme.colorScheme.primary
+    val onAccent = onAccentColor(accentColor)
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = accentColor.copy(alpha = 0.06f),
-        ),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    ) {
-        // Accent stripe at top
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .background(accentColor),
-        )
-
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
+    AccentCard(accentColor = accentColor) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Header row: badge + displayName + status
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Badge (if configured)
-                if (game.displayDefaults.badgeText != null) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(
-                                color = accentColor.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(8.dp),
-                            )
-                            .padding(4.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = game.displayDefaults.badgeText!!,
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                color = accentColor,
-                                fontWeight = FontWeight.Bold,
-                            ),
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                }
-
-                // Display name (primary)
-                Text(
-                    text = game.displayName,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Status chip
-                Surface(
-                    color = if (hasSession) accentColor.copy(alpha = 0.12f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(20.dp),
+            if (game.displayDefaults.badgeText != null) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(
+                            color = accentColor.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (hasSession) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium,
-                        ),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        text = game.displayDefaults.badgeText!!,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = accentColor,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
+                Spacer(modifier = Modifier.width(12.dp))
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Subtle URL hint
             Text(
-                text = game.launchUrl,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                ),
+                text = game.displayName,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
-            // Action buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (hasSession) {
-                    TextButton(
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("resume-${game.gameId}"),
-                        onClick = { onResume(game.gameId) },
-                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                            contentColor = accentColor,
-                        ),
-                    ) {
-                        Text("Resume", fontWeight = FontWeight.Medium)
-                    }
+            StatusChip(
+                text = statusText,
+                containerColor = if (hasSession) {
+                    accentColor.copy(alpha = 0.16f)
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                },
+                contentColor = if (hasSession) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = game.launchUrl,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (hasSession) {
+                Button(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("resume-${game.gameId}"),
+                    onClick = { onResume(game.gameId) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accentColor,
+                        contentColor = onAccent,
+                    ),
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text("Resume", fontWeight = FontWeight.Medium)
                 }
                 TextButton(
                     modifier = Modifier
-                        .weight(if (hasSession) 1f else 2f)
+                        .weight(1f)
                         .testTag("launch-${game.gameId}"),
                     onClick = { onLaunch(game.gameId) },
-                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                        contentColor = if (hasSession) MaterialTheme.colorScheme.onSurfaceVariant else accentColor,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
                 ) {
-                    Text("Launch", fontWeight = if (hasSession) FontWeight.Normal else FontWeight.Medium)
+                    Text("Launch")
                 }
-                if (hasSession) {
-                    Spacer(modifier = Modifier.width(8.dp))
+            } else {
+                Button(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("launch-${game.gameId}"),
+                    onClick = { onLaunch(game.gameId) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accentColor,
+                        contentColor = onAccent,
+                    ),
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text("Launch", fontWeight = FontWeight.Medium)
                 }
             }
         }
     }
-}
-
-/**
- * Parse a hex color string (e.g. `#1565C0`) to a [Color].
- * Returns null when the input is null or malformed.
- */
-private fun parseColorOrNull(hex: String?): Color? {
-    if (hex == null) return null
-    return runCatching {
-        val cleaned = hex.removePrefix("#")
-        val int = cleaned.toLong(16)
-        when {
-            cleaned.length <= 6 -> Color(int + 0xFF000000L)
-            else -> Color(int)
-        }
-    }.getOrNull()
 }
