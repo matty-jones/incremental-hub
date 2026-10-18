@@ -68,3 +68,10 @@ fun decideMerge(
         else -> MergeDecision.Skip
     }
 }
+
+/**
+ * An open session keeps its stored pointer. A pull is archived by the caller
+ * and is not written over the save the game is using.
+ */
+fun replacesStoredPointer(sessionOpen: Boolean, decision: MergeDecision): Boolean =
+    decision == MergeDecision.Pull && !sessionOpen

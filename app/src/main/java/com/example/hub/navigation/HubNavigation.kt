@@ -5,26 +5,22 @@ import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.hub.database.HubDatabase
-import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
-import com.example.hub.sync.SaveAssessment
 import com.example.hub.session.LaunchMode
-import com.example.hub.session.SessionController
-import com.example.hub.sync.SaveSync
-import com.example.hub.sync.WorkstationClient
 import com.example.hub.ui.ConnectedLauncher
 import com.example.hub.ui.PlaySurface
-import kotlinx.coroutines.launch
+import com.example.hub.ui.findActivity
 
 private const val TAG = "HubNavigation"
 
@@ -41,36 +37,19 @@ fun HubNavigation(
 ) {
     val navController = rememberNavController()
     val lifecycleOwner = LocalLifecycleOwner.current
-    val dao = database.gameInstanceDao()
-    val scope = rememberCoroutineScope()
-    val workstation = remember { WorkstationClient() }
-    val saveSync = remember(dao, gameRegistry) {
-        SaveSync(
-            dao = dao,
-            api = workstation,
-            snapshotDao = database.snapshotDao(),
-        ) { gameId, localPayload, remotePayload ->
-            val game = gameRegistry.getGame(gameId) ?: return@SaveSync SaveAssessment()
-            val adapter = GameAdapters.create(game.adapterId) ?: return@SaveSync SaveAssessment()
-            val comparison = adapter.compare(localPayload, remotePayload)
-            SaveAssessment(
-                localStanding = adapter.summarize(localPayload).standing,
-                remoteStanding = adapter.summarize(remotePayload).standing,
-                comparison = if (game.adapterId == "shark-incremental-adapter") comparison else null,
-            )
-        }
-    }
-    val controller = remember(lifecycleOwner, gameRegistry, dao, saveSync) {
-        SessionController(
-            context = context,
+    val activity = LocalContext.current.findActivity()
+    val sessionModel: HubSessionViewModel = viewModel(
+        factory = HubSessionViewModelFactory(
+            context = context.applicationContext,
             gameRegistry = gameRegistry,
-            instanceDao = dao,
-            lifecycleOwner = lifecycleOwner,
-            onSnapshotSaved = { instance ->
-                scope.launch { saveSync.push(instance) }
-            },
-            snapshotDao = database.snapshotDao(),
-        )
+            database = database,
+        ),
+    )
+    val controller = sessionModel.controller
+    val dao = database.gameInstanceDao()
+
+    SideEffect {
+        controller.configurationChanging = { activity?.isChangingConfigurations == true }
     }
 
     DisposableEffect(lifecycleOwner, controller) {
@@ -88,14 +67,10 @@ fun HubNavigation(
                 context = context,
                 registry = gameRegistry,
                 instanceDao = dao,
-                saveSync = saveSync,
-                api = workstation,
-                onLaunch = { gameId ->
-                    Log.d(TAG, "navigate to play_surface/$gameId (launch)")
-                    navController.navigate("play_surface/$gameId?mode=resume")
-                },
-                onResume = { gameId ->
-                    Log.d(TAG, "navigate to play_surface/$gameId (resume)")
+                saveSync = sessionModel.saveSync,
+                api = sessionModel.workstationApi,
+                onPlay = { gameId ->
+                    Log.d(TAG, "navigate to play_surface/$gameId")
                     navController.navigate("play_surface/$gameId?mode=resume")
                 },
                 onInspect = { gameId ->
@@ -105,6 +80,10 @@ fun HubNavigation(
                 onSafeLaunch = { gameId ->
                     Log.d(TAG, "navigate to play_surface/$gameId (safe)")
                     navController.navigate("play_surface/$gameId?mode=safe")
+                },
+                onRecover = { gameId ->
+                    Log.d(TAG, "navigate to play_surface/$gameId (recover)")
+                    navController.navigate("play_surface/$gameId?mode=recover")
                 },
             )
         }
@@ -120,6 +99,7 @@ fun HubNavigation(
             val mode = when (backStackEntry.arguments?.getString("mode")) {
                 "inspect" -> LaunchMode.INSPECT
                 "safe" -> LaunchMode.SAFE
+                "recover" -> LaunchMode.RECOVER
                 else -> LaunchMode.RESUME
             }
             LaunchedEffect(gameId, mode) {

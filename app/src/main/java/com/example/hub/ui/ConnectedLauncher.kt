@@ -43,10 +43,10 @@ fun ConnectedLauncher(
     instanceDao: GameInstanceDao,
     saveSync: SaveSync,
     api: WorkstationApi,
-    onLaunch: (String) -> Unit,
-    onResume: (String) -> Unit,
+    onPlay: (String) -> Unit,
     onInspect: (String) -> Unit = {},
     onSafeLaunch: (String) -> Unit = {},
+    onRecover: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val installer = remember(context, api) { UpdateInstaller(context, api) }
@@ -95,10 +95,10 @@ fun ConnectedLauncher(
             registry = registry,
             instanceDao = instanceDao,
             syncSettled = syncSettled,
-            onLaunch = onLaunch,
-            onResume = onResume,
+            onPlay = onPlay,
             onInspect = onInspect,
             onSafeLaunch = onSafeLaunch,
+            onRecover = onRecover,
         )
         val available = update
         if (available != null) {

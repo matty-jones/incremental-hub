@@ -17,6 +17,8 @@ data class SnapshotRecord(
     val pinned: Boolean,
     val payload: String,
     @ColumnInfo(name = "progress_json") val progressJson: String?,
+    @ColumnInfo(name = "origin", defaultValue = "local-capture")
+    val origin: String = SnapshotOrigins.LOCAL_CAPTURE,
 )
 
 object SnapshotReasons {
@@ -24,4 +26,19 @@ object SnapshotReasons {
     const val DIAGNOSTIC_BACKUP = "diagnostic-backup"
     const val PRE_RESTORE = "pre-restore"
     const val WORKSTATION = "workstation"
+    const val CHECKPOINT = "checkpoint"
+}
+
+object SnapshotOrigins {
+    const val LOCAL_CAPTURE = "local-capture"
+    const val MANUAL_CHECKPOINT = "manual-checkpoint"
+    const val RECOVERY = "recovery"
+    const val WORKSTATION = "workstation-sync"
+}
+
+fun originForReason(reason: String): String = when (reason) {
+    SnapshotReasons.CHECKPOINT -> SnapshotOrigins.MANUAL_CHECKPOINT
+    SnapshotReasons.PRE_RESTORE -> SnapshotOrigins.RECOVERY
+    SnapshotReasons.WORKSTATION -> SnapshotOrigins.WORKSTATION
+    else -> SnapshotOrigins.LOCAL_CAPTURE
 }

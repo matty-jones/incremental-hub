@@ -11,13 +11,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
-import androidx.window.layout.WindowMetricsCalculator
 import com.example.hub.session.SessionState
 import com.example.hub.ui.theme.HubWideWidth
 
@@ -82,15 +82,13 @@ fun FoldAwareLayout(
  * Returns true when the current window is wide enough to host a side-panel
  * menu alongside the WebView without crowding.
  *
- * Uses [HubWideWidth], the same threshold as the in-game sheet.
+ * Uses the current configuration width, which changes when a Pixel Fold
+ * opens or closes. The maximum window size does not.
  */
 @Composable
 fun isWideWindow(): Boolean {
-    val context = LocalContext.current
-    val metrics = WindowMetricsCalculator.getOrCreate()
-        .computeMaximumWindowMetrics(context)
-    val widthDp = with(LocalDensity.current) { metrics.bounds.width().toDp() }
-    return widthDp >= HubWideWidth
+    val widthDp = LocalConfiguration.current.screenWidthDp
+    return widthDp >= HubWideWidth.value.toInt()
 }
 
 internal fun pxToDp(px: Int, density: Float): Float {

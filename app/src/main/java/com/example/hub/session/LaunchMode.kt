@@ -4,4 +4,5 @@ enum class LaunchMode {
     RESUME,
     INSPECT,
     SAFE,
+    RECOVER,
 }

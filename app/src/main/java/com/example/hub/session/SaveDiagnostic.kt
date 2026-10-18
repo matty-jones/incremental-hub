@@ -1,5 +1,6 @@
 package com.example.hub.session
 
+import com.example.hub.database.SnapshotOrigins
 import com.example.hub.games.SaveComparison
 
 data class HistoryEntry(
@@ -9,6 +10,7 @@ data class HistoryEntry(
     val capturedAtMillis: Long,
     val byteLength: Int,
     val detail: String,
+    val origin: String = SnapshotOrigins.LOCAL_CAPTURE,
 )
 
 /**

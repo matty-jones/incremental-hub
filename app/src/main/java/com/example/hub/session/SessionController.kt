@@ -3,6 +3,7 @@ package com.example.hub.session
 import android.content.Context
 import android.os.Looper
 import android.util.Log
+import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -15,6 +16,7 @@ import com.example.hub.database.GameInstanceDao
 import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
+import com.example.hub.database.originForReason
 import com.example.hub.games.GameAdapter
 import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
@@ -23,6 +25,7 @@ import com.example.hub.games.QualificationResult
 import com.example.hub.games.SaveComparison
 import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
+import com.example.hub.games.SharkLayout
 import com.example.hub.games.shouldResumeLive
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
@@ -84,6 +87,8 @@ class SessionController(
         private const val CAPTURE_CADENCE_MS = 60_000L
         private const val CONSOLE_LIMIT = 50
         private const val CONSOLE_LINE_LIMIT = 500
+        private const val DIAGNOSTIC_LIMIT = 200
+        private const val READINESS_WATCH_MS = 30_000L
     }
 
     private enum class OpenStep {
@@ -133,6 +138,10 @@ class SessionController(
     private val _consoleLines = MutableStateFlow<List<String>>(emptyList())
     val consoleLines: StateFlow<List<String>> = _consoleLines.asStateFlow()
 
+    private val diagnosticBuffer = ArrayDeque<DiagnosticEvent>()
+    private val _diagnosticEvents = MutableStateFlow<List<DiagnosticEvent>>(emptyList())
+    val diagnosticEvents: StateFlow<List<DiagnosticEvent>> = _diagnosticEvents.asStateFlow()
+
     val documentGate = DocumentGate()
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
@@ -159,6 +168,15 @@ class SessionController(
     private var liveBeforeRestore: String? = null
     private var preparedPayload: String? = null
     private val consoleBuffer = ArrayDeque<String>()
+    private var handlingDocument = false
+    private var attachedOwner: LifecycleOwner? = lifecycleOwner
+    private var readinessWatch: Job? = null
+
+    /** Set while a configuration change is moving the existing WebView. */
+    @Volatile var retainAcrossConfiguration: Boolean = false
+
+    /** Activity hook. True only while Android is recreating for a configuration change. */
+    internal var configurationChanging: () -> Boolean = { false }
 
     val isActive: Boolean get() = _state.value !is SessionState.Closed
 
@@ -166,12 +184,30 @@ class SessionController(
         when (event) {
             Lifecycle.Event.ON_DESTROY -> {
                 scope.launch {
-                    mutex.withLock { forceClose() }
+                    mutex.withLock {
+                        if (retainAcrossConfiguration || configurationChanging()) {
+                            recordDiagnostic(
+                                DiagnosticSeverity.INFO,
+                                "lifecycle",
+                                "Configuration change kept the WebView. The page was not reloaded.",
+                            )
+                            return@withLock
+                        }
+                        forceClose()
+                    }
                 }
             }
             Lifecycle.Event.ON_PAUSE -> {
                 scope.launch {
                     mutex.withLock {
+                        if (retainAcrossConfiguration || configurationChanging()) {
+                            recordDiagnostic(
+                                DiagnosticSeverity.INFO,
+                                "lifecycle",
+                                "Configuration change left the live session in place.",
+                            )
+                            return@withLock
+                        }
                         if (_state.value is SessionState.Playing) {
                             performCaptureLocked("background")
                             if (_state.value is SessionState.Playing) {
@@ -195,6 +231,10 @@ class SessionController(
     }
 
     fun attach(owner: LifecycleOwner) {
+        if (attachedOwner !== owner) {
+            attachedOwner?.lifecycle?.removeObserver(this)
+            attachedOwner = owner
+        }
         owner.lifecycle.addObserver(this)
         scope.launch { onAttached() }
         Log.d(TAG, "Attached to lifecycle $owner")
@@ -210,35 +250,62 @@ class SessionController(
             Log.d(TAG, "onAttached: no active recovery instance")
             return
         }
-        Log.d(TAG, "onAttached: recoveryState=${activeInstance.recoveryState} game=${activeInstance.gameId}")
-        launchMode = LaunchMode.RESUME
-        openStep = OpenStep.DECIDE
-        documentGate.phase = DocumentPhase.PEEK
-        documentGate.payload = null
-        _activeGameId.value = activeInstance.gameId
-        _activeProfileName.value = activeInstance.profileName
-        val game = gameRegistry.getGame(activeInstance.gameId)
-        if (game != null) {
-            _launchUrl.value = game.launchUrl
-            activeAdapter = GameAdapters.create(game.adapterId)
-            _activeProfile.value = obtainProfile(activeInstance.profileName)
-        } else {
-            _sessionError.value = "Recovery row ${activeInstance.gameId} is not in the registry"
-        }
-        transitionTo(SessionState.Opening, activeInstance.gameId)
-        when (activeInstance.recoveryState) {
-            "Degraded" -> transitionTo(SessionState.Degraded, activeInstance.gameId)
-            else -> transitionTo(SessionState.RecoveryRequired, activeInstance.gameId)
+        mutex.withLock {
+            if (_state.value !is SessionState.Closed) {
+                recordDiagnostic(
+                    DiagnosticSeverity.INFO,
+                    "lifecycle",
+                    "Left the open session in place. Stored recovery was not applied.",
+                )
+                return@withLock
+            }
+            Log.d(TAG, "onAttached: recoveryState=${activeInstance.recoveryState} game=${activeInstance.gameId}")
+            launchMode = LaunchMode.RESUME
+            openStep = OpenStep.DECIDE
+            documentGate.phase = DocumentPhase.PEEK
+            documentGate.payload = null
+            _activeGameId.value = activeInstance.gameId
+            _activeProfileName.value = activeInstance.profileName
+            val game = gameRegistry.getGame(activeInstance.gameId)
+            if (game != null) {
+                _launchUrl.value = game.launchUrl
+                activeAdapter = GameAdapters.create(game.adapterId)
+                _activeProfile.value = obtainProfile(activeInstance.profileName)
+            } else {
+                _sessionError.value = "Recovery row ${activeInstance.gameId} is not in the registry"
+            }
+            transitionTo(SessionState.Opening, activeInstance.gameId)
+            when (activeInstance.recoveryState) {
+                "Degraded" -> transitionTo(SessionState.Degraded, activeInstance.gameId)
+                else -> transitionTo(SessionState.RecoveryRequired, activeInstance.gameId)
+            }
         }
     }
 
     fun detach() {
-        lifecycleOwner.lifecycle.removeObserver(this)
+        attachedOwner?.lifecycle?.removeObserver(this)
         Log.d(TAG, "Detached from lifecycle")
     }
 
     suspend fun open(gameId: String, mode: LaunchMode = LaunchMode.RESUME) {
         mutex.withLock {
+            if (_activeGameId.value == gameId &&
+                launchMode == mode &&
+                _state.value !is SessionState.Closed &&
+                _state.value !is SessionState.Closing &&
+                _state.value !is SessionState.RecoveryRequired &&
+                _state.value !is SessionState.Degraded
+            ) {
+                if (_state.value is SessionState.Background) {
+                    transitionTo(SessionState.Playing, gameId)
+                }
+                recordDiagnostic(
+                    DiagnosticSeverity.INFO,
+                    "navigation",
+                    "Kept the live $gameId session without reloading.",
+                )
+                return
+            }
             if (_state.value !is SessionState.Closed) {
                 Log.w(TAG, "open($gameId): settling ${_state.value}")
                 settleActiveSession()
@@ -248,7 +315,7 @@ class SessionController(
                 }
             }
             launchMode = mode
-            suppressCapture = mode == LaunchMode.SAFE || mode == LaunchMode.INSPECT
+            suppressCapture = mode == LaunchMode.SAFE || mode == LaunchMode.INSPECT || mode == LaunchMode.RECOVER
             openStep = OpenStep.DECIDE
             restoreInProgress = false
             peekOutcome = null
@@ -315,6 +382,18 @@ class SessionController(
                     return@withLock
                 }
                 performCaptureLocked("request")
+            }
+        }
+    }
+
+    fun requestCheckpoint() {
+        scope.launch {
+            mutex.withLock {
+                if (_state.value !is SessionState.Playing) {
+                    Log.w(TAG, "requestCheckpoint() rejected: ${_state.value}")
+                    return@withLock
+                }
+                performCaptureLocked(SnapshotReasons.CHECKPOINT)
             }
         }
     }
@@ -400,6 +479,9 @@ class SessionController(
         if (consoleBuffer.size >= CONSOLE_LIMIT) consoleBuffer.removeFirst()
         consoleBuffer.addLast(line)
         _consoleLines.value = consoleBuffer.toList()
+        if (line.startsWith("ERROR") || line.contains("Uncaught")) {
+            recordDiagnostic(DiagnosticSeverity.WARNING, "javascript", line)
+        }
     }
 
     fun requestSafeLaunch() {
@@ -457,7 +539,16 @@ class SessionController(
     }
 
     fun registerWebView(view: WebView) {
+        if (webView === view) {
+            recordDiagnostic(
+                DiagnosticSeverity.INFO,
+                "webview",
+                "Reattached the existing WebView without loading a new document.",
+            )
+            return
+        }
         webView = view
+        recordDiagnostic(DiagnosticSeverity.INFO, "webview", "WebView created.")
         val pending = pendingDocumentUrl
         if (pending != null) {
             pendingDocumentUrl = null
@@ -466,9 +557,108 @@ class SessionController(
     }
 
     fun releaseWebView(view: WebView) {
+        if (retainAcrossConfiguration && webView === view) {
+            recordDiagnostic(
+                DiagnosticSeverity.INFO,
+                "webview",
+                "Composition released the WebView during a configuration change. It was not destroyed.",
+            )
+            return
+        }
         if (webView === view) {
             webView = null
+            recordDiagnostic(DiagnosticSeverity.INFO, "webview", "WebView destroyed.")
             runCatching { view.destroy() }
+        }
+    }
+
+    /**
+     * Called from the activity before a configuration recreation. The same
+     * instance is later reattached and must not receive [WebView.loadUrl].
+     */
+    fun retainForConfigurationChange(): WebView? {
+        retainAcrossConfiguration = true
+        val view = webView ?: return null
+        detachForRetain(view)
+        recordDiagnostic(DiagnosticSeverity.INFO, "lifecycle", "Retained WebView for configuration change.")
+        return view
+    }
+
+    fun takeRetainedWebView(): WebView? {
+        if (!retainAcrossConfiguration) return null
+        val view = webView ?: return null
+        retainAcrossConfiguration = false
+        return view
+    }
+
+    fun noteConfigurationChange() {
+        recordDiagnostic(
+            DiagnosticSeverity.INFO,
+            "display",
+            "Configuration changed. The WebView was resized and was not reloaded.",
+        )
+        val view = webView ?: return
+        view.post {
+            view.requestLayout()
+            view.invalidate()
+            runCatching {
+                view.evaluateJavascript("window.dispatchEvent(new Event('resize'));", null)
+                view.evaluateJavascript(SharkLayout.injectionScript(), null)
+            }
+        }
+    }
+
+    fun onWebViewLoad(reason: String) {
+        val unexpected = reason == "load-token" && _state.value is SessionState.Playing
+        recordDiagnostic(
+            if (unexpected) DiagnosticSeverity.WARNING else DiagnosticSeverity.INFO,
+            "navigation",
+            "loadUrl ($reason) while ${_state.value}",
+        )
+    }
+
+    fun recordDiagnostic(severity: DiagnosticSeverity, category: String, message: String) {
+        val event = DiagnosticEvent(
+            atMillis = System.currentTimeMillis(),
+            severity = severity,
+            category = category,
+            message = message.take(CONSOLE_LINE_LIMIT),
+        )
+        synchronized(diagnosticBuffer) {
+            if (diagnosticBuffer.size >= DIAGNOSTIC_LIMIT) diagnosticBuffer.removeFirst()
+            diagnosticBuffer.addLast(event)
+            _diagnosticEvents.value = diagnosticBuffer.toList()
+        }
+        Log.d(TAG, "diagnostic ${event.severity} ${event.category}: ${event.message}")
+    }
+
+    fun diagnosticReport(): String {
+        val save = _diagnostic.value
+        return buildString {
+            appendLine("Incremental Hub diagnostic report")
+            appendLine("game=${_activeGameId.value ?: "none"}")
+            appendLine("state=${_state.value}")
+            appendLine("url=${_launchUrl.value ?: "none"}")
+            appendLine("profile=${_activeProfileName.value ?: "none"}")
+            appendLine("loadToken=${_loadToken.value}")
+            appendLine("reloadEpoch=${_reloadEpoch.value}")
+            appendLine("webViewGeneration=${_webViewGeneration.value}")
+            appendLine("documentPhase=${documentGate.phase}")
+            appendLine("gameDocumentLoads=$gameDocumentLoads")
+            if (save != null) {
+                appendLine("comparison=${save.comparison}")
+                appendLine("live=${save.liveBytes} bytes ${save.liveDetail}")
+                appendLine("stored=${save.storedBytes} bytes ${save.storedDetail}")
+                appendLine("note=${save.note}")
+            }
+            appendLine("console:")
+            _consoleLines.value.forEach { appendLine("  $it") }
+            appendLine("events:")
+            _diagnosticEvents.value.forEach { event ->
+                appendLine("  ${event.atMillis} ${event.severity} ${event.category}: ${event.message}")
+            }
+            appendLine("continuity=${continuityFor(activityRecreated = false, webViewRetained = webView != null, captureCompleted = false)}")
+            appendLine("A process death before capture completes can drop progress since the previous save.")
         }
     }
 
@@ -479,6 +669,7 @@ class SessionController(
     fun onMainFrameFailed(message: String) {
         Log.e(TAG, message)
         onError?.invoke(message)
+        recordDiagnostic(DiagnosticSeverity.FATAL, "network", message)
         scope.launch {
             mutex.withLock {
                 val gameId = _activeGameId.value
@@ -497,8 +688,18 @@ class SessionController(
     }
 
     fun onSubresourceFailed(message: String) {
+        val severity = if (message.contains("favicon.ico")) {
+            DiagnosticSeverity.INFO
+        } else if (message.contains(".js") || message.contains(".css")) {
+            DiagnosticSeverity.WARNING
+        } else {
+            DiagnosticSeverity.INFO
+        }
         Log.w(TAG, message)
-        _subresourceDiagnostic.value = message
+        recordDiagnostic(severity, "network", message)
+        if (severity == DiagnosticSeverity.FATAL) {
+            _subresourceDiagnostic.value = message
+        }
     }
 
     fun onRendererGone(message: String) {
@@ -507,6 +708,7 @@ class SessionController(
                 val gameId = _activeGameId.value
                 _sessionError.value = message
                 onError?.invoke(message)
+                recordDiagnostic(DiagnosticSeverity.FATAL, "renderer", message)
                 if (gameId != null) {
                     writeCaptureResult(
                         gameId,
@@ -583,6 +785,14 @@ class SessionController(
     private suspend fun handleDocument(url: String) {
         if (url.isBlank() || url == "about:blank") return
         val work = mutex.withLock {
+            if (handlingDocument) {
+                recordDiagnostic(
+                    DiagnosticSeverity.INFO,
+                    "navigation",
+                    "Ignored duplicate main-frame finish for $url during $openStep.",
+                )
+                return
+            }
             if (_state.value !is SessionState.Opening) return
             val gameId = _activeGameId.value ?: return
             val launch = _launchUrl.value
@@ -595,13 +805,22 @@ class SessionController(
                 pendingDocumentUrl = url
                 return
             }
+            handlingDocument = true
             ReadyWork(
                 gameId = gameId,
                 adapter = adapter,
                 view = view,
                 url = url,
             )
+        } ?: return
+        try {
+            handleDocumentWork(work)
+        } finally {
+            mutex.withLock { handlingDocument = false }
         }
+    }
+
+    private suspend fun handleDocumentWork(work: ReadyWork) {
         if (peekClient == null && readinessCheck != null &&
             openStep == OpenStep.DECIDE && launchMode == LaunchMode.RESUME
         ) {
@@ -693,14 +912,46 @@ class SessionController(
 
     private suspend fun finishGameLoad(work: ReadyWork) {
         val ready = awaitGameReady(work)
-        mutex.withLock {
+        val continueWatch = mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
             if (ready) {
                 transitionTo(SessionState.Playing, work.gameId)
                 Log.d(TAG, "handleDocument: Playing ${work.gameId} url=${work.url}")
+                false
             } else {
-                rememberFailure(work, "Adapter was not ready after loading ${work.url}")
-                failOpenLocked(work.gameId, "Adapter was not ready after loading ${work.url}")
+                val note = "Adapter was not ready after loading ${work.url}. The page was left in place and was not restored."
+                rememberFailure(work, note)
+                recordDiagnostic(DiagnosticSeverity.WARNING, "readiness", note)
+                true
+            }
+        }
+        if (continueWatch) watchReadiness(work)
+    }
+
+    private fun watchReadiness(work: ReadyWork) {
+        readinessWatch?.cancel()
+        readinessWatch = scope.launch {
+            val ready = try {
+                readinessCheck?.invoke(work.view, work.adapter)
+                    ?: work.adapter.awaitReady(work.view, READINESS_WATCH_MS)
+            } catch (e: Exception) {
+                Log.e(TAG, "readiness watch failed", e)
+                false
+            }
+            mutex.withLock {
+                if (!ready || _state.value !is SessionState.Opening || _activeGameId.value != work.gameId) {
+                    if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
+                        recordDiagnostic(
+                            DiagnosticSeverity.WARNING,
+                            "readiness",
+                            "Shark's interface stayed hidden. The save was not overwritten and the page was not reloaded.",
+                        )
+                    }
+                    return@withLock
+                }
+                if (openStep == OpenStep.LOAD_GAME) {
+                    transitionTo(SessionState.Playing, work.gameId)
+                }
             }
         }
     }
@@ -802,11 +1053,13 @@ class SessionController(
     }
 
     private fun beginGameLoadLocked() {
+        if (openStep == OpenStep.LOAD_GAME) return
         openStep = OpenStep.LOAD_GAME
         documentGate.phase = DocumentPhase.GAME
         documentGate.payload = null
         gameDocumentLoads += 1
         _loadToken.value = _loadToken.value + 1
+        recordDiagnostic(DiagnosticSeverity.INFO, "navigation", "Loading the game document.")
     }
 
     private fun beginRollbackLocked() {
@@ -907,6 +1160,7 @@ class SessionController(
                 pinned = pinned,
                 payload = payload,
                 progressJson = progressJson,
+                origin = originForReason(reason),
             ),
         )
         if (!pinned) dao.pruneAutomatic(gameId)
@@ -924,6 +1178,7 @@ class SessionController(
                 capturedAtMillis = record.capturedAtMillis,
                 byteLength = record.payload.length,
                 detail = detail,
+                origin = record.origin,
             )
         }
     }
@@ -944,6 +1199,9 @@ class SessionController(
         }
         if (launchMode == LaunchMode.INSPECT) {
             return "Inspect read storage without loading the game."
+        }
+        if (launchMode == LaunchMode.RECOVER) {
+            return "Recover from Snapshot read storage without loading the game."
         }
         return when (comparison) {
             SaveComparison.LIVE_BEHIND ->
@@ -1130,6 +1388,8 @@ class SessionController(
     private fun stopCaptureCadence() {
         captureJob?.cancel()
         captureJob = null
+        readinessWatch?.cancel()
+        readinessWatch = null
     }
 
     private suspend fun transitionTo(target: SessionState, gameId: String?) {
@@ -1139,6 +1399,7 @@ class SessionController(
             return
         }
         Log.d(TAG, "transition $current → $target (gameId=$gameId)")
+        recordDiagnostic(DiagnosticSeverity.INFO, "session", "$current -> $target")
         if (current is SessionState.Playing && target !is SessionState.Capturing) {
             stopCaptureCadence()
         }
@@ -1206,7 +1467,7 @@ class SessionController(
         if (successPayload != null) {
             val adapter = activeAdapter
             val progress = adapter?.let { summaryJson(it.summarize(successPayload)) }
-            appendSnapshot(gameId, successPayload, reason, pinned = false, progressJson = progress)
+            appendSnapshot(gameId, successPayload, reason, pinned = reason == SnapshotReasons.CHECKPOINT, progressJson = progress)
             onSnapshotSaved?.invoke(updated)
         }
     }

@@ -53,10 +53,10 @@ fun LauncherScreen(
     registry: GameRegistry,
     instanceDao: GameInstanceDao,
     syncSettled: Boolean,
-    onLaunch: (String) -> Unit,
-    onResume: (String) -> Unit,
+    onPlay: (String) -> Unit,
     onInspect: (String) -> Unit = {},
     onSafeLaunch: (String) -> Unit = {},
+    onRecover: (String) -> Unit = {},
 ) {
     val instances by produceState(initialValue = LauncherInstances(), instanceDao) {
         instanceDao.getAllOrdered().collect { rows ->
@@ -125,10 +125,11 @@ fun LauncherScreen(
                         GameCard(
                             game = game,
                             actionsHeld = !syncSettled && game.gameId !in snapshotIds,
-                            onLaunch = onLaunch,
-                            onResume = onResume,
+                            hasSnapshot = game.gameId in snapshotIds,
+                            onPlay = onPlay,
                             onInspect = onInspect,
                             onSafeLaunch = onSafeLaunch,
+                            onRecover = onRecover,
                         )
                     }
                 }
@@ -146,13 +147,14 @@ private data class LauncherInstances(
 private fun GameCard(
     game: RegisteredGame,
     actionsHeld: Boolean,
-    onLaunch: (String) -> Unit,
-    onResume: (String) -> Unit,
+    hasSnapshot: Boolean,
+    onPlay: (String) -> Unit,
     onInspect: (String) -> Unit,
     onSafeLaunch: (String) -> Unit,
+    onRecover: (String) -> Unit,
 ) {
-    val hasSession = game.lastPlayedAtMillis != null
-    val statusText = if (hasSession) "Resume" else "Launch"
+    val hasSession = hasPlayHistory(game.lastPlayedAtMillis, hasSnapshot)
+    val statusText = primaryPlayLabel(hasSession)
     val accentColor = hubAccentColor(game.displayDefaults.colorPrimary)
         ?: MaterialTheme.colorScheme.primary
     val onAccent = onAccentColor(accentColor)
@@ -221,71 +223,47 @@ private fun GameCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (hasSession) {
-                Button(
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("resume-${game.gameId}"),
-                    enabled = !actionsHeld,
-                    onClick = { onResume(game.gameId) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = accentColor,
-                        contentColor = onAccent,
-                    ),
-                    shape = MaterialTheme.shapes.small,
-                ) {
-                    Text("Resume", fontWeight = FontWeight.Medium)
-                }
-                TextButton(
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("launch-${game.gameId}"),
-                    enabled = !actionsHeld,
-                    onClick = { onLaunch(game.gameId) },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                ) {
-                    Text("Launch")
-                }
-            } else {
-                Button(
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("launch-${game.gameId}"),
-                    enabled = !actionsHeld,
-                    onClick = { onLaunch(game.gameId) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = accentColor,
-                        contentColor = onAccent,
-                    ),
-                    shape = MaterialTheme.shapes.small,
-                ) {
-                    Text("Launch", fontWeight = FontWeight.Medium)
-                }
+            Button(
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("play-${game.gameId}"),
+                enabled = !actionsHeld,
+                onClick = { onPlay(game.gameId) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = accentColor,
+                    contentColor = onAccent,
+                ),
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(primaryPlayLabel(hasSession), fontWeight = FontWeight.Medium)
             }
         }
         if (game.gameId == "shark-incremental") {
             Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 TextButton(
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .testTag("inspect-${game.gameId}"),
                     onClick = { onInspect(game.gameId) },
                 ) {
-                    Text("Inspect")
+                    Text("Inspect Save")
                 }
                 TextButton(
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .testTag("safe-${game.gameId}"),
                     onClick = { onSafeLaunch(game.gameId) },
                 ) {
-                    Text("Safe launch")
+                    Text("Safe Launch")
+                }
+                TextButton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("recover-${game.gameId}"),
+                    onClick = { onRecover(game.gameId) },
+                ) {
+                    Text("Recover from Snapshot")
                 }
             }
         }

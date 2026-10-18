@@ -40,6 +40,7 @@ fun RecoveryOverlay(
     onSafeLaunch: () -> Unit = {},
     onRecover: () -> Unit = {},
     onClose: () -> Unit,
+    onExport: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId url=$launchUrl detail=$detail")
@@ -145,8 +146,9 @@ fun RecoveryOverlay(
                     val whenText = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
                         .format(Date(entry.capturedAtMillis))
                     val pin = if (entry.pinned) "pinned" else "automatic"
+                    val origin = if (entry.origin.isBlank()) "" else ", ${entry.origin}"
                     Text(
-                        text = "#${entry.sequence} $whenText ${entry.reason} ($pin, ${entry.byteLength} bytes). ${entry.detail}",
+                        text = "#${entry.sequence} $whenText ${entry.reason} ($pin$origin, ${entry.byteLength} bytes). ${entry.detail}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -200,6 +202,13 @@ fun RecoveryOverlay(
             ) {
                 Text("Check storage again")
             }
+        }
+        Button(
+            onClick = onExport,
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.small,
+        ) {
+            Text("Export diagnostics")
         }
         Button(
             onClick = onClose,

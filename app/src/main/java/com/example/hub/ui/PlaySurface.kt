@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -21,6 +20,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.SessionController
 import com.example.hub.ui.chrome.PlayChrome
@@ -46,14 +46,25 @@ fun PlaySurface(
     val profile by controller.activeProfile.collectAsState()
     val launchUrl by controller.launchUrl.collectAsState()
     val sessionError by controller.sessionError.collectAsState()
-    val subresource by controller.subresourceDiagnostic.collectAsState()
     val generation by controller.webViewGeneration.collectAsState()
     val reloadEpoch by controller.reloadEpoch.collectAsState()
     val loadToken by controller.loadToken.collectAsState()
     val diagnostic by controller.diagnostic.collectAsState()
     val consoleLines by controller.consoleLines.collectAsState()
+    val events by controller.diagnosticEvents.collectAsState()
+    val context = LocalContext.current
+    val displayStore = remember(context) { DisplayPreferenceStore(context) }
+    var displayPrefs by remember(gameId) { mutableStateOf(displayStore.read(gameId)) }
+    val folded = !isWideWindow()
+    val zoom = displayPrefs.forPosture(folded)
     val scope = rememberCoroutineScope()
     var menuOpen by remember(gameId) { mutableStateOf(false) }
+    var menuPanel by remember(gameId) { mutableStateOf(MenuPanel.Actions) }
+
+    fun updateZoom(next: GameDisplayPreferences) {
+        displayPrefs = next
+        displayStore.write(gameId, next)
+    }
 
     fun exitSession() {
         scope.launch {
@@ -84,11 +95,17 @@ fun PlaySurface(
                         profile = profile,
                         reloadEpoch = reloadEpoch,
                         loadToken = loadToken,
+                        textZoomPercent = zoom.textZoomPercent,
+                        pageZoomPercent = zoom.pageZoomPercent,
                         documentGate = controller.documentGate,
+                        onTakeRetained = controller::takeRetainedWebView,
                         onWebViewCreated = controller::registerWebView,
                         onPageFinished = controller::onMainFrameFinished,
                         onMainFrameError = controller::onMainFrameFailed,
-                        onSubresourceError = controller::onSubresourceFailed,
+                        onResourceDiagnostic = { severity, message ->
+                            controller.recordDiagnostic(severity, "network", message)
+                        },
+                        onExplicitLoad = controller::onWebViewLoad,
                         onRendererGone = controller::onRendererGone,
                         onConsoleMessage = controller::onConsoleMessage,
                         onRelease = controller::releaseWebView,
@@ -96,14 +113,17 @@ fun PlaySurface(
                     )
                 }
 
-                if (state is SessionState.Opening) {
+                if (state is SessionState.Opening && loadToken == 0) {
                     OpeningStatus(gameId = gameId, launchUrl = launchUrl)
                 }
 
-                if (!menuOpen && state !is SessionState.Closed && state !is SessionState.Opening) {
+                if (!menuOpen && state !is SessionState.Closed) {
                     PlayChrome(
                         title = gameId,
-                        onMenuClick = { menuOpen = true },
+                        onMenuClick = {
+                            menuPanel = MenuPanel.Actions
+                            menuOpen = true
+                        },
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
                 }
@@ -112,7 +132,10 @@ fun PlaySurface(
                     NativeMenu(
                         state = state,
                         expanded = true,
-                        onExpandedChange = { menuOpen = it },
+                        onExpandedChange = {
+                            menuOpen = it
+                            if (!it) menuPanel = MenuPanel.Actions
+                        },
                         onAction = { action ->
                             Log.d(TAG, "PlaySurface: menu action=${action.label} state=$state")
                             when (action) {
@@ -120,11 +143,47 @@ fun PlaySurface(
                                     menuOpen = false
                                     controller.requestForeground()
                                 }
-                                MenuAction.SnapshotNow, MenuAction.Checkpoint -> controller.requestCapture()
+                                MenuAction.SnapshotNow -> controller.requestCapture()
+                                MenuAction.Checkpoint -> controller.requestCheckpoint()
                                 MenuAction.Reload -> controller.requestReload()
-                                MenuAction.Vault, MenuAction.Display -> Unit
+                                MenuAction.Vault -> Unit
+                                MenuAction.Display -> menuPanel = MenuPanel.Display
+                                MenuAction.Diagnostics -> menuPanel = MenuPanel.Diagnostics
                                 MenuAction.ReturnToHub -> exitSession()
                             }
+                        },
+                        showDisplay = menuPanel == MenuPanel.Display,
+                        showDiagnostics = menuPanel == MenuPanel.Diagnostics,
+                        onPanelBack = { menuPanel = MenuPanel.Actions },
+                        display = {
+                            DisplayPanel(
+                                folded = folded,
+                                textZoomPercent = zoom.textZoomPercent,
+                                pageZoomPercent = zoom.pageZoomPercent,
+                                onTextZoom = { percent ->
+                                    updateZoom(
+                                        displayPrefs.withPosture(
+                                            folded,
+                                            zoom.copy(textZoomPercent = percent),
+                                        ),
+                                    )
+                                },
+                                onPageZoom = { percent ->
+                                    updateZoom(
+                                        displayPrefs.withPosture(
+                                            folded,
+                                            zoom.copy(pageZoomPercent = percent),
+                                        ),
+                                    )
+                                },
+                                onReset = { updateZoom(GameDisplayPreferences()) },
+                            )
+                        },
+                        diagnostics = {
+                            DiagnosticsPanel(
+                                report = controller.diagnosticReport(),
+                                events = events,
+                            )
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -141,26 +200,9 @@ fun PlaySurface(
                         onSafeLaunch = { controller.requestSafeLaunch() },
                         onRecover = { controller.confirmRecover() },
                         onClose = { exitSession() },
+                        onExport = { shareReport(context, controller.diagnosticReport()) },
                         modifier = Modifier.fillMaxSize(),
                     )
-                }
-
-                if (subresource != null && state is SessionState.Playing) {
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .navigationBarsPadding()
-                            .padding(8.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                        shape = MaterialTheme.shapes.extraSmall,
-                    ) {
-                        Text(
-                            text = subresource!!,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        )
-                    }
                 }
             }
         })
@@ -195,4 +237,10 @@ private fun OpeningStatus(gameId: String, launchUrl: String?) {
             }
         }
     }
+}
+
+private enum class MenuPanel {
+    Actions,
+    Display,
+    Diagnostics,
 }

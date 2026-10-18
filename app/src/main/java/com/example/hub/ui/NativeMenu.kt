@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
@@ -24,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +51,7 @@ sealed class MenuAction {
     data object Vault : MenuAction()
     data object Reload : MenuAction()
     data object Display : MenuAction()
+    data object Diagnostics : MenuAction()
     data object ReturnToHub : MenuAction()
 }
 
@@ -60,6 +63,7 @@ internal val MenuAction.label: String
         is MenuAction.Vault -> "Vault"
         is MenuAction.Reload -> "Reload"
         is MenuAction.Display -> "Display"
+        is MenuAction.Diagnostics -> "Diagnostics"
         is MenuAction.ReturnToHub -> "Return to hub"
     }
 
@@ -79,6 +83,11 @@ fun NativeMenu(
     onExpandedChange: (Boolean) -> Unit,
     onAction: (MenuAction) -> Unit,
     modifier: Modifier = Modifier,
+    showDisplay: Boolean = false,
+    showDiagnostics: Boolean = false,
+    onPanelBack: () -> Unit = {},
+    display: @Composable () -> Unit = {},
+    diagnostics: @Composable () -> Unit = {},
 ) {
     if (sessionStateForcesMenuOpen(state)) {
         onExpandedChange(true)
@@ -124,11 +133,18 @@ fun NativeMenu(
             }
         }
 
-        MenuItems(
-            state = state,
-            onAction = onAction,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (showDisplay || showDiagnostics) {
+            TextButton(onClick = onPanelBack) {
+                Text("Back")
+            }
+            if (showDisplay) display() else diagnostics()
+        } else {
+            MenuItems(
+                state = state,
+                onAction = onAction,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -145,6 +161,7 @@ private fun MenuItems(
         MenuAction.Vault,
         MenuAction.Reload,
         MenuAction.Display,
+        MenuAction.Diagnostics,
         MenuAction.ReturnToHub,
     )
 
@@ -174,7 +191,8 @@ internal fun isActionEnabled(action: MenuAction, state: SessionState): Boolean {
         is MenuAction.Checkpoint -> state is SessionState.Playing
         is MenuAction.Vault -> false
         is MenuAction.Reload -> state is SessionState.Playing
-        is MenuAction.Display -> false
+        is MenuAction.Display -> state !is SessionState.Closed && state !is SessionState.Closing
+        is MenuAction.Diagnostics -> state !is SessionState.Closed && state !is SessionState.Closing
         is MenuAction.ReturnToHub -> true
     }
 }
@@ -192,6 +210,7 @@ private fun MenuItemRow(
         is MenuAction.Vault -> Icons.Default.Cloud
         is MenuAction.Reload -> Icons.Default.Refresh
         is MenuAction.Display -> Icons.Default.Settings
+        is MenuAction.Diagnostics -> Icons.Default.Info
         is MenuAction.ReturnToHub -> Icons.AutoMirrored.Default.ArrowBack
     }
     val label = action.label

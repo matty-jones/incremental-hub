@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.hub.database.GameInstance
 import com.example.hub.database.GameInstanceDao
 import com.example.hub.database.SnapshotDao
+import com.example.hub.database.SnapshotOrigins
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.SaveComparison
@@ -29,6 +30,9 @@ class SaveSync(
     private val assess: (gameId: String, localPayload: String?, remotePayload: String?) -> SaveAssessment =
         { _, _, _ -> SaveAssessment() },
 ) {
+    var activeGameId: () -> String? = { null }
+    var onDecision: (String) -> Unit = {}
+
     private val mutex = Mutex()
 
     suspend fun push(instance: GameInstance) {
@@ -86,9 +90,23 @@ class SaveSync(
 
     private suspend fun applyPull(remote: RemoteSave) {
         val existing = dao.get(remote.gameId)
-        if (decision(existing, remote) != MergeDecision.Pull) return
+        val merge = decision(existing, remote)
+        if (!replacesStoredPointer(activeGameId() == remote.gameId, merge)) {
+            if (merge == MergeDecision.Pull) {
+                rememberPulled(remote)
+                onDecision(
+                    "Archived workstation save for ${remote.gameId} without replacing the open session.",
+                )
+            } else {
+                onDecision(
+                    "Rejected workstation save for ${remote.gameId}. The stored snapshot was kept.",
+                )
+            }
+            return
+        }
         dao.upsert(remote.toGameInstance(existing))
         rememberPulled(remote)
+        onDecision("Pulled workstation save for ${remote.gameId}.")
         Log.i(TAG, "pulled ${remote.gameId} captured at ${remote.capturedAtMillis}")
     }
 
@@ -105,6 +123,7 @@ class SaveSync(
                 pinned = true,
                 payload = remote.snapshotPayload,
                 progressJson = null,
+                origin = SnapshotOrigins.WORKSTATION,
             ),
         )
     }

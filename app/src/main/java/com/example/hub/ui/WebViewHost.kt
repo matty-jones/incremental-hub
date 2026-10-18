@@ -1,5 +1,6 @@
 package com.example.hub.ui
 
+import android.content.MutableContextWrapper
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
@@ -15,9 +16,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.Profile
 import androidx.webkit.WebViewCompat
+import com.example.hub.games.SharkLayout
+import com.example.hub.session.DiagnosticSeverity
 import com.example.hub.session.DocumentGate
 import com.example.hub.session.SessionState
 import com.example.hub.session.StorageBootstrap
+import com.example.hub.session.classifyResourceFailure
 import java.nio.charset.StandardCharsets
 
 private const val TAG = "WebViewHost"
@@ -36,8 +40,9 @@ internal fun isMainFrameRequest(request: WebResourceRequest): Boolean = request.
  * Hosts one WebView for the active session.
  *
  * The view is created only while the session can show a page. Profile binding
- * happens before the first [WebView.loadUrl]. Ordinary recomposition updates
- * the same instance. The session controller is the only owner that destroys it.
+ * happens before the first [WebView.loadUrl]. Ordinary recomposition, including
+ * a fold or an unfold, updates the same instance and does not navigate.
+ * Text zoom, page zoom, and the Shark layout sheet are applied in place.
  */
 @Composable
 fun WebViewHost(
@@ -47,11 +52,15 @@ fun WebViewHost(
     profile: Profile?,
     reloadEpoch: Int,
     loadToken: Int,
+    textZoomPercent: Int,
+    pageZoomPercent: Int,
     documentGate: DocumentGate,
+    onTakeRetained: () -> WebView?,
     onWebViewCreated: (WebView) -> Unit,
     onPageFinished: (String) -> Unit,
     onMainFrameError: (String) -> Unit,
-    onSubresourceError: (String) -> Unit,
+    onResourceDiagnostic: (DiagnosticSeverity, String) -> Unit,
+    onExplicitLoad: (String) -> Unit,
     onRendererGone: (String) -> Unit,
     onConsoleMessage: (String) -> Unit,
     onRelease: (WebView) -> Unit,
@@ -65,114 +74,162 @@ fun WebViewHost(
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
-            Log.d(TAG, "WebViewHost: creating WebView gameId=$gameId url=$launchUrl")
-            WebView(ctx).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                val slot = Slot(
-                    profileName = null,
-                    appliedReloadEpoch = reloadEpoch,
-                    appliedLoadToken = loadToken,
+            val retained = onTakeRetained()
+            if (retained != null) {
+                (retained.context as? MutableContextWrapper)?.baseContext = ctx
+                Log.d(TAG, "WebViewHost: reattaching retained WebView gameId=$gameId")
+                onResourceDiagnostic(
+                    DiagnosticSeverity.INFO,
+                    "Reattached retained WebView for $gameId without loadUrl.",
                 )
-                tag = slot
-                webChromeClient = object : WebChromeClient() {
-                    override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                        val message = consoleMessage?.message() ?: return true
-                        onConsoleMessage("${consoleMessage.messageLevel()}: $message")
-                        return true
-                    }
-                }
-                webViewClient = object : WebViewClient() {
-                    override fun shouldInterceptRequest(
-                        view: WebView,
-                        request: WebResourceRequest,
-                    ): WebResourceResponse? {
-                        if (!StorageBootstrap.shouldServe(
-                                documentGate.phase,
-                                request.url.toString(),
-                                documentGate.launchUrl,
-                                request.isForMainFrame,
-                            )
-                        ) {
-                            return null
+                retained
+            } else {
+                Log.d(TAG, "WebViewHost: creating WebView gameId=$gameId url=$launchUrl")
+                onResourceDiagnostic(DiagnosticSeverity.INFO, "Creating WebView for $gameId.")
+                WebView(MutableContextWrapper(ctx)).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.textZoom = textZoomPercent
+                    val slot = Slot(
+                        profileName = null,
+                        appliedReloadEpoch = reloadEpoch,
+                        appliedLoadToken = loadToken,
+                        textZoomPercent = textZoomPercent,
+                        pageZoomPercent = pageZoomPercent,
+                        appliedTextZoom = textZoomPercent,
+                    )
+                    tag = slot
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                            val message = consoleMessage?.message() ?: return true
+                            onConsoleMessage("${consoleMessage.messageLevel()}: $message")
+                            return true
                         }
-                        val html = StorageBootstrap.document(
-                            documentGate.phase,
-                            documentGate.storageKey,
-                            documentGate.payload,
-                        )
-                        return WebResourceResponse(
-                            "text/html",
-                            "utf-8",
-                            200,
-                            "OK",
-                            mapOf("Cache-Control" to "no-store"),
-                            html.byteInputStream(StandardCharsets.UTF_8),
-                        )
                     }
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest,
+                        ): WebResourceResponse? {
+                            if (!StorageBootstrap.shouldServe(
+                                    documentGate.phase,
+                                    request.url.toString(),
+                                    documentGate.launchUrl,
+                                    request.isForMainFrame,
+                                )
+                            ) {
+                                return null
+                            }
+                            val html = StorageBootstrap.document(
+                                documentGate.phase,
+                                documentGate.storageKey,
+                                documentGate.payload,
+                            )
+                            return WebResourceResponse(
+                                "text/html",
+                                "utf-8",
+                                200,
+                                "OK",
+                                mapOf("Cache-Control" to "no-store"),
+                                html.byteInputStream(StandardCharsets.UTF_8),
+                            )
+                        }
 
-                    override fun onPageFinished(view: WebView, url: String) {
-                        Log.d(TAG, "WebViewHost: onPageFinished url=$url gameId=$gameId")
-                        if (url != "about:blank") onPageFinished(url)
-                    }
+                        override fun onPageFinished(view: WebView, url: String) {
+                            Log.d(TAG, "WebViewHost: onPageFinished url=$url gameId=$gameId")
+                            val current = view.tag as? Slot
+                            if (current != null) {
+                                current.layoutAppliedForUrl = null
+                                current.appliedPageZoom = -1
+                                applyPresentation(view, current)
+                            }
+                            if (url != "about:blank") onPageFinished(url)
+                        }
 
-                    override fun onReceivedError(
-                        view: WebView,
-                        request: WebResourceRequest,
-                        error: WebResourceError,
-                    ) {
-                        val message = "onReceivedError: ${error.errorCode} ${error.description} on ${request.url} (gameId=$gameId)"
-                        if (isMainFrameRequest(request)) onMainFrameError(message) else onSubresourceError(message)
-                    }
+                        override fun onReceivedError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            error: WebResourceError,
+                        ) {
+                            reportResource(
+                                request,
+                                "onReceivedError: ${error.errorCode} ${error.description} on ${request.url} (gameId=$gameId)",
+                                null,
+                            )
+                        }
 
-                    override fun onReceivedHttpError(
-                        view: WebView,
-                        request: WebResourceRequest,
-                        errorResponse: WebResourceResponse,
-                    ) {
-                        val message = "onReceivedHttpError: ${errorResponse.statusCode} on ${request.url} (gameId=$gameId)"
-                        if (isMainFrameRequest(request)) onMainFrameError(message) else onSubresourceError(message)
-                    }
+                        override fun onReceivedHttpError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            errorResponse: WebResourceResponse,
+                        ) {
+                            reportResource(
+                                request,
+                                "onReceivedHttpError: ${errorResponse.statusCode} on ${request.url} (gameId=$gameId)",
+                                errorResponse.statusCode,
+                            )
+                        }
 
-                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                        onRendererGone(
-                            "onRenderProcessGone: didCrash=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()} (gameId=$gameId url=$launchUrl)",
-                        )
-                        return true
+                        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                            onRendererGone(
+                                "onRenderProcessGone: didCrash=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()} (gameId=$gameId url=$launchUrl)",
+                            )
+                            return true
+                        }
+
+                        private fun reportResource(request: WebResourceRequest, message: String, status: Int?) {
+                            val severity = classifyResourceFailure(
+                                request.url.toString(),
+                                status,
+                                isMainFrameRequest(request),
+                            )
+                            if (severity == DiagnosticSeverity.FATAL) {
+                                onMainFrameError(message)
+                            } else {
+                                onResourceDiagnostic(severity, message)
+                            }
+                        }
                     }
+                    val profileName = profile?.name
+                    if (shouldNavigate(profileName, launchUrl)) {
+                        WebViewCompat.setProfile(this, profileName!!)
+                        slot.profileName = profileName
+                        Log.d(TAG, "WebViewHost: bound profile '$profileName' before $launchUrl")
+                        navigate(this, slot, launchUrl!!, "initial", onExplicitLoad)
+                    }
+                    onWebViewCreated(this)
                 }
-                val profileName = profile?.name
-                if (shouldNavigate(profileName, launchUrl)) {
-                    WebViewCompat.setProfile(this, profileName!!)
-                    slot.profileName = profileName
-                    Log.d(TAG, "WebViewHost: bound profile '$profileName' before $launchUrl")
-                    loadUrl(launchUrl!!)
-                }
-                onWebViewCreated(this)
             }
         },
         update = { webView ->
-            val slot = (webView.tag as? Slot) ?: Slot(null, -1, -1).also { webView.tag = it }
+            val slot = (webView.tag as? Slot) ?: Slot(
+                profileName = null,
+                appliedReloadEpoch = -1,
+                appliedLoadToken = -1,
+                textZoomPercent = textZoomPercent,
+                pageZoomPercent = pageZoomPercent,
+            ).also { webView.tag = it }
+            slot.textZoomPercent = textZoomPercent
+            slot.pageZoomPercent = pageZoomPercent
+            applyPresentation(webView, slot)
             val profileName = profile?.name
             if (slot.profileName == null && shouldNavigate(profileName, launchUrl)) {
                 WebViewCompat.setProfile(webView, profileName!!)
                 slot.profileName = profileName
                 Log.d(TAG, "WebViewHost: bound profile '$profileName' before $launchUrl")
-                webView.loadUrl(launchUrl!!)
+                navigate(webView, slot, launchUrl!!, "initial", onExplicitLoad)
             }
             if (slot.profileName != null && launchUrl != null && loadToken != slot.appliedLoadToken) {
+                navigate(webView, slot, launchUrl, "load-token", onExplicitLoad)
                 slot.appliedLoadToken = loadToken
-                Log.d(TAG, "WebViewHost: load token=$loadToken phase=${documentGate.phase}")
-                webView.loadUrl(launchUrl)
             }
             if (slot.profileName != null &&
                 launchUrl != null &&
                 reloadEpoch != slot.appliedReloadEpoch &&
                 state is SessionState.Playing
             ) {
+                navigate(webView, slot, launchUrl, "reload-epoch", onExplicitLoad)
                 slot.appliedReloadEpoch = reloadEpoch
-                Log.d(TAG, "WebViewHost: reload $launchUrl epoch=$reloadEpoch")
-                webView.loadUrl(launchUrl)
             }
         },
         onRelease = { webView ->
@@ -183,8 +240,44 @@ fun WebViewHost(
     )
 }
 
+private fun navigate(
+    webView: WebView,
+    slot: Slot,
+    url: String,
+    reason: String,
+    onExplicitLoad: (String) -> Unit,
+) {
+    slot.layoutAppliedForUrl = null
+    slot.appliedPageZoom = -1
+    Log.d(TAG, "WebViewHost: loadUrl reason=$reason url=$url")
+    onExplicitLoad(reason)
+    webView.loadUrl(url)
+}
+
+private fun applyPresentation(webView: WebView, slot: Slot) {
+    if (slot.appliedTextZoom != slot.textZoomPercent) {
+        webView.settings.textZoom = slot.textZoomPercent
+        slot.appliedTextZoom = slot.textZoomPercent
+    }
+    val url = webView.url
+    if (url.isNullOrBlank() || url == "about:blank") return
+    if (slot.appliedPageZoom != slot.pageZoomPercent) {
+        webView.evaluateJavascript(pageZoomScript(slot.pageZoomPercent), null)
+        slot.appliedPageZoom = slot.pageZoomPercent
+    }
+    if (url.contains("shark-incremental") && slot.layoutAppliedForUrl != url) {
+        webView.evaluateJavascript(SharkLayout.injectionScript(), null)
+        slot.layoutAppliedForUrl = url
+    }
+}
+
 private class Slot(
     var profileName: String?,
     var appliedReloadEpoch: Int,
     var appliedLoadToken: Int,
+    var textZoomPercent: Int,
+    var pageZoomPercent: Int,
+    var appliedTextZoom: Int = -1,
+    var appliedPageZoom: Int = -1,
+    var layoutAppliedForUrl: String? = null,
 )

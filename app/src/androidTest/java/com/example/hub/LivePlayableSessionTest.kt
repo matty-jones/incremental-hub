@@ -50,7 +50,7 @@ class LivePlayableSessionTest {
     }
 
     private fun play(gameId: String, launchUrl: String, validate: (String) -> Boolean) {
-        clickWhenEnabled("launch-$gameId")
+        clickWhenEnabled("play-$gameId")
         composeRule.waitUntil(timeoutMillis = 30_000) {
             composeRule.onAllNodesWithText(launchUrl, substring = true).fetchSemanticsNodes().isNotEmpty()
         }
@@ -107,10 +107,10 @@ class LivePlayableSessionTest {
         }
         composeRule.onNodeWithText("Return to hub").performScrollTo().performClick()
         composeRule.waitUntil(timeoutMillis = 30_000) {
-            composeRule.onAllNodesWithTag("resume-$gameId").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("play-$gameId").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.activityRule.scenario.recreate()
-        clickWhenEnabled("resume-$gameId")
+        clickWhenEnabled("play-$gameId")
         composeRule.waitUntil(timeoutMillis = 90_000) {
             composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isEmpty()
@@ -121,7 +121,7 @@ class LivePlayableSessionTest {
         composeRule.onNodeWithText("Menu").performClick()
         composeRule.onNodeWithText("Return to hub").performScrollTo().performClick()
         composeRule.waitUntil(timeoutMillis = 30_000) {
-            composeRule.onAllNodesWithTag("resume-$gameId").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("play-$gameId").fetchSemanticsNodes().isNotEmpty()
         }
     }
 

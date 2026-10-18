@@ -61,7 +61,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_1_2, HubDatabase.MIGRATION_2_3, HubDatabase.MIGRATION_3_4)
+            .addMigrations(HubDatabase.MIGRATION_1_2, HubDatabase.MIGRATION_2_3, HubDatabase.MIGRATION_3_4, HubDatabase.MIGRATION_4_5)
             .allowMainThreadQueries()
             .build()
         val history = db.snapshotDao().history("shark-incremental")
@@ -70,6 +70,88 @@ class SnapshotMigrationTest {
         assertTrue(history.single().pinned)
         assertEquals("progressed-payload", history.single().payload)
         assertEquals("progressed-payload", db.gameInstanceDao().get("shark-incremental")?.snapshotPayload)
+        assertEquals("local-capture", history.single().origin)
+        db.close()
+    }
+
+    @Test
+    fun migrationKeepsPinnedHistoryAndRecordsOrigin() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "snapshot-origin"
+        context.deleteDatabase(name)
+        val path = context.getDatabasePath(name)
+        path.parentFile?.mkdirs()
+        val sqlite = SQLiteDatabase.openOrCreateDatabase(path, null)
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `game_instances` (
+              `gameId` TEXT NOT NULL,
+              `profile_name` TEXT NOT NULL,
+              `session_identity` TEXT NOT NULL,
+              `last_played_at_millis` INTEGER NOT NULL,
+              `resume_token` TEXT,
+              `recovery_state` TEXT,
+              `last_capture_at_millis` INTEGER NOT NULL,
+              `snapshot_payload` TEXT,
+              `last_capture_attempt_at_millis` INTEGER NOT NULL,
+              `last_capture_success_at_millis` INTEGER NOT NULL,
+              `last_capture_failure_at_millis` INTEGER NOT NULL,
+              `last_capture_error` TEXT,
+              PRIMARY KEY(`gameId`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `snapshots` (
+              `id` TEXT NOT NULL,
+              `game_id` TEXT NOT NULL,
+              `sequence` INTEGER NOT NULL,
+              `captured_at_millis` INTEGER NOT NULL,
+              `reason` TEXT NOT NULL,
+              `pinned` INTEGER NOT NULL,
+              `payload` TEXT NOT NULL,
+              `progress_json` TEXT,
+              PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            INSERT INTO snapshots (
+              id, game_id, sequence, captured_at_millis, reason, pinned, payload, progress_json
+            ) VALUES (
+              'pre', 'shark-incremental', 2, 50, 'pre-restore', 1, 'before', NULL
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            INSERT INTO game_instances (
+              gameId, profile_name, session_identity, last_played_at_millis, resume_token,
+              recovery_state, last_capture_at_millis, snapshot_payload,
+              last_capture_attempt_at_millis, last_capture_success_at_millis,
+              last_capture_failure_at_millis, last_capture_error
+            ) VALUES (
+              'shark-incremental', 'hub-game-shark-incremental', 'kept', 50, NULL,
+              NULL, 50, 'before',
+              50, 50, 0, NULL
+            )
+            """.trimIndent(),
+        )
+        sqlite.version = 4
+        sqlite.close()
+
+        val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
+            .addMigrations(HubDatabase.MIGRATION_4_5)
+            .allowMainThreadQueries()
+            .build()
+        val history = db.snapshotDao().history("shark-incremental")
+        assertEquals(1, history.size)
+        assertEquals("pre-restore", history.single().reason)
+        assertEquals("recovery", history.single().origin)
+        assertTrue(history.single().pinned)
+        assertEquals("before", history.single().payload)
         db.close()
     }
 }

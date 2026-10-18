@@ -27,9 +27,9 @@ class NativeMenuTest {
     // -----------------------------------------------------------------
 
     @Test
-    fun sevenMenuActionsExist() {
+    fun menuActionCountMatchesTheMenu() {
         val actions = menuActions()
-        assertEquals("Must have exactly 7 menu actions", 7, actions.size)
+        assertEquals("Must have exactly 8 menu actions", 8, actions.size)
     }
 
     @Test
@@ -41,6 +41,7 @@ class NativeMenuTest {
         assertTrue("Must include Vault", actions.contains(MenuAction.Vault))
         assertTrue("Must include Reload", actions.contains(MenuAction.Reload))
         assertTrue("Must include Display", actions.contains(MenuAction.Display))
+        assertTrue("Must include Diagnostics", actions.contains(MenuAction.Diagnostics))
         assertTrue("Must include ReturnToHub", actions.contains(MenuAction.ReturnToHub))
     }
 
@@ -82,6 +83,11 @@ class NativeMenuTest {
     @Test
     fun displayActionLabel() {
         assertEquals("Display", MenuAction.Display.label)
+    }
+
+    @Test
+    fun diagnosticsActionLabel() {
+        assertEquals("Diagnostics", MenuAction.Diagnostics.label)
     }
 
     @Test
@@ -190,11 +196,13 @@ class NativeMenuTest {
     }
 
     @Test
-    fun displayAndVaultStayDisabled() {
+    fun vaultStaysDisabledAndDisplayOpensWhilePlaying() {
         for (state in allStates()) {
-            assertFalse(isActionEnabled(MenuAction.Display, state))
             assertFalse(isActionEnabled(MenuAction.Vault, state))
         }
+        assertTrue(isActionEnabled(MenuAction.Display, SessionState.Playing))
+        assertTrue(isActionEnabled(MenuAction.Diagnostics, SessionState.Playing))
+        assertFalse(isActionEnabled(MenuAction.Display, SessionState.Closed))
     }
 
     @Test
@@ -239,6 +247,7 @@ class NativeMenuTest {
             MenuAction.Vault,
             MenuAction.Reload,
             MenuAction.Display,
+            MenuAction.Diagnostics,
             MenuAction.ReturnToHub,
         )
     }

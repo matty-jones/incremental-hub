@@ -14,7 +14,7 @@ import androidx.room.migration.Migration
  */
 @Database(
     entities = [GameInstance::class, SnapshotRecord::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class HubDatabase : RoomDatabase() {
@@ -100,11 +100,28 @@ abstract class HubDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE snapshots ADD COLUMN origin TEXT NOT NULL DEFAULT 'local-capture'",
+                )
+                db.execSQL(
+                    "UPDATE snapshots SET origin = 'recovery' WHERE reason = 'pre-restore'",
+                )
+                db.execSQL(
+                    "UPDATE snapshots SET origin = 'workstation-sync' WHERE reason = 'workstation'",
+                )
+                db.execSQL(
+                    "UPDATE snapshots SET origin = 'manual-checkpoint' WHERE reason = 'checkpoint'",
+                )
+            }
+        }
+
         private fun buildDatabase(context: Context) = Room.databaseBuilder(
             context.applicationContext,
             HubDatabase::class.java,
             DATABASE_NAME,
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
     }
 }

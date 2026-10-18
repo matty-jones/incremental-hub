@@ -7,6 +7,7 @@ import java.util.Base64
 import com.example.hub.database.GameInstance
 import com.example.hub.database.GameInstanceDao
 import com.example.hub.database.SnapshotDao
+import com.example.hub.database.SnapshotOrigins
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.GameRegistry
@@ -570,6 +571,27 @@ class SessionControllerTest {
         assertNotNull(instance)
         assertTrue(instance!!.lastCaptureAttemptAtMillis > 0)
         assertEquals(0L, instance.lastCaptureSuccessAtMillis)
+    }
+
+    @Test
+    fun configurationPauseDoesNotBackgroundTheLiveSession() = runTest {
+        controller.open("shark-incremental")
+        val attempt = dao.get("shark-incremental")!!.lastCaptureAttemptAtMillis
+        controller.configurationChanging = { true }
+        controller.onStateChanged(StubLifecycleOwner(), Lifecycle.Event.ON_PAUSE)
+        assertEquals(SessionState.Playing, controller.state.value)
+        assertEquals(attempt, dao.get("shark-incremental")!!.lastCaptureAttemptAtMillis)
+        assertTrue(controller.diagnosticEvents.value.any { it.message.contains("live session") })
+    }
+
+    @Test
+    fun attachWhilePlayingDoesNotApplyStoredRecovery() = runTest {
+        controller.open("shark-incremental")
+        val playing = dao.get("shark-incremental")!!
+        dao.upsert(playing.copy(recoveryState = "RecoveryRequired"))
+        controller.attach(StubLifecycleOwner())
+        assertEquals(SessionState.Playing, controller.state.value)
+        assertEquals("shark-incremental", controller.activeGameId.value)
     }
 
     @Test
@@ -1248,9 +1270,89 @@ class SessionControllerTest {
     @Test
     fun subresourceFailureDoesNotLeavePlaying() = runTest {
         controller.open("shark-incremental")
-        controller.onSubresourceFailed("onReceivedError: image 404")
+        controller.onSubresourceFailed("onReceivedHttpError: 404 on https://mrredshark77.github.io/favicon.ico")
         assertEquals(SessionState.Playing, controller.state.value)
-        assertEquals("onReceivedError: image 404", controller.subresourceDiagnostic.value)
+        assertNull(controller.subresourceDiagnostic.value)
+        assertEquals("onReceivedHttpError: 404 on https://mrredshark77.github.io/favicon.ico", controller.diagnosticEvents.value.last().message)
+    }
+
+    @Test
+    fun reopeningTheLiveGameDoesNotReload() = runTest {
+        controller.open("shark-incremental")
+        val epoch = controller.navigationEpoch.value
+        val loads = controller.gameDocumentLoads
+        controller.open("shark-incremental")
+        assertEquals(SessionState.Playing, controller.state.value)
+        assertEquals(epoch, controller.navigationEpoch.value)
+        assertEquals(loads, controller.gameDocumentLoads)
+        assertTrue(controller.diagnosticEvents.value.any { it.message.contains("without reloading") })
+    }
+
+    @Test
+    fun duplicateMainFrameFinishDoesNotLoadTheGameTwice() = runTest {
+        var peeks = 0
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ ->
+                peeks += 1
+                PeekOutcome.Empty
+            },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        val url = "https://mrredshark77.github.io/shark-incremental/"
+        session.onMainFrameFinished(url)
+        session.onMainFrameFinished(url)
+        assertEquals(1, peeks)
+        assertEquals(1, session.gameDocumentLoads)
+        assertEquals(SessionState.Playing, session.state.value)
+    }
+
+    @Test
+    fun readinessTimeoutLeavesThePageAndDoesNotCapture() = runTest {
+        var captures = 0
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> false },
+            capture = { _, _ ->
+                captures += 1
+                freshSharkPayload()
+            },
+            peek = { _, _ -> PeekOutcome.Empty },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        val url = "https://mrredshark77.github.io/shark-incremental/"
+        session.onMainFrameFinished(url)
+        session.onMainFrameFinished(url)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertEquals(0, captures)
+        assertEquals(1, session.gameDocumentLoads)
+        assertNull(dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(session.diagnosticEvents.value.any { it.category == "readiness" })
+    }
+
+    @Test
+    fun checkpointIsPinnedAndAFailedCaptureDoesNotReplaceIt() = runTest {
+        val good = progressedSharkPayload()
+        var payload: String? = good
+        val snapshots = StubSnapshotDao()
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> payload },
+            snapshots = snapshots,
+        )
+        session.open("shark-incremental")
+        session.webView = WebView(ApplicationProvider.getApplicationContext())
+        session.requestCheckpoint()
+        assertEquals(good, dao.get("shark-incremental")!!.snapshotPayload)
+        val checkpoint = snapshots.history("shark-incremental").single()
+        assertTrue(checkpoint.pinned)
+        assertEquals(SnapshotReasons.CHECKPOINT, checkpoint.reason)
+        assertEquals(SnapshotOrigins.MANUAL_CHECKPOINT, checkpoint.origin)
+        payload = null
+        session.requestCapture()
+        assertEquals(good, dao.get("shark-incremental")!!.snapshotPayload)
+        assertEquals(1, snapshots.history("shark-incremental").size)
     }
 
     private fun sharkPayload(gold: Int): String = freshSharkPayload(gold)
@@ -1482,7 +1584,9 @@ class SessionControllerTest {
                     it.gameId == gameId && !it.pinned &&
                         it.reason != SnapshotReasons.MIGRATED_BASELINE &&
                         it.reason != SnapshotReasons.DIAGNOSTIC_BACKUP &&
-                        it.reason != SnapshotReasons.PRE_RESTORE
+                        it.reason != SnapshotReasons.PRE_RESTORE &&
+                        it.reason != SnapshotReasons.WORKSTATION &&
+                        it.reason != SnapshotReasons.CHECKPOINT
                 }
                 .sortedByDescending { it.sequence }
                 .take(10)
@@ -1494,6 +1598,8 @@ class SessionControllerTest {
                     record.reason != SnapshotReasons.MIGRATED_BASELINE &&
                     record.reason != SnapshotReasons.DIAGNOSTIC_BACKUP &&
                     record.reason != SnapshotReasons.PRE_RESTORE &&
+                    record.reason != SnapshotReasons.WORKSTATION &&
+                    record.reason != SnapshotReasons.CHECKPOINT &&
                     record.id !in keep
             }
         }

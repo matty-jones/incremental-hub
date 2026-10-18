@@ -31,12 +31,12 @@ interface SnapshotDao {
         DELETE FROM snapshots
         WHERE game_id = :gameId
           AND pinned = 0
-          AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'workstation')
+          AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'workstation', 'checkpoint')
           AND id NOT IN (
             SELECT id FROM snapshots
             WHERE game_id = :gameId
               AND pinned = 0
-              AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'workstation')
+              AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'workstation', 'checkpoint')
             ORDER BY sequence DESC
             LIMIT 10
           )

@@ -25,6 +25,13 @@ class SharkIncrementalAdapter : GameAdapter {
         internal const val MIN_VERSION = 3
         internal const val JS_PLAYER_EXISTS =
             "(function(){ return typeof player !== 'undefined' && player !== null; })()"
+        internal const val JS_UI_READY =
+            "(function(){ if (typeof player === 'undefined' || player === null) return false;" +
+                " var app = document.getElementById('app');" +
+                " var offline = document.getElementById('offline');" +
+                " var appShown = !!(app && app.style.display !== 'none');" +
+                " var offlineShown = !!(offline && offline.style.display !== 'none');" +
+                " return appShown || offlineShown; })()"
         internal const val JS_PEEK_SAVE =
             "(function(){ return localStorage.getItem('$SAVE_KEY'); })()"
         internal const val JS_READ_SAVE =
@@ -70,7 +77,7 @@ class SharkIncrementalAdapter : GameAdapter {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val ready: String? = withTimeoutOrNull(500L) {
-                evaluateJs(webView, JS_PLAYER_EXISTS)
+                evaluateJs(webView, JS_UI_READY)
             }
             if (ready == "true") return true
             kotlinx.coroutines.delay(500L)
