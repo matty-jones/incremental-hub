@@ -12,10 +12,19 @@ import androidx.webkit.ProfileStore
 import com.example.hub.bootstrap.DetectorResult
 import com.example.hub.database.GameInstance
 import com.example.hub.database.GameInstanceDao
+import com.example.hub.database.SnapshotDao
+import com.example.hub.database.SnapshotReasons
+import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.GameAdapter
 import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
+import com.example.hub.games.PeekOutcome
 import com.example.hub.games.QualificationResult
+import com.example.hub.games.SaveComparison
+import com.example.hub.games.SaveStanding
+import com.example.hub.games.SaveSummary
+import com.example.hub.games.shouldResumeLive
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,9 +43,9 @@ import java.util.UUID
 /**
  * Lifecycle-aware session controller that owns session transitions.
  *
- * Opening reaches [SessionState.Playing] only after the real launch URL has
- * finished loading and the game adapter reports readiness. Capture writes a
- * validated snapshot or records a failure without replacing the last good one.
+ * Opening reaches [SessionState.Playing] only after a read-only storage peek
+ * and, when that peek is safe, one load of the real game. Room snapshots are
+ * not written back unless the user confirms a restore.
  */
 class SessionController(
     private val context: Context,
@@ -59,11 +68,30 @@ class SessionController(
     internal val readinessCheck: (suspend (WebView, GameAdapter) -> Boolean)? = null,
     internal val restoreCheck: (suspend (WebView, GameAdapter, String) -> Boolean)? = null,
     internal val captureClient: (suspend (WebView?, GameAdapter) -> String?)? = null,
+    /**
+     * Fired after a successful snapshot write. Must return immediately;
+     * capture may be holding the session lock.
+     */
+    private val onSnapshotSaved: ((GameInstance) -> Unit)? = null,
+    private val snapshotDao: SnapshotDao? = null,
+    internal val peekClient: (suspend (WebView, GameAdapter) -> PeekOutcome)? = null,
+    internal val runtimeCheck: (suspend (WebView, GameAdapter, String) -> Boolean)? = null,
+    internal val onBootstrapWrite: ((String?) -> Unit)? = null,
 ) : LifecycleEventObserver {
 
     companion object {
         private const val TAG = "SessionController"
         private const val CAPTURE_CADENCE_MS = 60_000L
+        private const val CONSOLE_LIMIT = 50
+        private const val CONSOLE_LINE_LIMIT = 500
+    }
+
+    private enum class OpenStep {
+        DECIDE,
+        LOAD_GAME,
+        RESTORE_WRITE,
+        RESTORE_VERIFY,
+        ROLLBACK,
     }
 
     private val _state = MutableStateFlow<SessionState>(SessionState.Closed)
@@ -96,6 +124,17 @@ class SessionController(
     private val _reloadEpoch = MutableStateFlow(0)
     val reloadEpoch: StateFlow<Int> = _reloadEpoch.asStateFlow()
 
+    private val _loadToken = MutableStateFlow(0)
+    val loadToken: StateFlow<Int> = _loadToken.asStateFlow()
+
+    private val _diagnostic = MutableStateFlow<SaveDiagnostic?>(null)
+    val diagnostic: StateFlow<SaveDiagnostic?> = _diagnostic.asStateFlow()
+
+    private val _consoleLines = MutableStateFlow<List<String>>(emptyList())
+    val consoleLines: StateFlow<List<String>> = _consoleLines.asStateFlow()
+
+    val documentGate = DocumentGate()
+
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private val mutex = Mutex()
     private var captureJob: Job? = null
@@ -106,7 +145,20 @@ class SessionController(
     internal var cadenceStartCount: Int = 0
         private set
 
+    internal var gameDocumentLoads: Int = 0
+        private set
+
     @Volatile var webView: WebView? = null
+
+    private var launchMode: LaunchMode = LaunchMode.RESUME
+    private var suppressCapture: Boolean = false
+    private var openStep: OpenStep = OpenStep.DECIDE
+    private var restoreInProgress: Boolean = false
+    private var peekOutcome: PeekOutcome? = null
+    private var chosenPayload: String? = null
+    private var liveBeforeRestore: String? = null
+    private var preparedPayload: String? = null
+    private val consoleBuffer = ArrayDeque<String>()
 
     val isActive: Boolean get() = _state.value !is SessionState.Closed
 
@@ -159,6 +211,10 @@ class SessionController(
             return
         }
         Log.d(TAG, "onAttached: recoveryState=${activeInstance.recoveryState} game=${activeInstance.gameId}")
+        launchMode = LaunchMode.RESUME
+        openStep = OpenStep.DECIDE
+        documentGate.phase = DocumentPhase.PEEK
+        documentGate.payload = null
         _activeGameId.value = activeInstance.gameId
         _activeProfileName.value = activeInstance.profileName
         val game = gameRegistry.getGame(activeInstance.gameId)
@@ -181,7 +237,7 @@ class SessionController(
         Log.d(TAG, "Detached from lifecycle")
     }
 
-    suspend fun open(gameId: String) {
+    suspend fun open(gameId: String, mode: LaunchMode = LaunchMode.RESUME) {
         mutex.withLock {
             if (_state.value !is SessionState.Closed) {
                 Log.w(TAG, "open($gameId): settling ${_state.value}")
@@ -191,9 +247,23 @@ class SessionController(
                     return
                 }
             }
+            launchMode = mode
+            suppressCapture = mode == LaunchMode.SAFE || mode == LaunchMode.INSPECT
+            openStep = OpenStep.DECIDE
+            restoreInProgress = false
+            peekOutcome = null
+            chosenPayload = null
+            liveBeforeRestore = null
+            preparedPayload = null
+            gameDocumentLoads = 0
+            documentGate.phase = DocumentPhase.PEEK
+            documentGate.payload = null
+            consoleBuffer.clear()
+            _consoleLines.value = emptyList()
+            _diagnostic.value = null
             transitionTo(SessionState.Opening, gameId)
             _sessionError.value = null
-            Log.d(TAG, "open($gameId): Opening")
+            Log.d(TAG, "open($gameId): Opening mode=$mode")
             val bound = bindProfileAndNavigate(gameId)
             if (bound == null) {
                 failOpenLocked(gameId, "Game $gameId is not in the registry")
@@ -202,6 +272,20 @@ class SessionController(
             if (activeAdapter == null) {
                 failOpenLocked(gameId, "No adapter for $gameId (${bound.second})")
                 return
+            }
+            if (mode == LaunchMode.SAFE) {
+                val backups = snapshotDao?.countPinned(gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0
+                if (backups == 0) {
+                    failOpenLocked(
+                        gameId,
+                        "Safe Launch needs a diagnostic backup. Use Inspect first. The game was not loaded.",
+                    )
+                    return
+                }
+                suppressCapture = true
+                openStep = OpenStep.LOAD_GAME
+                documentGate.phase = DocumentPhase.GAME
+                gameDocumentLoads = 1
             }
             val bootstrap = bootstrapTest?.invoke(profileStore)
             if (bootstrap != null && bootstrap.qualifiedMechanism == null) {
@@ -297,11 +381,36 @@ class SessionController(
     }
 
     fun requestReload() {
+        if (restoreInProgress || openStep == OpenStep.RESTORE_WRITE ||
+            openStep == OpenStep.RESTORE_VERIFY || openStep == OpenStep.ROLLBACK
+        ) {
+            _sessionError.value = "Reload is unavailable during restore"
+            return
+        }
         if (_state.value is SessionState.Playing && webView != null) {
             _reloadEpoch.value = _reloadEpoch.value + 1
             Log.d(TAG, "requestReload epoch=${_reloadEpoch.value}")
         } else {
             _sessionError.value = "Reload is unavailable until the page is playing"
+        }
+    }
+
+    fun onConsoleMessage(message: String) {
+        val line = message.take(CONSOLE_LINE_LIMIT)
+        if (consoleBuffer.size >= CONSOLE_LIMIT) consoleBuffer.removeFirst()
+        consoleBuffer.addLast(line)
+        _consoleLines.value = consoleBuffer.toList()
+    }
+
+    fun requestSafeLaunch() {
+        scope.launch {
+            mutex.withLock { safeLaunchLocked() }
+        }
+    }
+
+    fun confirmRecover() {
+        scope.launch {
+            mutex.withLock { confirmRecoverLocked() }
         }
     }
 
@@ -319,6 +428,19 @@ class SessionController(
                 _webViewGeneration.value = _webViewGeneration.value + 1
                 _sessionError.value = null
                 pendingDocumentUrl = null
+                restoreInProgress = false
+                preparedPayload = null
+                if (launchMode == LaunchMode.SAFE) {
+                    openStep = OpenStep.LOAD_GAME
+                    documentGate.phase = DocumentPhase.GAME
+                    documentGate.payload = null
+                    gameDocumentLoads = 1
+                } else {
+                    openStep = OpenStep.DECIDE
+                    documentGate.phase = DocumentPhase.PEEK
+                    documentGate.payload = null
+                    gameDocumentLoads = 0
+                }
                 transitionTo(SessionState.Opening, gameId)
                 val bound = bindProfileAndNavigate(gameId)
                 if (bound == null) {
@@ -446,6 +568,8 @@ class SessionController(
         _launchUrl.value = game.launchUrl
         _activeGameId.value = gameId
         activeAdapter = GameAdapters.create(game.adapterId)
+        documentGate.launchUrl = game.launchUrl
+        documentGate.storageKey = activeAdapter?.storageKey.orEmpty()
         Log.d(TAG, "bindProfileAndNavigate($gameId): profile=$profileName url=${game.launchUrl} profileNull=${profile == null}")
         return Pair(profile, game.launchUrl)
     }
@@ -475,74 +599,377 @@ class SessionController(
                 gameId = gameId,
                 adapter = adapter,
                 view = view,
-                payload = instanceDao.get(gameId)?.snapshotPayload,
                 url = url,
             )
         }
-        val ready = try {
-            readinessCheck?.invoke(work.view, work.adapter) ?: work.adapter.awaitReady(work.view, 30_000L)
-        } catch (e: Exception) {
-            Log.e(TAG, "readiness failed", e)
-            false
-        }
-        if (!ready) {
+        if (peekClient == null && readinessCheck != null &&
+            openStep == OpenStep.DECIDE && launchMode == LaunchMode.RESUME
+        ) {
+            val ready = try {
+                readinessCheck.invoke(work.view, work.adapter)
+            } catch (e: Exception) {
+                Log.e(TAG, "readiness failed", e)
+                false
+            }
             mutex.withLock {
                 if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
-                    failOpenLocked(work.gameId, "Adapter was not ready after loading ${work.url}")
+                    if (ready) {
+                        transitionTo(SessionState.Playing, work.gameId)
+                        Log.d(TAG, "handleDocument: Playing ${work.gameId} url=${work.url}")
+                    } else {
+                        failOpenLocked(work.gameId, "Adapter was not ready after loading ${work.url}")
+                    }
                 }
             }
             return
         }
-        val live = try {
-            when {
-                captureClient != null -> captureClient.invoke(work.view, work.adapter)
-                readinessCheck != null -> null
-                else -> withTimeoutOrNull(8_000L) {
-                    work.adapter.capture(
-                        work.view,
-                        QualificationResult(gameId = work.gameId, displayName = work.gameId, stages = emptyList()),
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "live capture before play failed", e)
-            null
+        when (openStep) {
+            OpenStep.DECIDE -> decideResume(work)
+            OpenStep.LOAD_GAME -> finishGameLoad(work)
+            OpenStep.RESTORE_WRITE -> finishRestoreWrite(work)
+            OpenStep.RESTORE_VERIFY -> finishRestoreVerify(work)
+            OpenStep.ROLLBACK -> finishRollback(work)
         }
-        val liveValid = live != null && try {
-            work.adapter.validate(live)
-        } catch (e: Exception) {
-            false
-        }
-        if (!liveValid) {
-            val payload = work.payload
-            if (!payload.isNullOrBlank() && work.adapter.validate(payload)) {
-                val restored = try {
-                    val prepared = work.adapter.prepareRestore(payload)
-                    restoreCheck?.invoke(work.view, work.adapter, prepared)
-                        ?: work.adapter.verifyLoaded(work.view, prepared)
-                } catch (e: Exception) {
-                    Log.e(TAG, "restore failed", e)
-                    false
-                }
-                if (!restored) {
-                    mutex.withLock {
-                        if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
-                            failOpenLocked(
-                                work.gameId,
-                                "Restore failed for ${work.gameId}; last good snapshot was kept",
-                            )
-                        }
-                    }
-                    return
-                }
+    }
+
+    private suspend fun decideResume(work: ReadyWork) {
+        val outcome = readPeek(work)
+        val history = snapshotDao?.history(work.gameId).orEmpty()
+        val pointer = instanceDao.get(work.gameId)?.snapshotPayload
+        val candidates = buildList {
+            if (!pointer.isNullOrBlank()) add(pointer)
+            history.forEach { record ->
+                if (record.payload.isNotBlank()) add(record.payload)
             }
         }
+        val stored = work.adapter.chooseStored(candidates)
+        val livePayload = (outcome as? PeekOutcome.Value)?.payload
+        val liveSummary = work.adapter.summarize(livePayload)
+        val comparison = when {
+            outcome is PeekOutcome.Failed -> SaveComparison.INCONCLUSIVE
+            candidates.isEmpty() -> SaveComparison.NO_SNAPSHOT
+            stored == null && liveSummary.standing != SaveStanding.PROGRESSED -> SaveComparison.INCONCLUSIVE
+            else -> work.adapter.compare(livePayload, stored)
+        }
+        val shouldPlay = launchMode == LaunchMode.RESUME &&
+            outcome !is PeekOutcome.Failed &&
+            shouldResumeLive(comparison)
+        if (!shouldPlay) {
+            pinCopy(work.gameId, work.adapter, livePayload, SnapshotReasons.DIAGNOSTIC_BACKUP)
+            if (!pointer.isNullOrBlank() && pointer != livePayload) {
+                pinCopy(work.gameId, work.adapter, pointer, SnapshotReasons.DIAGNOSTIC_BACKUP)
+            }
+        }
+        val storedSummary = work.adapter.summarize(stored)
+        val backupReady = (snapshotDao?.countPinned(work.gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0) > 0
+        val recoverAllowed = outcome !is PeekOutcome.Failed &&
+            stored != null &&
+            work.adapter.validate(stored)
+        val note = diagnosticNote(outcome, comparison)
+        val diagnostic = SaveDiagnostic(
+            comparison = comparison,
+            liveDetail = liveSummary.detail,
+            liveBytes = liveSummary.byteLength,
+            storedDetail = storedSummary.detail,
+            storedBytes = storedSummary.byteLength,
+            history = historyEntries(snapshotDao?.history(work.gameId).orEmpty()),
+            note = note,
+            backupReady = backupReady,
+            recoverAllowed = recoverAllowed,
+        )
         mutex.withLock {
-            if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            peekOutcome = outcome
+            chosenPayload = stored
+            _diagnostic.value = diagnostic
+            if (shouldPlay) {
+                beginGameLoadLocked()
+            } else {
+                _sessionError.value = note
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+            }
+        }
+    }
+
+    private suspend fun finishGameLoad(work: ReadyWork) {
+        val ready = awaitGameReady(work)
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (ready) {
                 transitionTo(SessionState.Playing, work.gameId)
                 Log.d(TAG, "handleDocument: Playing ${work.gameId} url=${work.url}")
+            } else {
+                rememberFailure(work, "Adapter was not ready after loading ${work.url}")
+                failOpenLocked(work.gameId, "Adapter was not ready after loading ${work.url}")
             }
         }
+    }
+
+    private suspend fun finishRestoreWrite(work: ReadyWork) {
+        val expected = preparedPayload
+        if (peekClient == null) {
+            val marker = try {
+                work.adapter.confirmBootstrap(work.view)
+            } catch (e: Exception) {
+                false
+            }
+            if (!marker) {
+                mutex.withLock {
+                    if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
+                        beginRollbackLocked()
+                    }
+                }
+                return
+            }
+        }
+        onBootstrapWrite?.invoke(expected)
+        val readback = when (val outcome = readPeek(work)) {
+            is PeekOutcome.Value -> outcome.payload
+            else -> null
+        }
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (expected != null && readback == expected) {
+                openStep = OpenStep.RESTORE_VERIFY
+                documentGate.phase = DocumentPhase.GAME
+                documentGate.payload = null
+                gameDocumentLoads += 1
+                _loadToken.value = _loadToken.value + 1
+            } else {
+                beginRollbackLocked()
+            }
+        }
+    }
+
+    private suspend fun finishRestoreVerify(work: ReadyWork) {
+        val prepared = preparedPayload
+        val ready = awaitGameReady(work)
+        val accepted = ready && prepared != null && try {
+            runtimeCheck?.invoke(work.view, work.adapter, prepared)
+                ?: work.adapter.acceptsRuntime(work.view, prepared)
+        } catch (e: Exception) {
+            Log.e(TAG, "runtime verify failed", e)
+            false
+        }
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (accepted) {
+                restoreInProgress = false
+                transitionTo(SessionState.Playing, work.gameId)
+                Log.d(TAG, "restore verified ${work.gameId}")
+            } else {
+                beginRollbackLocked()
+            }
+        }
+    }
+
+    private suspend fun finishRollback(work: ReadyWork) {
+        onBootstrapWrite?.invoke(documentGate.payload)
+        val note = "Restore did not match the running game. The previous storage value was written back. The game was not loaded again."
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            restoreInProgress = false
+            documentGate.phase = DocumentPhase.PEEK
+            rememberFailure(work, note)
+            _sessionError.value = note
+            transitionTo(SessionState.RecoveryRequired, work.gameId)
+        }
+    }
+
+    private suspend fun readPeek(work: ReadyWork): PeekOutcome {
+        val client = peekClient
+        if (client != null) return client.invoke(work.view, work.adapter)
+        val marker = try {
+            work.adapter.confirmBootstrap(work.view)
+        } catch (e: Exception) {
+            Log.e(TAG, "bootstrap marker failed", e)
+            false
+        }
+        if (!marker) return PeekOutcome.Failed
+        return try {
+            work.adapter.peekStorage(work.view)
+        } catch (e: Exception) {
+            Log.e(TAG, "peek failed", e)
+            PeekOutcome.Failed
+        }
+    }
+
+    private suspend fun awaitGameReady(work: ReadyWork): Boolean = try {
+        readinessCheck?.invoke(work.view, work.adapter) ?: work.adapter.awaitReady(work.view, 30_000L)
+    } catch (e: Exception) {
+        Log.e(TAG, "readiness failed", e)
+        false
+    }
+
+    private fun beginGameLoadLocked() {
+        openStep = OpenStep.LOAD_GAME
+        documentGate.phase = DocumentPhase.GAME
+        documentGate.payload = null
+        gameDocumentLoads += 1
+        _loadToken.value = _loadToken.value + 1
+    }
+
+    private fun beginRollbackLocked() {
+        openStep = OpenStep.ROLLBACK
+        documentGate.phase = DocumentPhase.ROLLBACK
+        documentGate.payload = liveBeforeRestore
+        _loadToken.value = _loadToken.value + 1
+    }
+
+    private suspend fun safeLaunchLocked() {
+        val gameId = _activeGameId.value ?: return
+        if (_state.value !is SessionState.RecoveryRequired) return
+        val backups = snapshotDao?.countPinned(gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0
+        if (backups == 0) {
+            _sessionError.value = "Safe Launch needs a diagnostic backup. Use Inspect first. The game was not loaded."
+            return
+        }
+        launchMode = LaunchMode.SAFE
+        suppressCapture = true
+        openStep = OpenStep.LOAD_GAME
+        documentGate.phase = DocumentPhase.GAME
+        documentGate.payload = null
+        restoreInProgress = false
+        gameDocumentLoads += 1
+        _sessionError.value = null
+        val dead = webView
+        webView = null
+        dead?.let { runCatching { it.destroy() } }
+        _webViewGeneration.value = _webViewGeneration.value + 1
+        transitionTo(SessionState.Opening, gameId)
+    }
+
+    private suspend fun confirmRecoverLocked() {
+        val gameId = _activeGameId.value ?: return
+        val adapter = activeAdapter ?: return
+        if (_state.value !is SessionState.RecoveryRequired) return
+        if (peekOutcome == null || peekOutcome is PeekOutcome.Failed) {
+            _sessionError.value = "Restore refused because storage could not be inspected."
+            return
+        }
+        val stored = chosenPayload
+        if (stored.isNullOrBlank() || !adapter.validate(stored)) {
+            _sessionError.value = "Restore refused because no validated snapshot is available."
+            return
+        }
+        val livePayload = (peekOutcome as? PeekOutcome.Value)?.payload
+        pinCopy(gameId, adapter, livePayload, SnapshotReasons.PRE_RESTORE)
+        val roomPayload = instanceDao.get(gameId)?.snapshotPayload
+        if (!roomPayload.isNullOrBlank()) {
+            pinCopy(gameId, adapter, roomPayload, SnapshotReasons.PRE_RESTORE)
+        }
+        val prepared = adapter.prepareRestore(stored)
+        liveBeforeRestore = livePayload
+        preparedPayload = prepared
+        openStep = OpenStep.RESTORE_WRITE
+        documentGate.phase = DocumentPhase.WRITE
+        documentGate.payload = prepared
+        restoreInProgress = true
+        _sessionError.value = null
+        val dead = webView
+        webView = null
+        dead?.let { runCatching { it.destroy() } }
+        _webViewGeneration.value = _webViewGeneration.value + 1
+        transitionTo(SessionState.Opening, gameId)
+    }
+
+    private suspend fun pinCopy(gameId: String, adapter: GameAdapter, payload: String?, reason: String) {
+        val summary = adapter.summarize(payload)
+        appendSnapshot(
+            gameId = gameId,
+            payload = payload.orEmpty(),
+            reason = reason,
+            pinned = true,
+            progressJson = summaryJson(summary),
+        )
+    }
+
+    private suspend fun appendSnapshot(
+        gameId: String,
+        payload: String,
+        reason: String,
+        pinned: Boolean,
+        progressJson: String?,
+    ) {
+        val dao = snapshotDao ?: return
+        if (reason == SnapshotReasons.DIAGNOSTIC_BACKUP &&
+            dao.findPinnedPayload(gameId, reason, payload) != null
+        ) {
+            return
+        }
+        dao.insert(
+            SnapshotRecord(
+                id = UUID.randomUUID().toString(),
+                gameId = gameId,
+                sequence = dao.maxSequence(gameId) + 1,
+                capturedAtMillis = System.currentTimeMillis(),
+                reason = reason,
+                pinned = pinned,
+                payload = payload,
+                progressJson = progressJson,
+            ),
+        )
+        if (!pinned) dao.pruneAutomatic(gameId)
+    }
+
+    private fun historyEntries(records: List<SnapshotRecord>): List<HistoryEntry> {
+        return records.asReversed().map { record ->
+            val detail = record.progressJson?.let { raw ->
+                runCatching { JSONObject(raw).optString("detail") }.getOrNull().orEmpty()
+            }.orEmpty().ifBlank { record.reason }
+            HistoryEntry(
+                sequence = record.sequence,
+                reason = record.reason,
+                pinned = record.pinned,
+                capturedAtMillis = record.capturedAtMillis,
+                byteLength = record.payload.length,
+                detail = detail,
+            )
+        }
+    }
+
+    private fun summaryJson(summary: SaveSummary): String {
+        return JSONObject()
+            .put("standing", summary.standing.name)
+            .put("detail", summary.detail)
+            .put("bytes", summary.byteLength)
+            .put("version", summary.version ?: JSONObject.NULL)
+            .toString()
+    }
+
+    private fun diagnosticNote(outcome: PeekOutcome, comparison: SaveComparison): String {
+        if (outcome is PeekOutcome.Failed) {
+            return "Inspection inconclusive. The bootstrap page did not run, so the game was not loaded. " +
+                "A service worker may have intercepted the request. Storage was not changed."
+        }
+        if (launchMode == LaunchMode.INSPECT) {
+            return "Inspect read storage without loading the game."
+        }
+        return when (comparison) {
+            SaveComparison.LIVE_BEHIND ->
+                "Live storage is behind the saved snapshot. The game was not loaded."
+            SaveComparison.LIVE_MISSING ->
+                "Live storage has no save key, and a snapshot exists. The game was not loaded."
+            SaveComparison.INCONCLUSIVE ->
+                "Storage could not be compared safely. The game was not loaded."
+            else -> "Resume held. The game was not loaded."
+        }
+    }
+
+    private fun rememberFailure(work: ReadyWork, note: String) {
+        val current = _diagnostic.value
+        _diagnostic.value = current?.copy(note = note, recoverAllowed = false) ?: SaveDiagnostic(
+            comparison = SaveComparison.INCONCLUSIVE,
+            liveDetail = "Unavailable",
+            liveBytes = 0,
+            storedDetail = "Unavailable",
+            storedBytes = 0,
+            history = emptyList(),
+            note = note,
+            backupReady = false,
+            recoverAllowed = false,
+        )
+        Log.e(TAG, "rememberFailure ${work.gameId}: $note")
     }
 
     private suspend fun closeLocked() {
@@ -613,6 +1040,10 @@ class SessionController(
     }
 
     private suspend fun performCaptureLocked(reason: String): Boolean {
+        if (suppressCapture) {
+            Log.d(TAG, "capture suppressed ($reason)")
+            return false
+        }
         if (captureRunning) {
             Log.w(TAG, "capture overlap rejected ($reason)")
             return false
@@ -667,7 +1098,7 @@ class SessionController(
                 }
                 return false
             }
-            writeCaptureResult(gameId, payload, null)
+            writeCaptureResult(gameId, payload, null, reason)
             if (_sessionError.value?.startsWith("Capture failed") == true) {
                 _sessionError.value = null
             }
@@ -711,7 +1142,7 @@ class SessionController(
         if (current is SessionState.Playing && target !is SessionState.Capturing) {
             stopCaptureCadence()
         }
-        if (target is SessionState.Playing && current !is SessionState.Capturing) {
+        if (target is SessionState.Playing && current !is SessionState.Capturing && !suppressCapture) {
             startCaptureCadence()
         }
         _state.value = target
@@ -748,7 +1179,12 @@ class SessionController(
         instanceDao.upsert(instance.copy(recoveryState = null))
     }
 
-    private suspend fun writeCaptureResult(gameId: String, successPayload: String?, error: String?) {
+    private suspend fun writeCaptureResult(
+        gameId: String,
+        successPayload: String?,
+        error: String?,
+        reason: String = "capture",
+    ) {
         val instance = instanceDao.get(gameId) ?: return
         val now = System.currentTimeMillis()
         val updated = if (successPayload != null) {
@@ -767,6 +1203,12 @@ class SessionController(
             )
         }
         instanceDao.upsert(updated)
+        if (successPayload != null) {
+            val adapter = activeAdapter
+            val progress = adapter?.let { summaryJson(it.summarize(successPayload)) }
+            appendSnapshot(gameId, successPayload, reason, pinned = false, progressJson = progress)
+            onSnapshotSaved?.invoke(updated)
+        }
     }
 
     private suspend fun failOpenLocked(gameId: String, message: String) {
@@ -828,7 +1270,6 @@ class SessionController(
         val gameId: String,
         val adapter: GameAdapter,
         val view: WebView,
-        val payload: String?,
         val url: String,
     )
 }

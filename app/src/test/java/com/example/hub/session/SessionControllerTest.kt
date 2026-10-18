@@ -6,7 +6,13 @@ import org.json.JSONObject
 import java.util.Base64
 import com.example.hub.database.GameInstance
 import com.example.hub.database.GameInstanceDao
+import com.example.hub.database.SnapshotDao
+import com.example.hub.database.SnapshotReasons
+import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.GameRegistry
+import com.example.hub.games.PeekOutcome
+import com.example.hub.games.SharkProgress
+import com.example.hub.session.LaunchMode
 import com.example.hub.bootstrap.DetectorResult
 import androidx.lifecycle.Lifecycle
 import kotlinx.coroutines.Dispatchers
@@ -969,8 +975,8 @@ class SessionControllerTest {
         session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
         session.onMainFrameFinished("https://mrredshark77.github.io")
         assertEquals(SessionState.Playing, session.state.value)
-        assertNotNull(restored)
-        assertTrue(com.example.hub.games.SharkIncrementalAdapter().validate(restored!!))
+        assertNull(restored)
+        assertEquals(payload, dao.get("shark-incremental")!!.snapshotPayload)
     }
 
     @Test
@@ -1031,9 +1037,47 @@ class SessionControllerTest {
         assertEquals("onReceivedError: image 404", controller.subresourceDiagnostic.value)
     }
 
-    private fun sharkPayload(gold: Int): String {
-        val json = JSONObject().put("VERSION", 3).put("gold", gold).toString()
-        return Base64.getEncoder().encodeToString(json.toByteArray(Charsets.UTF_8))
+    private fun sharkPayload(gold: Int): String = freshSharkPayload(gold)
+
+    private fun freshSharkPayload(gold: Int = 0): String {
+        val json = JSONObject()
+            .put("VERSION", 3)
+            .put("feature", 0)
+            .put("totalTimePlayed", 0)
+            .put("shark_level", 0)
+            .put("total_fish", 0)
+            .put("prestige", JSONObject().put("times", 0))
+            .put("core", JSONObject().put("times", 0))
+            .put("humanoid", JSONObject().put("times", 0))
+            .put("singularity", JSONObject().put("first", false))
+            .put("gold", gold)
+        return Base64.getEncoder().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun progressedSharkPayload(): String {
+        val json = JSONObject()
+            .put("VERSION", 3)
+            .put("feature", 4)
+            .put("totalTimePlayed", 345_600)
+            .put("shark_level", JSONObject().put("s", 1).put("e", 20).put("c", org.json.JSONArray().put(1)))
+            .put("total_fish", JSONObject().put("s", 1).put("e", 15).put("c", org.json.JSONArray().put(1)))
+            .put("prestige", JSONObject().put("times", 2))
+            .put("core", JSONObject().put("times", 1))
+            .put("humanoid", JSONObject().put("times", 0))
+            .put("singularity", JSONObject().put("first", false))
+        return Base64.getEncoder().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun progressedInstance(payload: String, playedAt: Long): GameInstance {
+        return GameInstance(
+            gameId = "shark-incremental",
+            profileName = "hub-game-shark-incremental",
+            sessionIdentity = "progressed-session",
+            lastPlayedAtMillis = playedAt,
+            lastCaptureAtMillis = playedAt,
+            snapshotPayload = payload,
+            lastCaptureSuccessAtMillis = playedAt,
+        )
     }
 
     private fun controllerWithoutDocumentHook(
@@ -1041,6 +1085,10 @@ class SessionControllerTest {
         readiness: (suspend (WebView, com.example.hub.games.GameAdapter) -> Boolean)? = null,
         restore: (suspend (WebView, com.example.hub.games.GameAdapter, String) -> Boolean)? = null,
         capture: (suspend (WebView?, com.example.hub.games.GameAdapter) -> String?)? = null,
+        peek: (suspend (WebView, com.example.hub.games.GameAdapter) -> PeekOutcome)? = null,
+        runtime: (suspend (WebView, com.example.hub.games.GameAdapter, String) -> Boolean)? = null,
+        onWrite: ((String?) -> Unit)? = null,
+        snapshots: SnapshotDao? = null,
     ): SessionController {
         return SessionController(
             context = ApplicationProvider.getApplicationContext(),
@@ -1054,6 +1102,10 @@ class SessionControllerTest {
             readinessCheck = readiness,
             restoreCheck = restore,
             captureClient = capture,
+            snapshotDao = snapshots,
+            peekClient = peek,
+            runtimeCheck = runtime,
+            onBootstrapWrite = onWrite,
         )
     }
 
@@ -1162,6 +1214,8 @@ class SessionControllerTest {
         override fun getAllOrdered(): kotlinx.coroutines.flow.Flow<List<GameInstance>> {
             throw UnsupportedOperationException("Not used in unit tests")
         }
+
+        override suspend fun getAll(): List<GameInstance> = instances.values.toList()
 
         override suspend fun get(gameId: String): GameInstance? = instances[gameId]
 

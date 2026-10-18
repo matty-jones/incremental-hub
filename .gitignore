@@ -77,4 +77,9 @@ local.properties
 TEMP/
 
 /apk/
+
+server/.venv/
+server/db/*.db
+server/apks/*.apk
+server/apks/version.json
 PROGRESS.md

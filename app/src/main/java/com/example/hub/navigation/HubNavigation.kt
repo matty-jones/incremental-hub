@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavType
@@ -15,9 +16,13 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.hub.database.HubDatabase
 import com.example.hub.games.GameRegistry
+import com.example.hub.session.LaunchMode
 import com.example.hub.session.SessionController
-import com.example.hub.ui.LauncherScreen
+import com.example.hub.sync.SaveSync
+import com.example.hub.sync.WorkstationClient
+import com.example.hub.ui.ConnectedLauncher
 import com.example.hub.ui.PlaySurface
+import kotlinx.coroutines.launch
 
 private const val TAG = "HubNavigation"
 
@@ -35,12 +40,19 @@ fun HubNavigation(
     val navController = rememberNavController()
     val lifecycleOwner = LocalLifecycleOwner.current
     val dao = database.gameInstanceDao()
-    val controller = remember(lifecycleOwner, gameRegistry, dao) {
+    val scope = rememberCoroutineScope()
+    val workstation = remember { WorkstationClient() }
+    val saveSync = remember(dao) { SaveSync(dao, workstation) }
+    val controller = remember(lifecycleOwner, gameRegistry, dao, saveSync) {
         SessionController(
             context = context,
             gameRegistry = gameRegistry,
             instanceDao = dao,
             lifecycleOwner = lifecycleOwner,
+            onSnapshotSaved = { instance ->
+                scope.launch { saveSync.push(instance) }
+            },
+            snapshotDao = database.snapshotDao(),
         )
     }
 
@@ -55,28 +67,47 @@ fun HubNavigation(
         modifier = modifier,
     ) {
         composable("launcher") {
-            LauncherScreen(
+            ConnectedLauncher(
+                context = context,
                 registry = gameRegistry,
                 instanceDao = dao,
+                saveSync = saveSync,
+                api = workstation,
                 onLaunch = { gameId ->
                     Log.d(TAG, "navigate to play_surface/$gameId (launch)")
-                    navController.navigate("play_surface/$gameId")
+                    navController.navigate("play_surface/$gameId?mode=resume")
                 },
                 onResume = { gameId ->
                     Log.d(TAG, "navigate to play_surface/$gameId (resume)")
-                    navController.navigate("play_surface/$gameId")
+                    navController.navigate("play_surface/$gameId?mode=resume")
+                },
+                onInspect = { gameId ->
+                    Log.d(TAG, "navigate to play_surface/$gameId (inspect)")
+                    navController.navigate("play_surface/$gameId?mode=inspect")
+                },
+                onSafeLaunch = { gameId ->
+                    Log.d(TAG, "navigate to play_surface/$gameId (safe)")
+                    navController.navigate("play_surface/$gameId?mode=safe")
                 },
             )
         }
         composable(
-            route = "play_surface/{gameId}",
-            arguments = listOf(navArgument("gameId") { type = NavType.StringType }),
+            route = "play_surface/{gameId}?mode={mode}",
+            arguments = listOf(
+                navArgument("gameId") { type = NavType.StringType },
+                navArgument("mode") { type = NavType.StringType; defaultValue = "resume" },
+            ),
         ) { backStackEntry ->
             val gameId = backStackEntry.arguments?.getString("gameId")
                 ?: throw IllegalArgumentException("gameId is required for play_surface route")
-            LaunchedEffect(gameId) {
-                Log.d(TAG, "opening session for gameId=$gameId")
-                controller.open(gameId)
+            val mode = when (backStackEntry.arguments?.getString("mode")) {
+                "inspect" -> LaunchMode.INSPECT
+                "safe" -> LaunchMode.SAFE
+                else -> LaunchMode.RESUME
+            }
+            LaunchedEffect(gameId, mode) {
+                Log.d(TAG, "opening session for gameId=$gameId mode=$mode")
+                controller.open(gameId, mode)
             }
             PlaySurface(
                 gameId = gameId,

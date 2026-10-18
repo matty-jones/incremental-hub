@@ -104,4 +104,33 @@ interface GameAdapter {
      * @return true if the save was verified as loaded correctly
      */
     suspend fun verifyLoaded(webView: WebView, importedPayload: String): Boolean
+
+    /** localStorage key that holds this game's save. */
+    val storageKey: String
+
+    /**
+     * Read the persisted save without calling the game's save routine.
+     */
+    suspend fun peekStorage(webView: WebView): PeekOutcome
+
+    /**
+     * True when the pre-script bootstrap page ran in this document.
+     */
+    suspend fun confirmBootstrap(webView: WebView): Boolean
+
+    fun summarize(payload: String?): SaveSummary
+
+    fun compare(livePayload: String?, storedPayload: String?): SaveComparison
+
+    /**
+     * Pick the stored payload that should be treated as the recovery source.
+     * Shark prefers the furthest progressed candidate.
+     */
+    fun chooseStored(candidates: List<String>): String?
+
+    /**
+     * True when the running game's in-memory progress matches [importedPayload].
+     * Must not call the game's save routine.
+     */
+    suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean
 }

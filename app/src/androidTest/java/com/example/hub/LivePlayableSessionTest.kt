@@ -1,5 +1,6 @@
 package com.example.hub
 
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -49,7 +50,7 @@ class LivePlayableSessionTest {
     }
 
     private fun play(gameId: String, launchUrl: String, validate: (String) -> Boolean) {
-        composeRule.onNodeWithTag("launch-$gameId").performClick()
+        clickWhenEnabled("launch-$gameId")
         composeRule.waitUntil(timeoutMillis = 30_000) {
             composeRule.onAllNodesWithText(launchUrl, substring = true).fetchSemanticsNodes().isNotEmpty()
         }
@@ -109,7 +110,7 @@ class LivePlayableSessionTest {
             composeRule.onAllNodesWithTag("resume-$gameId").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.activityRule.scenario.recreate()
-        composeRule.onNodeWithTag("resume-$gameId").performClick()
+        clickWhenEnabled("resume-$gameId")
         composeRule.waitUntil(timeoutMillis = 90_000) {
             composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isEmpty()
@@ -122,6 +123,17 @@ class LivePlayableSessionTest {
         composeRule.waitUntil(timeoutMillis = 30_000) {
             composeRule.onAllNodesWithTag("resume-$gameId").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private fun clickWhenEnabled(tag: String) {
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            if (composeRule.onAllNodesWithText("Later").fetchSemanticsNodes().isNotEmpty()) {
+                composeRule.onNodeWithText("Later").performClick()
+            }
+            val nodes = composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes()
+            nodes.isNotEmpty() && nodes.all { SemanticsProperties.Disabled !in it.config }
+        }
+        composeRule.onNodeWithTag(tag).performClick()
     }
 
     private fun waitForSnapshot(

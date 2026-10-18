@@ -1,0 +1,20 @@
+[Unit]
+Description=Incremental Hub update and save server
+After=network.target
+
+[Service]
+Type=simple
+User=blasky
+WorkingDirectory=@ROOT@/server
+Environment="PATH=@ROOT@/server/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HUB_DB_PATH=@ROOT@/server/db/saves.db"
+Environment="HUB_APK_DIR=@ROOT@/server/apks"
+Environment="BASE_URL=http://192.168.86.3:8006"
+ExecStart=@ROOT@/server/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8006
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

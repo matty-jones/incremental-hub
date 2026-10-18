@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -51,14 +52,24 @@ private const val TAG = "LauncherScreen"
 fun LauncherScreen(
     registry: GameRegistry,
     instanceDao: GameInstanceDao,
+    syncSettled: Boolean,
     onLaunch: (String) -> Unit,
     onResume: (String) -> Unit,
+    onInspect: (String) -> Unit = {},
+    onSafeLaunch: (String) -> Unit = {},
 ) {
-    val lastPlayedByGameId by produceState<Map<String, Long>>(initialValue = emptyMap(), instanceDao) {
-        instanceDao.getAllOrdered().collect { instances ->
-            value = instances.associate { it.gameId to it.lastPlayedAtMillis }
+    val instances by produceState(initialValue = LauncherInstances(), instanceDao) {
+        instanceDao.getAllOrdered().collect { rows ->
+            value = LauncherInstances(
+                lastPlayed = rows.associate { it.gameId to it.lastPlayedAtMillis },
+                snapshotIds = rows.mapNotNull { row ->
+                    row.gameId.takeIf { !row.snapshotPayload.isNullOrBlank() }
+                }.toSet(),
+            )
         }
     }
+    val lastPlayedByGameId = instances.lastPlayed
+    val snapshotIds = instances.snapshotIds
 
     val games by produceState<List<RegisteredGame>>(initialValue = emptyList(), lastPlayedByGameId, registry) {
         val ordered = registry.getGames(lastPlayedByGameId)
@@ -69,50 +80,76 @@ fun LauncherScreen(
     HubScaffold(
         topBar = { HubTopBar(title = stringResource(R.string.app_name)) },
     ) { padding ->
-        if (games.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
+        val checkingWorkstation = !syncSettled && games.any { it.gameId !in snapshotIds }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            if (checkingWorkstation) {
                 Text(
-                    text = "No games registered",
-                    style = MaterialTheme.typography.bodyLarge,
+                    text = "Checking the workstation for saves",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 16.dp,
-                    vertical = 12.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(
-                    items = games,
-                    key = { it.gameId },
-                ) { game ->
-                    GameCard(
-                        game = game,
-                        onLaunch = onLaunch,
-                        onResume = onResume,
+            if (games.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No games registered",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                     )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 16.dp,
+                        vertical = 12.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(
+                        items = games,
+                        key = { it.gameId },
+                    ) { game ->
+                        GameCard(
+                            game = game,
+                            actionsHeld = !syncSettled && game.gameId !in snapshotIds,
+                            onLaunch = onLaunch,
+                            onResume = onResume,
+                            onInspect = onInspect,
+                            onSafeLaunch = onSafeLaunch,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+private data class LauncherInstances(
+    val lastPlayed: Map<String, Long> = emptyMap(),
+    val snapshotIds: Set<String> = emptySet(),
+)
+
 @Composable
 private fun GameCard(
     game: RegisteredGame,
+    actionsHeld: Boolean,
     onLaunch: (String) -> Unit,
     onResume: (String) -> Unit,
+    onInspect: (String) -> Unit,
+    onSafeLaunch: (String) -> Unit,
 ) {
     val hasSession = game.lastPlayedAtMillis != null
     val statusText = if (hasSession) "Resume" else "Launch"
@@ -189,6 +226,7 @@ private fun GameCard(
                     modifier = Modifier
                         .weight(1f)
                         .testTag("resume-${game.gameId}"),
+                    enabled = !actionsHeld,
                     onClick = { onResume(game.gameId) },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = accentColor,
@@ -202,6 +240,7 @@ private fun GameCard(
                     modifier = Modifier
                         .weight(1f)
                         .testTag("launch-${game.gameId}"),
+                    enabled = !actionsHeld,
                     onClick = { onLaunch(game.gameId) },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -214,6 +253,7 @@ private fun GameCard(
                     modifier = Modifier
                         .weight(1f)
                         .testTag("launch-${game.gameId}"),
+                    enabled = !actionsHeld,
                     onClick = { onLaunch(game.gameId) },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = accentColor,
@@ -222,6 +262,30 @@ private fun GameCard(
                     shape = MaterialTheme.shapes.small,
                 ) {
                     Text("Launch", fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+        if (game.gameId == "shark-incremental") {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("inspect-${game.gameId}"),
+                    onClick = { onInspect(game.gameId) },
+                ) {
+                    Text("Inspect")
+                }
+                TextButton(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("safe-${game.gameId}"),
+                    onClick = { onSafeLaunch(game.gameId) },
+                ) {
+                    Text("Safe launch")
                 }
             }
         }

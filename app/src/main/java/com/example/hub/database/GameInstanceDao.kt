@@ -19,6 +19,9 @@ interface GameInstanceDao {
     @Query("SELECT * FROM game_instances ORDER BY last_played_at_millis DESC")
     fun getAllOrdered(): Flow<List<GameInstance>>
 
+    @Query("SELECT * FROM game_instances")
+    suspend fun getAll(): List<GameInstance>
+
     /**
      * Returns the instance with the given [gameId], or null if absent.
      */

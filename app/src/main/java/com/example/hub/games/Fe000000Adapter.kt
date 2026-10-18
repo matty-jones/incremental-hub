@@ -40,6 +40,12 @@ class Fe000000Adapter : GameAdapter {
 
         internal const val JS_PLAYER_READY =
             "(function(){ return typeof player !== 'undefined' && player !== null && typeof Saving !== 'undefined' && typeof Saving.saveGame === 'function'; })()"
+        internal const val JS_PEEK_SAVE =
+            "(function(){ return localStorage.getItem('$SAVE_KEY'); })()"
+        internal const val JS_BOOTSTRAP_MARKER =
+            "(function(){ return window.__hubStorageBootstrap || ''; })()"
+        internal const val JS_RUNTIME_LAST_UPDATE =
+            "(function(){ if (typeof player === 'undefined' || player === null || player.lastUpdate === undefined) return null; return String(player.lastUpdate); })()"
         internal const val JS_FLUSH_AND_READ =
             "(function(){ if (typeof Saving !== 'undefined' && typeof Saving.saveGame === 'function') { Saving.saveGame(true, false); } return localStorage.getItem('$SAVE_KEY'); })()"
 
@@ -133,6 +139,7 @@ class Fe000000Adapter : GameAdapter {
 
     override val adapterId = "fe000000-adapter"
     override val adapterVersion = "1.1.0"
+    override val storageKey: String = SAVE_KEY
 
     override suspend fun probe(webView: WebView): Boolean {
         val hasGlobal: String? = withTimeoutOrNull(5_000L) {
@@ -190,6 +197,76 @@ class Fe000000Adapter : GameAdapter {
             null
         }
         return result == "ok"
+    }
+
+    override suspend fun peekStorage(webView: WebView): PeekOutcome {
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_PEEK_SAVE) }
+        } catch (e: Exception) {
+            return PeekOutcome.Failed
+        } ?: return PeekOutcome.Failed
+        val value = unwrapJsResult(raw)
+        return if (value == null) PeekOutcome.Empty else PeekOutcome.Value(value)
+    }
+
+    override suspend fun confirmBootstrap(webView: WebView): Boolean {
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_BOOTSTRAP_MARKER) }
+        } catch (e: Exception) {
+            return false
+        } ?: return false
+        val marker = unwrapJsResult(raw)
+        return marker == "peek" || marker == "write" || marker == "rollback"
+    }
+
+    override fun summarize(payload: String?): SaveSummary {
+        if (payload.isNullOrBlank()) {
+            return SaveSummary(SaveStanding.ABSENT, null, "No save key", 0)
+        }
+        val decoded = decodeSave(payload)
+        if (decoded == null) {
+            return SaveSummary(SaveStanding.INVALID, null, "Save did not parse", payload.length)
+        }
+        val valid = try {
+            val json = JSONObject(decoded)
+            REQUIRED_KEYS.all { json.has(it) }
+        } catch (e: Exception) {
+            false
+        }
+        return if (valid) {
+            SaveSummary(SaveStanding.PROGRESSED, null, "structure ok", payload.length)
+        } else {
+            SaveSummary(SaveStanding.INVALID, null, "Save did not parse", payload.length)
+        }
+    }
+
+    override fun compare(livePayload: String?, storedPayload: String?): SaveComparison {
+        val stored = summarize(storedPayload)
+        if (stored.standing == SaveStanding.ABSENT) return SaveComparison.NO_SNAPSHOT
+        val live = summarize(livePayload)
+        if (live.standing == SaveStanding.ABSENT) return SaveComparison.LIVE_MISSING
+        if (live.standing != SaveStanding.PROGRESSED || stored.standing != SaveStanding.PROGRESSED) {
+            return SaveComparison.INCONCLUSIVE
+        }
+        return if (livePayload == storedPayload) SaveComparison.MATCH else SaveComparison.LIVE_AHEAD
+    }
+
+    override fun chooseStored(candidates: List<String>): String? =
+        candidates.firstOrNull { summarize(it).standing == SaveStanding.PROGRESSED }
+
+    override suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean {
+        val decoded = decodeSave(importedPayload) ?: return false
+        val expected = try {
+            JSONObject(decoded).opt("lastUpdate")?.toString()
+        } catch (e: Exception) {
+            null
+        } ?: return false
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_RUNTIME_LAST_UPDATE) }
+        } catch (e: Exception) {
+            return false
+        } ?: return false
+        return unwrapJsResult(raw) == expected
     }
 
     private suspend fun evaluateJs(webView: WebView, js: String): String? {

@@ -21,15 +21,38 @@ import org.json.JSONObject
 class SharkIncrementalAdapter : GameAdapter {
 
     companion object {
-        private const val SAVE_KEY = "shark_inc_save"
-        private const val MIN_VERSION = 3
+        internal const val SAVE_KEY = "shark_inc_save"
+        internal const val MIN_VERSION = 3
         internal const val JS_PLAYER_EXISTS =
             "(function(){ return typeof player !== 'undefined' && player !== null; })()"
+        internal const val JS_PEEK_SAVE =
+            "(function(){ return localStorage.getItem('$SAVE_KEY'); })()"
         internal const val JS_READ_SAVE =
             "(function(){ if (typeof save === 'function') { save(); } return localStorage.getItem('$SAVE_KEY'); })()"
+        internal const val JS_BOOTSTRAP_MARKER =
+            "(function(){ return window.__hubStorageBootstrap || ''; })()"
+        internal const val JS_RUNTIME_PROGRESS =
+            "(function(){ if (typeof player === 'undefined' || player === null) return null;" +
+                " function mag(v){ if (v == null) return null;" +
+                " if (typeof v === 'number' || typeof v === 'string') return v;" +
+                " if (typeof v === 'object' && v.s != null && v.e != null) return {s:v.s, e:v.e};" +
+                " if (typeof v.toString === 'function') return String(v); return null; }" +
+                " return JSON.stringify({" +
+                " VERSION: player.VERSION," +
+                " feature: player.feature," +
+                " totalTimePlayed: player.totalTimePlayed," +
+                " shark_level: mag(player.shark_level)," +
+                " total_fish: mag(player.total_fish)," +
+                " prestige: {times: player.prestige ? player.prestige.times : null}," +
+                " core: {times: player.core ? player.core.times : null}," +
+                " humanoid: {times: player.humanoid ? player.humanoid.times : null}," +
+                " singularity: {first: player.singularity ? player.singularity.first : null}" +
+                " }); })()"
         private const val JS_SET_SAVE =
             "(function(){ localStorage.setItem('$SAVE_KEY', __PAYLOAD__); return true; })()"
     }
+
+    override val storageKey: String = SAVE_KEY
 
     override val adapterId = "shark-incremental-adapter"
     override val adapterVersion = "1.0.0"
@@ -131,6 +154,44 @@ class SharkIncrementalAdapter : GameAdapter {
             null
         }
         return restored == importedPayload
+    }
+
+    override suspend fun peekStorage(webView: WebView): PeekOutcome {
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_PEEK_SAVE) }
+        } catch (e: Exception) {
+            return PeekOutcome.Failed
+        } ?: return PeekOutcome.Failed
+        val value = unwrapJsResult(raw)
+        return if (value == null) PeekOutcome.Empty else PeekOutcome.Value(value)
+    }
+
+    override suspend fun confirmBootstrap(webView: WebView): Boolean {
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_BOOTSTRAP_MARKER) }
+        } catch (e: Exception) {
+            return false
+        } ?: return false
+        val marker = unwrapJsResult(raw)
+        return marker == "peek" || marker == "write" || marker == "rollback"
+    }
+
+    override fun summarize(payload: String?): SaveSummary = SharkProgress.summarize(payload)
+
+    override fun compare(livePayload: String?, storedPayload: String?): SaveComparison =
+        SharkProgress.compare(livePayload, storedPayload)
+
+    override fun chooseStored(candidates: List<String>): String? = SharkProgress.chooseStored(candidates)
+
+    override suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean {
+        val expected = SharkProgress.parsePayload(importedPayload) ?: return false
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_RUNTIME_PROGRESS) }
+        } catch (e: Exception) {
+            return false
+        } ?: return false
+        val runtime = SharkProgress.parseRuntime(unwrapJsResult(raw)) ?: return false
+        return SharkProgress.acceptsRuntime(expected, runtime)
     }
 
     // ── JS bridge helper ───────────────────────────────────────────────────

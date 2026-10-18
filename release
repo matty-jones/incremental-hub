@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# Build a debug-signed release APK, publish it for the phone, and restart the workstation server.
+# Run this on 192.168.86.3. Default bump is the patch number (0.1.0 -> 0.1.1) and versionCode + 1.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$root"
+
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
+bump="patch"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --minor|--major|--no-bump)
+      if [[ "$bump" != "patch" ]]; then
+        echo "Use only one of --minor, --major, or --no-bump." >&2
+        exit 2
+      fi
+      bump="${1#--}"
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Usage: ./release [--minor | --major | --no-bump]" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+gradle_file="app/build.gradle.kts"
+apk_src="app/build/outputs/apk/release/app-release.apk"
+apk_dir="server/apks"
+apk_dest="$apk_dir/latest.apk"
+version_file="$apk_dir/version.json"
+base_url="http://192.168.86.3:8006"
+download_url="$base_url/app/download/latest.apk"
+
+if [[ -z "${JAVA_HOME:-}" && -d /usr/lib/jvm/java-17-openjdk-amd64 ]]; then
+  export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
+
+read_version() {
+  local code name
+  code="$(sed -nE 's/^[[:space:]]*versionCode = ([0-9]+).*/\1/p' "$gradle_file" | head -n 1)"
+  name="$(sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\1/p' "$gradle_file" | head -n 1)"
+  if [[ -z "$code" || -z "$name" ]]; then
+    echo "Could not read versionCode/versionName from $gradle_file" >&2
+    exit 1
+  fi
+  printf '%s %s\n' "$code" "$name"
+}
+
+bump_name() {
+  local name="$1" kind="$2"
+  local major minor patch
+  IFS=. read -r major minor patch <<<"$name"
+  major="${major:-0}"
+  minor="${minor:-0}"
+  patch="${patch:-0}"
+  case "$kind" in
+    patch) patch=$((patch + 1)) ;;
+    minor) minor=$((minor + 1)); patch=0 ;;
+    major) major=$((major + 1)); minor=0; patch=0 ;;
+    *) echo "Unknown bump $kind" >&2; exit 1 ;;
+  esac
+  printf '%s.%s.%s\n' "$major" "$minor" "$patch"
+}
+
+read -r version_code version_name <<<"$(read_version)"
+if [[ "$bump" != "no-bump" ]]; then
+  version_code=$((version_code + 1))
+  version_name="$(bump_name "$version_name" "$bump")"
+  sed -i -E "s/^([[:space:]]*)versionCode = [0-9]+/\\1versionCode = ${version_code}/" "$gradle_file"
+  sed -i -E "s/^([[:space:]]*)versionName = \"[^\"]*\"/\\1versionName = \"${version_name}\"/" "$gradle_file"
+  echo "Version is now $version_name ($version_code)"
+else
+  echo "Rebuilding $version_name ($version_code) without a version bump"
+fi
+
+./gradlew :app:assembleRelease --no-daemon
+
+if [[ ! -f "$apk_src" ]]; then
+  echo "Build finished but $apk_src was not produced." >&2
+  exit 1
+fi
+
+mkdir -p "$apk_dir" server/db
+cp "$apk_src" "$apk_dest"
+
+python3 - "$version_file" "$version_code" "$version_name" "$download_url" <<'PY'
+import json
+import sys
+
+path, code, name, url = sys.argv[1:]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(
+        {
+            "version_code": int(code),
+            "version_name": name,
+            "download_url": url,
+        },
+        handle,
+        indent=2,
+    )
+    handle.write("\n")
+PY
+
+if [[ ! -x server/.venv/bin/python ]]; then
+  python3 -m venv server/.venv
+fi
+server/.venv/bin/pip install -r server/requirements.txt
+
+unit_tmp="$(mktemp)"
+sed "s|@ROOT@|$root|g" server/incremental-hub.service >"$unit_tmp"
+sudo cp "$unit_tmp" /etc/systemd/system/incremental-hub.service
+rm -f "$unit_tmp"
+sudo systemctl daemon-reload
+sudo systemctl enable incremental-hub.service
+sudo systemctl restart incremental-hub.service
+
+echo "Published $apk_dest"
+echo "Phone update URL: $download_url"

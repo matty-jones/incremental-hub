@@ -49,6 +49,9 @@ fun PlaySurface(
     val subresource by controller.subresourceDiagnostic.collectAsState()
     val generation by controller.webViewGeneration.collectAsState()
     val reloadEpoch by controller.reloadEpoch.collectAsState()
+    val loadToken by controller.loadToken.collectAsState()
+    val diagnostic by controller.diagnostic.collectAsState()
+    val consoleLines by controller.consoleLines.collectAsState()
     val scope = rememberCoroutineScope()
     var menuOpen by remember(gameId) { mutableStateOf(false) }
 
@@ -80,11 +83,14 @@ fun PlaySurface(
                         state = state,
                         profile = profile,
                         reloadEpoch = reloadEpoch,
+                        loadToken = loadToken,
+                        documentGate = controller.documentGate,
                         onWebViewCreated = controller::registerWebView,
                         onPageFinished = controller::onMainFrameFinished,
                         onMainFrameError = controller::onMainFrameFailed,
                         onSubresourceError = controller::onSubresourceFailed,
                         onRendererGone = controller::onRendererGone,
+                        onConsoleMessage = controller::onConsoleMessage,
                         onRelease = controller::releaseWebView,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -129,7 +135,11 @@ fun PlaySurface(
                         gameId = gameId,
                         launchUrl = launchUrl,
                         detail = sessionError,
+                        diagnostic = diagnostic,
+                        consoleLines = consoleLines,
                         onRetry = { controller.retryRecovery() },
+                        onSafeLaunch = { controller.requestSafeLaunch() },
+                        onRecover = { controller.confirmRecover() },
                         onClose = { exitSession() },
                         modifier = Modifier.fillMaxSize(),
                     )
