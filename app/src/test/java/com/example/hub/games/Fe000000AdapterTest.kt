@@ -48,6 +48,8 @@ class Fe000000AdapterTest {
         assertFalse(Fe000000Adapter.JS_PLAYER_READY.trimStart().startsWith("return"))
         assertFalse(Fe000000Adapter.JS_FLUSH_AND_READ.trimStart().startsWith("return"))
         assertTrue(Fe000000Adapter.JS_FLUSH_AND_READ.contains("Saving.saveGame(true, false)"))
+        assertFalse(Fe000000Adapter.JS_PEEK_SAVE.contains("saveGame"))
+        assertFalse(Fe000000Adapter.JS_RUNTIME_LAST_UPDATE.contains("saveGame"))
         assertTrue(Fe000000Adapter.JS_FLUSH_AND_READ.contains("fe000000-save"))
         val nasty = "a\"b\\c\n\u2028</script>"
         val script = Fe000000Adapter.setSaveScript(nasty)

@@ -68,6 +68,8 @@ class SharkIncrementalAdapterTest {
 
     @Test
     fun `read script flushes save and write script quotes payload`() {
+        assertFalse(SharkIncrementalAdapter.JS_PEEK_SAVE.contains("save("))
+        assertFalse(SharkIncrementalAdapter.JS_RUNTIME_PROGRESS.contains("save("))
         assertTrue(SharkIncrementalAdapter.JS_READ_SAVE.contains("save()"))
         assertFalse(SharkIncrementalAdapter.JS_READ_SAVE.trimStart().startsWith("return"))
         assertTrue(SharkIncrementalAdapter.JS_PLAYER_EXISTS.startsWith("(function()"))

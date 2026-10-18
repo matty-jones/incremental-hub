@@ -1,6 +1,8 @@
 package com.example.hub.ui
 
+import com.example.hub.session.DocumentPhase
 import com.example.hub.session.SessionState
+import com.example.hub.session.StorageBootstrap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -38,6 +40,20 @@ class WebViewHostTest {
         assertFalse(shouldCreateWebView(SessionState.Closed))
         assertFalse(shouldCreateWebView(SessionState.Closing))
         assertFalse(shouldCreateWebView(SessionState.RecoveryRequired))
+    }
+
+    @Test
+    fun bootstrapServesOnlyTheMainFrameBeforeTheGame() {
+        val launch = "https://mrredshark77.github.io/shark-incremental/"
+        assertTrue(StorageBootstrap.shouldServe(DocumentPhase.PEEK, launch, launch, mainFrame = true))
+        assertFalse(StorageBootstrap.shouldServe(DocumentPhase.PEEK, launch, launch, mainFrame = false))
+        assertFalse(StorageBootstrap.shouldServe(DocumentPhase.GAME, launch, launch, mainFrame = true))
+        val page = StorageBootstrap.document(DocumentPhase.PEEK, "shark_inc_save", null)
+        assertTrue(page.contains("__hubStorageBootstrap"))
+        assertFalse(page.contains("shark-incremental/js"))
+        val write = StorageBootstrap.document(DocumentPhase.WRITE, "shark_inc_save", "abc")
+        assertTrue(write.contains("localStorage.setItem"))
+        assertTrue(write.contains("abc"))
     }
 
     @Test

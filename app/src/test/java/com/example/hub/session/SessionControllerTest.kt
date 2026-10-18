@@ -12,7 +12,6 @@ import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.PeekOutcome
 import com.example.hub.games.SharkProgress
-import com.example.hub.session.LaunchMode
 import com.example.hub.bootstrap.DetectorResult
 import androidx.lifecycle.Lifecycle
 import kotlinx.coroutines.Dispatchers
@@ -948,35 +947,252 @@ class SessionControllerTest {
     }
 
     @Test
-    fun reopenRestoresPersistedSnapshot() = runTest {
-        val payload = sharkPayload(gold = 11)
-        var restored: String? = null
-        var liveSave = false
+    fun reopenResumesLiveStorageWithoutCallingSaveOrRestore() = runTest {
+        val payload = progressedSharkPayload()
+        assertFalse(SharkProgress.parsePayload(payload)!!.fresh)
+        var captures = 0
+        val snapshots = StubSnapshotDao()
         val session = controllerWithoutDocumentHook(
             readiness = { _, _ -> true },
-            restore = { _, _, prepared ->
-                restored = prepared
+            capture = { _, _ ->
+                captures += 1
+                payload
+            },
+            peek = { _, _ -> PeekOutcome.Value(payload) },
+            snapshots = snapshots,
+        )
+        session.open("shark-incremental")
+        val view = WebView(ApplicationProvider.getApplicationContext())
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(0, captures)
+        assertEquals(1, session.gameDocumentLoads)
+        session.requestCapture()
+        assertEquals(1, captures)
+        session.close()
+
+        var restoreCalled = false
+        var resumeCaptures = 0
+        val resumed = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            capture = { _, _ ->
+                resumeCaptures += 1
+                error("capture during resume")
+            },
+            restore = { _, _, _ ->
+                restoreCalled = true
                 true
             },
-            capture = { _, _ -> if (liveSave) payload else null },
+            peek = { _, _ -> PeekOutcome.Value(payload) },
+            snapshots = snapshots,
+        )
+        resumed.open("shark-incremental")
+        resumed.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        resumed.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        resumed.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, resumed.state.value)
+        assertFalse(restoreCalled)
+        assertEquals(0, resumeCaptures)
+        assertEquals(payload, dao.get("shark-incremental")!!.snapshotPayload)
+    }
+
+    @Test
+    fun processDeathResumesProgressedLiveSave() = runTest {
+        val payload = progressedSharkPayload()
+        val snapshots = StubSnapshotDao()
+        dao.upsert(progressedInstance(payload, playedAt = 50L))
+        val first = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(payload) },
+            snapshots = snapshots,
+        )
+        first.open("shark-incremental")
+        first.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        first.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        first.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, first.state.value)
+        first.forceCloseForTest()
+
+        var restoreCalled = false
+        val second = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            restore = { _, _, _ ->
+                restoreCalled = true
+                true
+            },
+            peek = { _, _ -> PeekOutcome.Value(payload) },
+            snapshots = snapshots,
+        )
+        second.open("shark-incremental")
+        second.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        second.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        second.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, second.state.value)
+        assertFalse(restoreCalled)
+        assertEquals(payload, dao.get("shark-incremental")!!.snapshotPayload)
+    }
+
+    @Test
+    fun multiDaySnapshotDoesNotOverrideMatchingLiveSave() = runTest {
+        val payload = progressedSharkPayload()
+        val snapshots = StubSnapshotDao()
+        val fourDaysMs = 4L * 24L * 60L * 60L * 1000L
+        dao.upsert(progressedInstance(payload, playedAt = System.currentTimeMillis() - fourDaysMs))
+        snapshots.insert(
+            SnapshotRecord(
+                id = "old",
+                gameId = "shark-incremental",
+                sequence = 1,
+                capturedAtMillis = System.currentTimeMillis() - fourDaysMs,
+                reason = SnapshotReasons.MIGRATED_BASELINE,
+                pinned = true,
+                payload = payload,
+                progressJson = null,
+            ),
+        )
+        var restoreCalled = false
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            restore = { _, _, _ ->
+                restoreCalled = true
+                true
+            },
+            peek = { _, _ -> PeekOutcome.Value(payload) },
+            snapshots = snapshots,
         )
         session.open("shark-incremental")
         session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
-        session.onMainFrameFinished("https://mrredshark77.github.io")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
         assertEquals(SessionState.Playing, session.state.value)
-        liveSave = true
-        session.requestCapture()
-        liveSave = false
-        session.close()
-        assertEquals(SessionState.Closed, session.state.value)
-
-        session.open("shark-incremental")
-        assertEquals(SessionState.Opening, session.state.value)
-        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
-        session.onMainFrameFinished("https://mrredshark77.github.io")
-        assertEquals(SessionState.Playing, session.state.value)
-        assertNull(restored)
+        assertFalse(restoreCalled)
         assertEquals(payload, dao.get("shark-incremental")!!.snapshotPayload)
+    }
+
+    @Test
+    fun freshLiveSaveDoesNotReplaceProgressedSnapshot() = runTest {
+        val stored = progressedSharkPayload()
+        val live = freshSharkPayload()
+        val snapshots = StubSnapshotDao()
+        dao.upsert(progressedInstance(stored, playedAt = 20L))
+        var captures = 0
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            capture = { _, _ ->
+                captures += 1
+                live
+            },
+            peek = { _, _ -> PeekOutcome.Value(live) },
+            snapshots = snapshots,
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(0, captures)
+        assertEquals(0, session.gameDocumentLoads)
+        assertEquals(stored, dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(
+            snapshots.history("shark-incremental").any {
+                it.pinned && it.reason == SnapshotReasons.DIAGNOSTIC_BACKUP
+            },
+        )
+        assertFalse(session.isCaptureCadenceActive)
+    }
+
+    @Test
+    fun safeLaunchWithoutBackupDoesNotStartCapture() = runTest {
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            capture = { _, _ -> error("capture") },
+            snapshots = StubSnapshotDao(),
+        )
+        session.open("shark-incremental", LaunchMode.SAFE)
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertFalse(session.isCaptureCadenceActive)
+        assertEquals(0, session.gameDocumentLoads)
+    }
+
+    @Test
+    fun safeLaunchAfterBackupLoadsWithoutCapture() = runTest {
+        val snapshots = StubSnapshotDao()
+        snapshots.insert(
+            SnapshotRecord(
+                id = "backup",
+                gameId = "shark-incremental",
+                sequence = 1,
+                capturedAtMillis = 10L,
+                reason = SnapshotReasons.DIAGNOSTIC_BACKUP,
+                pinned = true,
+                payload = progressedSharkPayload(),
+                progressJson = null,
+            ),
+        )
+        var captures = 0
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            capture = { _, _ ->
+                captures += 1
+                error("capture")
+            },
+            snapshots = snapshots,
+        )
+        session.open("shark-incremental", LaunchMode.SAFE)
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(0, captures)
+        assertFalse(session.isCaptureCadenceActive)
+        assertEquals(1, session.gameDocumentLoads)
+    }
+
+    @Test
+    fun failedRestoreRollsBackAfterOneGameLoad() = runTest {
+        val stored = progressedSharkPayload()
+        val live = freshSharkPayload()
+        val snapshots = StubSnapshotDao()
+        dao.upsert(progressedInstance(stored, playedAt = 30L))
+        var storage = live
+        val writes = mutableListOf<String?>()
+        var gameLoadsAtVerify = -1
+        lateinit var session: SessionController
+        session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ ->
+                if (storage.isEmpty()) PeekOutcome.Empty else PeekOutcome.Value(storage)
+            },
+            runtime = { _, _, _ ->
+                gameLoadsAtVerify = session.gameDocumentLoads
+                false
+            },
+            onWrite = { value ->
+                writes.add(value)
+                storage = value.orEmpty()
+            },
+            snapshots = snapshots,
+        )
+        session.open("shark-incremental")
+        val view = WebView(ApplicationProvider.getApplicationContext())
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        session.confirmRecover()
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(1, gameLoadsAtVerify)
+        assertEquals(1, session.gameDocumentLoads)
+        assertEquals(stored, dao.get("shark-incremental")!!.snapshotPayload)
+        assertEquals(live, writes.last())
+        assertTrue(
+            snapshots.history("shark-incremental").any {
+                it.reason == SnapshotReasons.PRE_RESTORE && it.pinned
+            },
+        )
     }
 
     @Test
@@ -1238,6 +1454,48 @@ class SessionControllerTest {
         fun clearAll() {
             instances.clear()
             insertOrder.clear()
+        }
+    }
+
+    class StubSnapshotDao : SnapshotDao {
+        private val rows = mutableListOf<SnapshotRecord>()
+
+        override suspend fun insert(record: SnapshotRecord) {
+            rows.add(record)
+        }
+
+        override suspend fun history(gameId: String): List<SnapshotRecord> =
+            rows.filter { it.gameId == gameId }.sortedBy { it.sequence }
+
+        override suspend fun maxSequence(gameId: String): Long =
+            rows.filter { it.gameId == gameId }.maxOfOrNull { it.sequence } ?: 0L
+
+        override suspend fun countPinned(gameId: String, reason: String): Int =
+            rows.count { it.gameId == gameId && it.reason == reason && it.pinned }
+
+        override suspend fun findPinnedPayload(gameId: String, reason: String, payload: String): SnapshotRecord? =
+            rows.firstOrNull { it.gameId == gameId && it.reason == reason && it.payload == payload && it.pinned }
+
+        override suspend fun pruneAutomatic(gameId: String) {
+            val keep = rows
+                .filter {
+                    it.gameId == gameId && !it.pinned &&
+                        it.reason != SnapshotReasons.MIGRATED_BASELINE &&
+                        it.reason != SnapshotReasons.DIAGNOSTIC_BACKUP &&
+                        it.reason != SnapshotReasons.PRE_RESTORE
+                }
+                .sortedByDescending { it.sequence }
+                .take(10)
+                .map { it.id }
+                .toSet()
+            rows.removeAll { record ->
+                record.gameId == gameId &&
+                    !record.pinned &&
+                    record.reason != SnapshotReasons.MIGRATED_BASELINE &&
+                    record.reason != SnapshotReasons.DIAGNOSTIC_BACKUP &&
+                    record.reason != SnapshotReasons.PRE_RESTORE &&
+                    record.id !in keep
+            }
         }
     }
 }
