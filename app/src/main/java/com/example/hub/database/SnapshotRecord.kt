@@ -23,4 +23,5 @@ object SnapshotReasons {
     const val MIGRATED_BASELINE = "migrated-baseline"
     const val DIAGNOSTIC_BACKUP = "diagnostic-backup"
     const val PRE_RESTORE = "pre-restore"
+    const val WORKSTATION = "workstation"
 }

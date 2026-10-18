@@ -15,7 +15,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.hub.database.HubDatabase
+import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
+import com.example.hub.sync.SaveAssessment
 import com.example.hub.session.LaunchMode
 import com.example.hub.session.SessionController
 import com.example.hub.sync.SaveSync
@@ -42,7 +44,22 @@ fun HubNavigation(
     val dao = database.gameInstanceDao()
     val scope = rememberCoroutineScope()
     val workstation = remember { WorkstationClient() }
-    val saveSync = remember(dao) { SaveSync(dao, workstation) }
+    val saveSync = remember(dao, gameRegistry) {
+        SaveSync(
+            dao = dao,
+            api = workstation,
+            snapshotDao = database.snapshotDao(),
+        ) { gameId, localPayload, remotePayload ->
+            val game = gameRegistry.getGame(gameId) ?: return@SaveSync SaveAssessment()
+            val adapter = GameAdapters.create(game.adapterId) ?: return@SaveSync SaveAssessment()
+            val comparison = adapter.compare(localPayload, remotePayload)
+            SaveAssessment(
+                localStanding = adapter.summarize(localPayload).standing,
+                remoteStanding = adapter.summarize(remotePayload).standing,
+                comparison = if (game.adapterId == "shark-incremental-adapter") comparison else null,
+            )
+        }
+    }
     val controller = remember(lifecycleOwner, gameRegistry, dao, saveSync) {
         SessionController(
             context = context,
