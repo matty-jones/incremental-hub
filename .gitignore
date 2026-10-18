@@ -75,3 +75,6 @@ local.properties
 .gsd/quarantine/
 
 TEMP/
+
+/apk/
+PROGRESS.md
