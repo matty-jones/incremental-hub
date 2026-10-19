@@ -80,6 +80,11 @@ class SessionController(
     internal val peekClient: (suspend (WebView, GameAdapter) -> PeekOutcome)? = null,
     internal val runtimeCheck: (suspend (WebView, GameAdapter, String) -> Boolean)? = null,
     internal val onBootstrapWrite: ((String?) -> Unit)? = null,
+    /**
+     * Test hook for the bootstrap-document guard in [finishGameLoad].
+     * Production leaves this null and asks the adapter.
+     */
+    internal val bootstrapConfirmTest: (suspend (WebView) -> Boolean)? = null,
 ) : LifecycleEventObserver {
 
     companion object {
@@ -89,6 +94,18 @@ class SessionController(
         private const val CONSOLE_LINE_LIMIT = 500
         private const val DIAGNOSTIC_LIMIT = 200
         private const val READINESS_WATCH_MS = 30_000L
+        private const val DOCUMENT_PROBE_JS =
+            "(function(){ try {" +
+                " var app = document.getElementById('app');" +
+                " var offline = document.getElementById('offline');" +
+                " return JSON.stringify({" +
+                " bootstrap: window.__hubStorageBootstrap || ''," +
+                " player: typeof player !== 'undefined' && player !== null," +
+                " appDisplay: app ? String(app.style.display) : null," +
+                " offlineDisplay: offline ? String(offline.style.display) : null," +
+                " title: document.title || ''," +
+                " readyState: document.readyState || ''" +
+                " }); } catch (e) { return JSON.stringify({ error: String(e) }); } })()"
     }
 
     private enum class OpenStep {
@@ -644,6 +661,8 @@ class SessionController(
             appendLine("reloadEpoch=${_reloadEpoch.value}")
             appendLine("webViewGeneration=${_webViewGeneration.value}")
             appendLine("documentPhase=${documentGate.phase}")
+            appendLine("openStep=$openStep")
+            appendLine("launchMode=$launchMode")
             appendLine("gameDocumentLoads=$gameDocumentLoads")
             if (save != null) {
                 appendLine("comparison=${save.comparison}")
@@ -911,6 +930,18 @@ class SessionController(
     }
 
     private suspend fun finishGameLoad(work: ReadyWork) {
+        // A duplicate onPageFinished for the storage-bootstrap document arrives
+        // after beginGameLoadLocked flips openStep to LOAD_GAME. Awaiting
+        // readiness there holds handlingDocument for up to 30s and drops the
+        // real game finish, leaving Shark's turquoise body with #app hidden.
+        if (documentStillBootstrap(work)) {
+            recordDiagnostic(
+                DiagnosticSeverity.INFO,
+                "navigation",
+                "Ignored game-load finish on the storage bootstrap page (phase=${documentGate.phase} step=$openStep). Waiting for the real document.",
+            )
+            return
+        }
         val ready = awaitGameReady(work)
         val continueWatch = mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
@@ -921,11 +952,19 @@ class SessionController(
             } else {
                 val note = "Adapter was not ready after loading ${work.url}. The page was left in place and was not restored."
                 rememberFailure(work, note)
-                recordDiagnostic(DiagnosticSeverity.WARNING, "readiness", note)
                 true
             }
         }
-        if (continueWatch) watchReadiness(work)
+        if (continueWatch) {
+            val probe = productionDocumentProbe(work)
+            recordDiagnostic(
+                DiagnosticSeverity.WARNING,
+                "readiness",
+                "Adapter was not ready after loading ${work.url}. The page was left in place and was not restored. " +
+                    "probe=$probe console=${_consoleLines.value.takeLast(5)}",
+            )
+            watchReadiness(work)
+        }
     }
 
     private fun watchReadiness(work: ReadyWork) {
@@ -939,20 +978,56 @@ class SessionController(
                 false
             }
             mutex.withLock {
-                if (!ready || _state.value !is SessionState.Opening || _activeGameId.value != work.gameId) {
-                    if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
-                        recordDiagnostic(
-                            DiagnosticSeverity.WARNING,
-                            "readiness",
-                            "Shark's interface stayed hidden. The save was not overwritten and the page was not reloaded.",
-                        )
-                    }
+                if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) {
                     return@withLock
                 }
-                if (openStep == OpenStep.LOAD_GAME) {
+                if (ready && openStep == OpenStep.LOAD_GAME) {
                     transitionTo(SessionState.Playing, work.gameId)
+                    return@withLock
                 }
             }
+            val probe = productionDocumentProbe(work)
+            mutex.withLock {
+                if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) {
+                    return@withLock
+                }
+                val note =
+                    "Game interface stayed hidden after the readiness watch. " +
+                        "The save was not overwritten and the page was not reloaded. probe=$probe"
+                rememberFailure(work, note)
+                recordDiagnostic(DiagnosticSeverity.WARNING, "readiness", note)
+                _sessionError.value = note
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+            }
+        }
+    }
+
+    private suspend fun documentStillBootstrap(work: ReadyWork): Boolean {
+        bootstrapConfirmTest?.let { return it(work.view) }
+        // Unit tests inject peek/readiness hooks and never serve the bootstrap page.
+        if (peekClient != null || readinessCheck != null) return false
+        return try {
+            work.adapter.confirmBootstrap(work.view)
+        } catch (e: Exception) {
+            Log.e(TAG, "bootstrap check failed", e)
+            false
+        }
+    }
+
+    private suspend fun productionDocumentProbe(work: ReadyWork): String {
+        // Unit tests inject peek/readiness hooks and Robolectric WebViews that
+        // never invoke evaluateJavascript callbacks.
+        if (peekClient != null || readinessCheck != null || bootstrapConfirmTest != null) {
+            return "skipped"
+        }
+        return try {
+            withTimeoutOrNull(3_000L) {
+                val deferred = kotlinx.coroutines.CompletableDeferred<String?>()
+                work.view.evaluateJavascript(DOCUMENT_PROBE_JS) { deferred.complete(it) }
+                deferred.await()
+            }.orEmpty().trim('"')
+        } catch (e: Exception) {
+            "probe-failed:${e.javaClass.simpleName}"
         }
     }
 

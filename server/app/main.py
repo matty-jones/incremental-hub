@@ -5,7 +5,7 @@ from contextlib import closing
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from .db import apk_dir, connect, row_to_dict
@@ -42,8 +42,7 @@ def _save_content(game_id: str, body: SaveBody) -> dict:
     }
 
 
-@app.get("/app/update", response_model=UpdateInfo)
-def get_update_info() -> UpdateInfo:
+def _read_update_info() -> UpdateInfo:
     path = apk_dir() / "version.json"
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no release published")
@@ -54,8 +53,7 @@ def get_update_info() -> UpdateInfo:
         raise HTTPException(status_code=500, detail="version metadata is unreadable") from exc
 
 
-@app.get("/app/download/{filename}")
-def download_apk(filename: str) -> FileResponse:
+def _apk_path(filename: str) -> Path:
     directory = apk_dir().resolve()
     if filename != Path(filename).name or filename in {".", ".."}:
         raise HTTPException(status_code=400, detail="invalid filename")
@@ -64,6 +62,70 @@ def download_apk(filename: str) -> FileResponse:
         raise HTTPException(status_code=400, detail="invalid filename")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="APK not found")
+    return path
+
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/app", response_class=HTMLResponse)
+def install_page() -> HTMLResponse:
+    info = _read_update_info()
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Incremental Hub {info.version_name}</title>
+  <style>
+    :root {{ color-scheme: light; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }}
+    main {{
+      width: min(28rem, calc(100% - 2rem));
+      padding: 1.5rem;
+      border-radius: 1rem;
+      background: #1e293b;
+    }}
+    h1 {{ margin: 0 0 0.5rem; font-size: 1.5rem; }}
+    p {{ margin: 0 0 1.25rem; line-height: 1.4; color: #94a3b8; }}
+    a {{
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      color: #0f172a;
+      background: #38bdf8;
+      font-weight: 700;
+      padding: 0.9rem 1rem;
+      border-radius: 0.75rem;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Incremental Hub {info.version_name}</h1>
+    <p>Version code {info.version_code}. Tap below to download the APK, then open the file to install.</p>
+    <a href="/app/download/latest.apk">Download APK</a>
+  </main>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@app.get("/app/update", response_model=UpdateInfo)
+def get_update_info() -> UpdateInfo:
+    return _read_update_info()
+
+
+@app.api_route("/app/download/{filename}", methods=["GET", "HEAD"])
+def download_apk(filename: str) -> FileResponse:
+    path = _apk_path(filename)
     return FileResponse(
         path=path,
         media_type="application/vnd.android.package-archive",

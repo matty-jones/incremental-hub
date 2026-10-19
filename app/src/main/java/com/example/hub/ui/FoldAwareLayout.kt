@@ -22,9 +22,10 @@ import com.example.hub.session.SessionState
 import com.example.hub.ui.theme.HubWideWidth
 
 /**
- * Fold-aware layout. The WebView stays full-bleed; status and navigation
- * bars are left to the chrome drawn on top. IME padding still applies while
- * a session is open, and a vertical hinge still reserves start padding.
+ * Fold-aware layout. PlaySurface places hub chrome above the WebView so game
+ * controls at the top of the document stay reachable. IME padding still
+ * applies while a session is open, and a vertical hinge still reserves start
+ * padding.
  *
  * @param state the current session state — used to skip IME when closed
  * @param content the content to lay out

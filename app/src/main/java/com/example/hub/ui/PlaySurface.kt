@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -86,37 +87,9 @@ fun PlaySurface(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { _ ->
         FoldAwareLayout(state = state, content = {
-            Box(modifier = Modifier.fillMaxSize()) {
-                androidx.compose.runtime.key(gameId, generation) {
-                    WebViewHost(
-                        gameId = gameId,
-                        launchUrl = launchUrl,
-                        state = state,
-                        profile = profile,
-                        reloadEpoch = reloadEpoch,
-                        loadToken = loadToken,
-                        textZoomPercent = zoom.textZoomPercent,
-                        pageZoomPercent = zoom.pageZoomPercent,
-                        documentGate = controller.documentGate,
-                        onTakeRetained = controller::takeRetainedWebView,
-                        onWebViewCreated = controller::registerWebView,
-                        onPageFinished = controller::onMainFrameFinished,
-                        onMainFrameError = controller::onMainFrameFailed,
-                        onResourceDiagnostic = { severity, message ->
-                            controller.recordDiagnostic(severity, "network", message)
-                        },
-                        onExplicitLoad = controller::onWebViewLoad,
-                        onRendererGone = controller::onRendererGone,
-                        onConsoleMessage = controller::onConsoleMessage,
-                        onRelease = controller::releaseWebView,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-
-                if (state is SessionState.Opening && loadToken == 0) {
-                    OpeningStatus(gameId = gameId, launchUrl = launchUrl)
-                }
-
+            // Chrome sits above the WebView so games that put controls at the
+            // top of the document (FE000000) are not covered by the hub header.
+            Column(modifier = Modifier.fillMaxSize()) {
                 if (!menuOpen && state !is SessionState.Closed) {
                     PlayChrome(
                         title = gameId,
@@ -124,85 +97,117 @@ fun PlaySurface(
                             menuPanel = MenuPanel.Actions
                             menuOpen = true
                         },
-                        modifier = Modifier.align(Alignment.TopCenter),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
 
-                if (menuOpen && state !is SessionState.Closed && state !is SessionState.Closing) {
-                    NativeMenu(
-                        state = state,
-                        expanded = true,
-                        onExpandedChange = {
-                            menuOpen = it
-                            if (!it) menuPanel = MenuPanel.Actions
-                        },
-                        onAction = { action ->
-                            Log.d(TAG, "PlaySurface: menu action=${action.label} state=$state")
-                            when (action) {
-                                MenuAction.Resume -> {
-                                    menuOpen = false
-                                    controller.requestForeground()
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    androidx.compose.runtime.key(gameId, generation) {
+                        WebViewHost(
+                            gameId = gameId,
+                            launchUrl = launchUrl,
+                            state = state,
+                            profile = profile,
+                            reloadEpoch = reloadEpoch,
+                            loadToken = loadToken,
+                            textZoomPercent = zoom.textZoomPercent,
+                            pageZoomPercent = zoom.pageZoomPercent,
+                            documentGate = controller.documentGate,
+                            onTakeRetained = controller::takeRetainedWebView,
+                            onWebViewCreated = controller::registerWebView,
+                            onPageFinished = controller::onMainFrameFinished,
+                            onMainFrameError = controller::onMainFrameFailed,
+                            onResourceDiagnostic = { severity, message ->
+                                controller.recordDiagnostic(severity, "network", message)
+                            },
+                            onExplicitLoad = controller::onWebViewLoad,
+                            onRendererGone = controller::onRendererGone,
+                            onConsoleMessage = controller::onConsoleMessage,
+                            onRelease = controller::releaseWebView,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
+                    if (state is SessionState.Opening && loadToken == 0) {
+                        OpeningStatus(gameId = gameId, launchUrl = launchUrl)
+                    }
+
+                    if (menuOpen && state !is SessionState.Closed && state !is SessionState.Closing) {
+                        NativeMenu(
+                            state = state,
+                            expanded = true,
+                            onExpandedChange = {
+                                menuOpen = it
+                                if (!it) menuPanel = MenuPanel.Actions
+                            },
+                            onAction = { action ->
+                                Log.d(TAG, "PlaySurface: menu action=${action.label} state=$state")
+                                when (action) {
+                                    MenuAction.Resume -> {
+                                        menuOpen = false
+                                        controller.requestForeground()
+                                    }
+                                    MenuAction.SnapshotNow -> controller.requestCapture()
+                                    MenuAction.Checkpoint -> controller.requestCheckpoint()
+                                    MenuAction.Reload -> controller.requestReload()
+                                    MenuAction.Vault -> Unit
+                                    MenuAction.Display -> menuPanel = MenuPanel.Display
+                                    MenuAction.Diagnostics -> menuPanel = MenuPanel.Diagnostics
+                                    MenuAction.ReturnToHub -> exitSession()
                                 }
-                                MenuAction.SnapshotNow -> controller.requestCapture()
-                                MenuAction.Checkpoint -> controller.requestCheckpoint()
-                                MenuAction.Reload -> controller.requestReload()
-                                MenuAction.Vault -> Unit
-                                MenuAction.Display -> menuPanel = MenuPanel.Display
-                                MenuAction.Diagnostics -> menuPanel = MenuPanel.Diagnostics
-                                MenuAction.ReturnToHub -> exitSession()
-                            }
-                        },
-                        showDisplay = menuPanel == MenuPanel.Display,
-                        showDiagnostics = menuPanel == MenuPanel.Diagnostics,
-                        onPanelBack = { menuPanel = MenuPanel.Actions },
-                        display = {
-                            DisplayPanel(
-                                folded = folded,
-                                textZoomPercent = zoom.textZoomPercent,
-                                pageZoomPercent = zoom.pageZoomPercent,
-                                onTextZoom = { percent ->
-                                    updateZoom(
-                                        displayPrefs.withPosture(
-                                            folded,
-                                            zoom.copy(textZoomPercent = percent),
-                                        ),
-                                    )
-                                },
-                                onPageZoom = { percent ->
-                                    updateZoom(
-                                        displayPrefs.withPosture(
-                                            folded,
-                                            zoom.copy(pageZoomPercent = percent),
-                                        ),
-                                    )
-                                },
-                                onReset = { updateZoom(GameDisplayPreferences()) },
-                            )
-                        },
-                        diagnostics = {
-                            DiagnosticsPanel(
-                                report = controller.diagnosticReport(),
-                                events = events,
-                            )
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                            },
+                            showDisplay = menuPanel == MenuPanel.Display,
+                            showDiagnostics = menuPanel == MenuPanel.Diagnostics,
+                            onPanelBack = { menuPanel = MenuPanel.Actions },
+                            display = {
+                                DisplayPanel(
+                                    folded = folded,
+                                    textZoomPercent = zoom.textZoomPercent,
+                                    pageZoomPercent = zoom.pageZoomPercent,
+                                    onTextZoom = { percent ->
+                                        updateZoom(
+                                            displayPrefs.withPosture(
+                                                folded,
+                                                zoom.copy(textZoomPercent = percent),
+                                            ),
+                                        )
+                                    },
+                                    onPageZoom = { percent ->
+                                        updateZoom(
+                                            displayPrefs.withPosture(
+                                                folded,
+                                                zoom.copy(pageZoomPercent = percent),
+                                            ),
+                                        )
+                                    },
+                                    onReset = { updateZoom(GameDisplayPreferences()) },
+                                )
+                            },
+                            diagnostics = {
+                                DiagnosticsPanel(
+                                    report = controller.diagnosticReport(),
+                                    events = events,
+                                )
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
 
-                if (state is SessionState.RecoveryRequired) {
-                    RecoveryOverlay(
-                        gameId = gameId,
-                        launchUrl = launchUrl,
-                        detail = sessionError,
-                        diagnostic = diagnostic,
-                        consoleLines = consoleLines,
-                        onRetry = { controller.retryRecovery() },
-                        onSafeLaunch = { controller.requestSafeLaunch() },
-                        onRecover = { controller.confirmRecover() },
-                        onClose = { exitSession() },
-                        onExport = { shareReport(context, controller.diagnosticReport()) },
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    if (state is SessionState.RecoveryRequired) {
+                        RecoveryOverlay(
+                            gameId = gameId,
+                            launchUrl = launchUrl,
+                            detail = sessionError,
+                            diagnostic = diagnostic,
+                            consoleLines = consoleLines,
+                            onRetry = { controller.retryRecovery() },
+                            onSafeLaunch = { controller.requestSafeLaunch() },
+                            onRecover = { controller.confirmRecover() },
+                            onClose = { exitSession() },
+                            onExport = { shareReport(context, controller.diagnosticReport()) },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
         })

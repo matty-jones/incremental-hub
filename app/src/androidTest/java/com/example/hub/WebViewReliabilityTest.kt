@@ -167,6 +167,57 @@ class WebViewReliabilityTest {
     }
 
     @Test
+    fun realSharkDocumentBecomesUiReadyWithoutBootstrapMarker() {
+        ActivityScenario.launch(WebViewProbeActivity::class.java).use { scenario ->
+            val webRef = AtomicReference<WebView>()
+            val console = mutableListOf<String>()
+            val started = CountDownLatch(1)
+            scenario.onActivity { activity ->
+                val web = WebView(activity)
+                web.settings.javaScriptEnabled = true
+                web.settings.domStorageEnabled = true
+                web.webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                        val message = consoleMessage?.message() ?: return true
+                        console.add("${consoleMessage.messageLevel()}: $message")
+                        return true
+                    }
+                }
+                web.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        started.countDown()
+                    }
+                }
+                attach(activity, web)
+                web.loadUrl("https://mrredshark77.github.io/shark-incremental/")
+                webRef.set(web)
+            }
+            assertTrue("Shark page did not finish loading", started.await(60, TimeUnit.SECONDS))
+            val bootstrap = evalJs(webRef.get(), SharkIncrementalAdapter.JS_BOOTSTRAP_MARKER)
+            assertTrue(
+                "game document must not look like the storage bootstrap page, got $bootstrap",
+                bootstrap == "\"\"" || bootstrap == "null" || bootstrap.isEmpty(),
+            )
+            val deadline = System.currentTimeMillis() + 45_000
+            var ready = "false"
+            while (System.currentTimeMillis() < deadline) {
+                ready = evalJs(webRef.get(), SharkIncrementalAdapter.JS_UI_READY)
+                if (ready == "true") break
+                Thread.sleep(500)
+            }
+            val errors = console.filter {
+                it.contains("ERROR", ignoreCase = true) || it.contains("Uncaught", ignoreCase = true)
+            }
+            assertEquals(
+                "Shark UI was not ready. consoleErrors=$errors allConsole=$console",
+                "true",
+                ready,
+            )
+            scenario.onActivity { webRef.get().destroy() }
+        }
+    }
+
+    @Test
     fun missingFaviconDoesNotChangeStoredProgress() {
         ActivityScenario.launch(WebViewProbeActivity::class.java).use { scenario ->
             val webRef = AtomicReference<WebView>()

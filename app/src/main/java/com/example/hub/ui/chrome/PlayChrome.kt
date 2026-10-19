@@ -24,8 +24,9 @@ import androidx.compose.ui.unit.dp
 import com.example.hub.ui.theme.HubChipCorner
 
 /**
- * Slim frame over a full-bleed game. The menu label stays the word "Menu"
- * so existing device tests can find it.
+ * Slim hub header above the game WebView. Laid out in a column with the page
+ * below it so top-of-document controls stay visible. The menu label stays the
+ * word "Menu" so existing device tests can find it.
  */
 @Composable
 fun PlayChrome(

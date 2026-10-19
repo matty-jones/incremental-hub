@@ -77,6 +77,15 @@ def test_update_metadata_and_apk_download(tmp_path, monkeypatch):
     assert downloaded.status_code == 200
     assert downloaded.content == b"apk-bytes"
 
+    head = client.head("/app/download/latest.apk")
+    assert head.status_code == 200
+    assert head.headers["content-length"] == "9"
+
+    page = client.get("/app")
+    assert page.status_code == 200
+    assert "Download APK" in page.text
+    assert 'href="/app/download/latest.apk"' in page.text
+
     missing = client.get("/app/download/missing.apk")
     assert missing.status_code == 404
 

@@ -18,6 +18,7 @@ import androidx.lifecycle.Lifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -1324,11 +1325,52 @@ class SessionControllerTest {
         val url = "https://mrredshark77.github.io/shark-incremental/"
         session.onMainFrameFinished(url)
         session.onMainFrameFinished(url)
-        assertEquals(SessionState.Opening, session.state.value)
+        advanceUntilIdle()
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
         assertEquals(0, captures)
         assertEquals(1, session.gameDocumentLoads)
         assertNull(dao.get("shark-incremental")!!.snapshotPayload)
         assertTrue(session.diagnosticEvents.value.any { it.category == "readiness" })
+        assertTrue(
+            session.sessionError.value.orEmpty().contains("was not overwritten"),
+        )
+    }
+
+    @Test
+    fun bootstrapPageFinishDuringGameLoadIsIgnored() = runTest {
+        var readyCalls = 0
+        var stillBootstrap = true
+        val session = SessionController(
+            context = ApplicationProvider.getApplicationContext(),
+            gameRegistry = registry,
+            instanceDao = dao,
+            lifecycleOwner = StubLifecycleOwner(),
+            webViewDestroyer = { destroyedWebViews.add("destroyed") },
+            profileStore = profileStore,
+            bootstrapTest = bootstrapSuccess,
+            peekClient = { _, _ -> PeekOutcome.Empty },
+            readinessCheck = { _, _ ->
+                readyCalls += 1
+                true
+            },
+            bootstrapConfirmTest = { stillBootstrap },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        val url = "https://mrredshark77.github.io/shark-incremental/"
+        session.onMainFrameFinished(url)
+        session.onMainFrameFinished(url)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertEquals(0, readyCalls)
+        assertTrue(
+            session.diagnosticEvents.value.any {
+                it.message.contains("Ignored game-load finish on the storage bootstrap page")
+            },
+        )
+        stillBootstrap = false
+        session.onMainFrameFinished(url)
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(1, readyCalls)
     }
 
     @Test
