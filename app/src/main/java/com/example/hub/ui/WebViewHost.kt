@@ -3,6 +3,7 @@ package com.example.hub.ui
 import android.content.MutableContextWrapper
 import android.graphics.Bitmap
 import android.util.Log
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.RenderProcessGoneDetail
@@ -54,6 +55,8 @@ fun WebViewHost(
     loadToken: Int,
     textZoomPercent: Int,
     pageZoomPercent: Int,
+    pageScaleMode: PageScaleMode,
+    presentationEpoch: Int,
     documentGate: DocumentGate,
     onTakeRetained: () -> WebView?,
     onWebViewCreated: (WebView) -> Unit,
@@ -63,6 +66,7 @@ fun WebViewHost(
     onExplicitLoad: (String) -> Unit,
     onRendererGone: (String) -> Unit,
     onConsoleMessage: (String) -> Unit,
+    onPresentation: (PresentationAck) -> Unit,
     onRelease: (WebView) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -77,6 +81,7 @@ fun WebViewHost(
             val retained = onTakeRetained()
             if (retained != null) {
                 (retained.context as? MutableContextWrapper)?.baseContext = ctx
+                ensureLayoutListener(retained)
                 Log.d(TAG, "WebViewHost: reattaching retained WebView gameId=$gameId")
                 onResourceDiagnostic(
                     DiagnosticSeverity.INFO,
@@ -97,9 +102,12 @@ fun WebViewHost(
                         finishToken = loadToken,
                         textZoomPercent = textZoomPercent,
                         pageZoomPercent = pageZoomPercent,
+                        mode = pageScaleMode,
+                        presentationEpoch = presentationEpoch,
                         appliedTextZoom = textZoomPercent,
                     )
                     tag = slot
+                    ensureLayoutListener(this)
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                             val message = consoleMessage?.message() ?: return true
@@ -152,7 +160,9 @@ fun WebViewHost(
                             if (current != null) {
                                 current.layoutAppliedForUrl = null
                                 current.appliedPageZoom = -1
-                                applyPresentation(view, current)
+                                current.appliedMode = null
+                                current.forceReconcile = true
+                                reconcilePresentation(view, current)
                             }
                             if (url != "about:blank") onPageFinished(url, token)
                         }
@@ -220,10 +230,19 @@ fun WebViewHost(
                 finishToken = -1,
                 textZoomPercent = textZoomPercent,
                 pageZoomPercent = pageZoomPercent,
+                mode = pageScaleMode,
+                presentationEpoch = presentationEpoch,
             ).also { webView.tag = it }
+            ensureLayoutListener(webView)
             slot.textZoomPercent = textZoomPercent
             slot.pageZoomPercent = pageZoomPercent
-            applyPresentation(webView, slot)
+            slot.mode = pageScaleMode
+            slot.onAck = onPresentation
+            if (presentationEpoch != slot.presentationEpoch) {
+                slot.presentationEpoch = presentationEpoch
+                slot.forceReconcile = true
+            }
+            reconcilePresentation(webView, slot)
             val profileName = profile?.name
             if (slot.profileName == null && shouldNavigate(profileName, launchUrl)) {
                 WebViewCompat.setProfile(webView, profileName!!)
@@ -269,21 +288,105 @@ private fun navigate(
     webView.loadUrl(url)
 }
 
-private fun applyPresentation(webView: WebView, slot: Slot) {
-    if (slot.appliedTextZoom != slot.textZoomPercent) {
+private fun ensureLayoutListener(webView: WebView) {
+    val slot = webView.tag as? Slot ?: return
+    if (slot.listener != null) return
+    val listener = View.OnLayoutChangeListener { view, left, top, right, bottom, _, _, _, _ ->
+        val current = view.tag as? Slot ?: return@OnLayoutChangeListener
+        val width = right - left
+        val height = bottom - top
+        if (width == current.viewWidth && height == current.viewHeight) return@OnLayoutChangeListener
+        current.viewWidth = width
+        current.viewHeight = height
+        current.forceReconcile = true
+        Log.d(TAG, "WebViewHost: size ${width}x$height; reconciling presentation without reload")
+        view.post { reconcilePresentation(view as WebView, current) }
+    }
+    slot.listener = listener
+    webView.addOnLayoutChangeListener(listener)
+}
+
+private fun reconcilePresentation(webView: WebView, slot: Slot) {
+    if (!webView.isAttachedToWindow) return
+    val textChanged = slot.appliedTextZoom != slot.textZoomPercent
+    if (textChanged) {
         webView.settings.textZoom = slot.textZoomPercent
         slot.appliedTextZoom = slot.textZoomPercent
     }
     val url = webView.url
-    if (url.isNullOrBlank() || url == "about:blank") return
-    if (slot.appliedPageZoom != slot.pageZoomPercent) {
-        webView.evaluateJavascript(pageZoomScript(slot.pageZoomPercent), null)
-        slot.appliedPageZoom = slot.pageZoomPercent
+    if (url.isNullOrBlank() || url == "about:blank") {
+        if (textChanged) publishTextOnly(slot)
+        return
     }
-    if (url.contains("shark-incremental") && slot.layoutAppliedForUrl != url) {
+    val settled = !slot.forceReconcile &&
+        slot.appliedPageZoom == slot.pageZoomPercent &&
+        slot.appliedMode == slot.mode &&
+        slot.lastAck?.ok == true &&
+        slot.viewWidth == slot.ackedWidth &&
+        slot.viewHeight == slot.ackedHeight
+    if (settled) {
+        if (textChanged) publishTextOnly(slot)
+        return
+    }
+    val flush = slot.forceReconcile
+    slot.forceReconcile = false
+    val generation = ++slot.generation
+    val mode = slot.mode
+    val percent = slot.pageZoomPercent
+    val textZoom = slot.textZoomPercent
+    if (url.contains("shark-incremental") && (flush || slot.layoutAppliedForUrl != url)) {
         webView.evaluateJavascript(SharkLayout.injectionScript(), null)
         slot.layoutAppliedForUrl = url
     }
+    Log.d(
+        TAG,
+        "reconcile before view=${webView.width}x${webView.height} mode=${mode.stored()} " +
+            "page=$percent text=$textZoom flush=$flush",
+    )
+    val script = presentationScript(mode, percent, flush)
+    val started = runCatching {
+        webView.evaluateJavascript(script) { raw ->
+            if (generation != slot.generation) return@evaluateJavascript
+            val ack = parsePresentationAck(raw, percent, textZoom)
+            Log.d(TAG, "reconcile after raw=${raw?.take(500)} ok=${ack?.ok} vs=${ack?.viewportScale}")
+            if (ack == null) {
+                retryReconcile(webView, slot, generation)
+                return@evaluateJavascript
+            }
+            slot.lastAck = ack
+            slot.onAck?.invoke(ack)
+            if (ack.ok) {
+                slot.appliedPageZoom = percent
+                slot.appliedMode = mode
+                slot.ackedWidth = slot.viewWidth
+                slot.ackedHeight = slot.viewHeight
+                slot.retries = 0
+            } else {
+                retryReconcile(webView, slot, generation)
+            }
+        }
+    }
+    if (started.isFailure) {
+        Log.d(TAG, "reconcile skipped ${started.exceptionOrNull()?.javaClass?.simpleName}")
+    }
+}
+
+private fun publishTextOnly(slot: Slot) {
+    val previous = slot.lastAck ?: return
+    val next = previous.copy(textZoom = slot.textZoomPercent)
+    slot.lastAck = next
+    slot.onAck?.invoke(next)
+}
+
+private fun retryReconcile(webView: WebView, slot: Slot, generation: Int) {
+    if (slot.retries >= MAX_PRESENTATION_RETRIES) return
+    slot.retries += 1
+    val delay = 80L * slot.retries
+    webView.postDelayed({
+        if (generation != slot.generation) return@postDelayed
+        slot.forceReconcile = true
+        reconcilePresentation(webView, slot)
+    }, delay)
 }
 
 private class Slot(
@@ -293,7 +396,22 @@ private class Slot(
     var finishToken: Int,
     var textZoomPercent: Int,
     var pageZoomPercent: Int,
+    var mode: PageScaleMode,
+    var presentationEpoch: Int,
     var appliedTextZoom: Int = -1,
     var appliedPageZoom: Int = -1,
+    var appliedMode: PageScaleMode? = null,
     var layoutAppliedForUrl: String? = null,
+    var viewWidth: Int = -1,
+    var viewHeight: Int = -1,
+    var ackedWidth: Int = -1,
+    var ackedHeight: Int = -1,
+    var forceReconcile: Boolean = true,
+    var generation: Int = 0,
+    var retries: Int = 0,
+    var lastAck: PresentationAck? = null,
+    var onAck: ((PresentationAck) -> Unit)? = null,
+    var listener: View.OnLayoutChangeListener? = null,
 )
+
+private const val MAX_PRESENTATION_RETRIES = 4

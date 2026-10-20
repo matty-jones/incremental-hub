@@ -50,14 +50,17 @@ fun PlaySurface(
     val generation by controller.webViewGeneration.collectAsState()
     val reloadEpoch by controller.reloadEpoch.collectAsState()
     val loadToken by controller.loadToken.collectAsState()
+    val presentationEpoch by controller.presentationEpoch.collectAsState()
     val diagnostic by controller.diagnostic.collectAsState()
     val consoleLines by controller.consoleLines.collectAsState()
     val events by controller.diagnosticEvents.collectAsState()
     val context = LocalContext.current
     val displayStore = remember(context) { DisplayPreferenceStore(context) }
     var displayPrefs by remember(gameId) { mutableStateOf(displayStore.read(gameId)) }
+    var presentation by remember(gameId) { mutableStateOf<PresentationAck?>(null) }
     val folded = !isWideWindow()
     val zoom = displayPrefs.forPosture(folded)
+    val pageScaleMode = pageScaleModeFor(gameId, displayPrefs.pageScaleMode)
     val scope = rememberCoroutineScope()
     var menuOpen by remember(gameId) { mutableStateOf(false) }
     var menuPanel by remember(gameId) { mutableStateOf(MenuPanel.Actions) }
@@ -112,6 +115,8 @@ fun PlaySurface(
                             loadToken = loadToken,
                             textZoomPercent = zoom.textZoomPercent,
                             pageZoomPercent = zoom.pageZoomPercent,
+                            pageScaleMode = pageScaleMode,
+                            presentationEpoch = presentationEpoch,
                             documentGate = controller.documentGate,
                             onTakeRetained = controller::takeRetainedWebView,
                             onWebViewCreated = controller::registerWebView,
@@ -123,6 +128,7 @@ fun PlaySurface(
                             onExplicitLoad = controller::onWebViewLoad,
                             onRendererGone = controller::onRendererGone,
                             onConsoleMessage = controller::onConsoleMessage,
+                            onPresentation = { presentation = it },
                             onRelease = controller::releaseWebView,
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -168,6 +174,9 @@ fun PlaySurface(
                                     folded = folded,
                                     textZoomPercent = zoom.textZoomPercent,
                                     pageZoomPercent = zoom.pageZoomPercent,
+                                    pageScaleMode = pageScaleMode,
+                                    allowGameFit = gameId == FE000000_GAME_ID,
+                                    presentation = presentation,
                                     onTextZoom = { percent ->
                                         updateZoom(
                                             displayPrefs.withPosture(
@@ -184,7 +193,13 @@ fun PlaySurface(
                                             ),
                                         )
                                     },
-                                    onReset = { updateZoom(GameDisplayPreferences()) },
+                                    onMode = { mode ->
+                                        updateZoom(displayPrefs.copy(pageScaleMode = mode))
+                                    },
+                                    onReset = {
+                                        presentation = null
+                                        updateZoom(defaultDisplayPreferences(gameId))
+                                    },
                                 )
                             },
                             diagnostics = {

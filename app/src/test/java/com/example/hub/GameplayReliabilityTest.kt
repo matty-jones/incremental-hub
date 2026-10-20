@@ -10,6 +10,7 @@ import com.example.hub.session.continuityFor
 import com.example.hub.sync.MergeDecision
 import com.example.hub.sync.replacesStoredPointer
 import com.example.hub.ui.DisplayPreferenceStore
+import com.example.hub.ui.PageScaleMode
 import com.example.hub.ui.GameDisplayPreferences
 import com.example.hub.ui.ZoomPreference
 import com.example.hub.ui.clampZoom
@@ -89,6 +90,30 @@ class GameplayReliabilityTest {
         assertTrue(script.contains("1.10"))
         assertFalse(script.contains("loadUrl"))
         assertFalse(script.contains("save("))
+        assertFalse(script.contains("localStorage"))
+        assertEquals(PageScaleMode.READABLE, store.read("fe000000").pageScaleMode)
+        assertEquals(PageScaleMode.HUB, store.read("shark-incremental").pageScaleMode)
+        store.write("fe000000", written.copy(pageScaleMode = PageScaleMode.GAME_FIT))
+        assertEquals(PageScaleMode.GAME_FIT, store.read("fe000000").pageScaleMode)
+        store.write("shark-incremental", written.copy(pageScaleMode = PageScaleMode.READABLE))
+        assertEquals(PageScaleMode.HUB, store.read("shark-incremental").pageScaleMode)
+    }
+
+    @Test
+    fun legacyDisplayPrefsUseTheGameDefaultMode() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("hub_display_preferences", Context.MODE_PRIVATE)
+            .edit()
+            .putString(
+                "fe000000",
+                """{"folded":{"text":90,"page":80},"unfolded":{"text":100,"page":110}}""",
+            )
+            .commit()
+        val read = DisplayPreferenceStore(context).read("fe000000")
+        assertEquals(90, read.folded.textZoomPercent)
+        assertEquals(80, read.folded.pageZoomPercent)
+        assertEquals(110, read.unfolded.pageZoomPercent)
+        assertEquals(PageScaleMode.READABLE, read.pageScaleMode)
     }
 
     @Test

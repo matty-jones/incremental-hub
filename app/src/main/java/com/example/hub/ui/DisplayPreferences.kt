@@ -13,9 +13,36 @@ data class ZoomPreference(
     )
 }
 
+enum class PageScaleMode {
+    /** Hub sets documentElement zoom. Shark uses this. */
+    HUB,
+
+    /** FE000000's Fit to Width owns body zoom. Hub page zoom is not applied. */
+    GAME_FIT,
+
+    /** Reflow FE000000 and hold body zoom at the Hub page percent. */
+    READABLE,
+    ;
+
+    fun stored(): String = when (this) {
+        HUB -> "hub"
+        GAME_FIT -> "game-fit"
+        READABLE -> "readable"
+    }
+
+    companion object {
+        fun fromStored(raw: String?): PageScaleMode = when (raw) {
+            "game-fit" -> GAME_FIT
+            "readable" -> READABLE
+            else -> HUB
+        }
+    }
+}
+
 data class GameDisplayPreferences(
     val folded: ZoomPreference = ZoomPreference(),
     val unfolded: ZoomPreference = ZoomPreference(),
+    val pageScaleMode: PageScaleMode = PageScaleMode.HUB,
 ) {
     fun forPosture(foldedPosture: Boolean): ZoomPreference =
         if (foldedPosture) folded else unfolded
@@ -25,6 +52,21 @@ data class GameDisplayPreferences(
         return if (foldedPosture) copy(folded = clamped) else copy(unfolded = clamped)
     }
 }
+
+fun defaultPageScaleMode(gameId: String): PageScaleMode =
+    if (gameId == FE000000_GAME_ID) PageScaleMode.READABLE else PageScaleMode.HUB
+
+/** FE000000 never uses root zoom. Other games stay on the Hub's page zoom. */
+fun pageScaleModeFor(gameId: String, stored: PageScaleMode): PageScaleMode = when {
+    gameId == FE000000_GAME_ID && stored == PageScaleMode.GAME_FIT -> PageScaleMode.GAME_FIT
+    gameId == FE000000_GAME_ID -> PageScaleMode.READABLE
+    else -> PageScaleMode.HUB
+}
+
+fun defaultDisplayPreferences(gameId: String): GameDisplayPreferences =
+    GameDisplayPreferences(pageScaleMode = defaultPageScaleMode(gameId))
+
+const val FE000000_GAME_ID = "fe000000"
 
 const val MIN_ZOOM = 75
 const val MAX_ZOOM = 125
@@ -38,12 +80,12 @@ fun stepZoom(percent: Int, delta: Int): Int = clampZoom(percent + delta)
 /** Cover-screen widths sit under the hub's wide-window threshold. */
 fun isFoldedWidth(widthDp: Float): Boolean = widthDp < 600f
 
-fun pageZoomScript(percent: Int): String {
-    val zoom = clampZoom(percent) / 100f
-    val literal = String.format(java.util.Locale.US, "%.2f", zoom)
-    return "(function(){ var z = '$literal'; var root = document.documentElement;" +
-        " if (!root) return ''; if (root.style.zoom !== z) root.style.zoom = z; return root.style.zoom; })()"
-}
+fun zoomLiteral(percent: Int): String =
+    String.format(java.util.Locale.US, "%.2f", clampZoom(percent) / 100f)
+
+/** Hub page zoom for callers that only need the Shark path. */
+fun pageZoomScript(percent: Int): String =
+    presentationScript(PageScaleMode.HUB, percent, flush = false)
 
 /**
  * Per-game zoom for the folded and unfolded postures.
@@ -53,8 +95,8 @@ class DisplayPreferenceStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun read(gameId: String): GameDisplayPreferences {
-        val raw = prefs.getString(gameId, null) ?: return GameDisplayPreferences()
-        return runCatching { decode(raw) }.getOrDefault(GameDisplayPreferences())
+        val raw = prefs.getString(gameId, null) ?: return defaultDisplayPreferences(gameId)
+        return runCatching { decode(gameId, raw) }.getOrDefault(defaultDisplayPreferences(gameId))
     }
 
     fun write(gameId: String, value: GameDisplayPreferences) {
@@ -65,6 +107,7 @@ class DisplayPreferenceStore(context: Context) {
         return JSONObject()
             .put("folded", encodeZoom(value.folded))
             .put("unfolded", encodeZoom(value.unfolded))
+            .put("mode", value.pageScaleMode.stored())
             .toString()
     }
 
@@ -75,11 +118,17 @@ class DisplayPreferenceStore(context: Context) {
             .put("page", clamped.pageZoomPercent)
     }
 
-    private fun decode(raw: String): GameDisplayPreferences {
+    private fun decode(gameId: String, raw: String): GameDisplayPreferences {
         val json = JSONObject(raw)
+        val stored = if (json.has("mode")) {
+            PageScaleMode.fromStored(json.optString("mode"))
+        } else {
+            defaultPageScaleMode(gameId)
+        }
         return GameDisplayPreferences(
             folded = decodeZoom(json.optJSONObject("folded")),
             unfolded = decodeZoom(json.optJSONObject("unfolded")),
+            pageScaleMode = pageScaleModeFor(gameId, stored),
         )
     }
 

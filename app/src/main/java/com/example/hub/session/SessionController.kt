@@ -26,7 +26,6 @@ import com.example.hub.games.SaveComparison
 import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
 import com.example.hub.BuildConfig
-import com.example.hub.games.SharkLayout
 import com.example.hub.games.SharkProbe
 import com.example.hub.games.unwrapJsResult
 import com.example.hub.games.shouldResumeLive
@@ -139,6 +138,9 @@ class SessionController(
 
     private val _loadToken = MutableStateFlow(0)
     val loadToken: StateFlow<Int> = _loadToken.asStateFlow()
+
+    private val _presentationEpoch = MutableStateFlow(0)
+    val presentationEpoch: StateFlow<Int> = _presentationEpoch.asStateFlow()
 
     private val _diagnostic = MutableStateFlow<SaveDiagnostic?>(null)
     val diagnostic: StateFlow<SaveDiagnostic?> = _diagnostic.asStateFlow()
@@ -613,13 +615,13 @@ class SessionController(
             "display",
             "Configuration changed. The WebView was resized and was not reloaded.",
         )
+        _presentationEpoch.value = _presentationEpoch.value + 1
         val view = webView ?: return
         view.post {
             view.requestLayout()
             view.invalidate()
             runCatching {
                 view.evaluateJavascript("window.dispatchEvent(new Event('resize'));", null)
-                view.evaluateJavascript(SharkLayout.injectionScript(), null)
             }
         }
     }

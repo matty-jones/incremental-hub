@@ -29,8 +29,12 @@ fun DisplayPanel(
     folded: Boolean,
     textZoomPercent: Int,
     pageZoomPercent: Int,
+    pageScaleMode: PageScaleMode,
+    allowGameFit: Boolean,
+    presentation: PresentationAck?,
     onTextZoom: (Int) -> Unit,
     onPageZoom: (Int) -> Unit,
+    onMode: (PageScaleMode) -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -43,7 +47,7 @@ fun DisplayPanel(
             style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            text = "Zoom changes the page in place. It does not reload the game.",
+            text = "Display changes apply in place. They do not reload the game.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -52,14 +56,96 @@ fun DisplayPanel(
             percent = textZoomPercent,
             onChange = onTextZoom,
         )
-        ZoomRow(
-            label = "Page",
-            percent = pageZoomPercent,
-            onChange = onPageZoom,
+        Text(
+            text = textZoomDetail(textZoomPercent, presentation?.textZoom),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (pageScaleMode == PageScaleMode.GAME_FIT) {
+            Text(
+                text = "Game fit",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = gameFitDetail(presentation),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            ZoomRow(
+                label = "Page",
+                percent = pageZoomPercent,
+                onChange = onPageZoom,
+            )
+            Text(
+                text = pageZoomDetail(pageZoomPercent, pageScaleMode, presentation),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            text = viewportDetail(presentation?.viewportScale),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (allowGameFit) {
+            if (pageScaleMode == PageScaleMode.GAME_FIT) {
+                TextButton(onClick = { onMode(PageScaleMode.READABLE) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Use readable layout")
+                }
+            } else {
+                Text(
+                    text = readableOverrideDetail(presentation),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { onMode(PageScaleMode.GAME_FIT) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Use the game's fit")
+                }
+            }
+        }
         TextButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
             Text("Reset to defaults")
         }
+    }
+}
+
+fun textZoomDetail(requested: Int, applied: Int?): String {
+    val shown = applied ?: requested
+    return "Requested text $requested%. WebView text zoom $shown%."
+}
+
+fun pageZoomDetail(requested: Int, mode: PageScaleMode, ack: PresentationAck?): String {
+    val applied = ack?.let { appliedZoomPercent(it) }
+    val appliedText = if (applied == null) "waiting for the page" else "$applied%"
+    val kind = if (mode == PageScaleMode.READABLE) "Applied body zoom" else "Applied CSS zoom"
+    return "Requested page $requested%. $kind $appliedText."
+}
+
+fun gameFitDetail(ack: PresentationAck?): String {
+    val ratio = ack?.bodyZoom?.toFloatOrNull()
+    val percent = if (ratio == null || ratio > 2f) "waiting" else "${kotlin.math.round(ratio * 100).toInt()}%"
+    return "FE000000 Fit to Width sets body zoom to $percent (window.innerWidth / 1376). Hub page zoom is not applied."
+}
+
+fun readableOverrideDetail(ack: PresentationAck?): String {
+    val enabled = ack?.gameFitEnabled
+    val wrote = ack?.fitRatio?.toFloat() ?: ack?.bodyZoom?.toFloatOrNull()
+    val wroteText = if (wrote == null || wrote > 2f) "its own ratio" else "${kotlin.math.round(wrote * 100).toInt()}%"
+    return if (enabled == false) {
+        "Fit to Width is off in the game. Readable layout is holding Hub page zoom."
+    } else {
+        "Fit to Width is on in the game and would use $wroteText. Readable layout overrides that zoom without changing the save."
+    }
+}
+
+fun viewportDetail(scale: Double?): String {
+    if (scale == null) return "Viewport scale waiting for the page."
+    val shown = String.format(java.util.Locale.US, "%.2f", scale)
+    return if (kotlin.math.abs(scale - 1.0) > 0.02) {
+        "Viewport scale $shown. Reconciling it to 1 without reloading."
+    } else {
+        "Viewport scale $shown."
     }
 }
 
