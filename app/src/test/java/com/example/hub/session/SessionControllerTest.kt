@@ -1374,6 +1374,64 @@ class SessionControllerTest {
     }
 
     @Test
+    fun staleFinishTokenDuringGameLoadIsIgnoredWithoutBlocking() = runTest {
+        var readyCalls = 0
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ ->
+                readyCalls += 1
+                true
+            },
+            peek = { _, _ -> PeekOutcome.Empty },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        val url = "https://mrredshark77.github.io/shark-incremental/"
+        session.onMainFrameFinished(url, finishToken = 0)
+        // Stale peek finish still carrying token 0 after beginGameLoad bumped the token.
+        session.onMainFrameFinished(url, finishToken = 0)
+        assertEquals(0, readyCalls)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertTrue(
+            session.diagnosticEvents.value.any { it.message.contains("Ignored stale finish") },
+        )
+        session.onMainFrameFinished(url, finishToken = session.loadToken.value)
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(1, readyCalls)
+    }
+
+    @Test
+    fun finishQueuedDuringHandlerIsReplayed() = runTest {
+        var readyCalls = 0
+        var gateOpen = false
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ ->
+                readyCalls += 1
+                if (!gateOpen) {
+                    gateOpen = true
+                    gate.await()
+                }
+                true
+            },
+            peek = { _, _ -> PeekOutcome.Empty },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        val url = "https://mrredshark77.github.io/shark-incremental/"
+        session.onMainFrameFinished(url, finishToken = 0)
+        val token = session.loadToken.value
+        // LOAD_GAME finish suspends inside readiness.
+        session.onMainFrameFinished(url, finishToken = token)
+        // Concurrent finish while handlingDocument is held.
+        session.onMainFrameFinished(url, finishToken = token)
+        assertTrue(session.diagnosticEvents.value.any { it.message.contains("Queued main-frame finish") })
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(SessionState.Playing, session.state.value)
+        assertTrue(readyCalls >= 1)
+    }
+
+    @Test
     fun checkpointIsPinnedAndAFailedCaptureDoesNotReplaceIt() = runTest {
         val good = progressedSharkPayload()
         var payload: String? = good

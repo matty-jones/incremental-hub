@@ -128,7 +128,11 @@ fun PlaySurface(
                         )
                     }
 
-                    if (state is SessionState.Opening && loadToken == 0) {
+                    // Keep the opening chrome until the game document is requested, not
+                    // only while loadToken is still 0 (token is never reset across opens).
+                    if (state is SessionState.Opening &&
+                        controller.documentGate.phase != com.example.hub.session.DocumentPhase.GAME
+                    ) {
                         OpeningStatus(gameId = gameId, launchUrl = launchUrl)
                     }
 

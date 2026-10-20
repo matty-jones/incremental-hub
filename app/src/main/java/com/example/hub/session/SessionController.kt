@@ -25,6 +25,7 @@ import com.example.hub.games.QualificationResult
 import com.example.hub.games.SaveComparison
 import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
+import com.example.hub.BuildConfig
 import com.example.hub.games.SharkLayout
 import com.example.hub.games.shouldResumeLive
 import org.json.JSONObject
@@ -186,8 +187,12 @@ class SessionController(
     private var preparedPayload: String? = null
     private val consoleBuffer = ArrayDeque<String>()
     private var handlingDocument = false
+    private var pendingFinish: PendingFinish? = null
     private var attachedOwner: LifecycleOwner? = lifecycleOwner
     private var readinessWatch: Job? = null
+    val loadTimeline = LoadTimeline()
+    private val _blankScreenReport = MutableStateFlow<String?>(null)
+    val blankScreenReport: StateFlow<String?> = _blankScreenReport.asStateFlow()
 
     /** Set while a configuration change is moving the existing WebView. */
     @Volatile var retainAcrossConfiguration: Boolean = false
@@ -345,6 +350,10 @@ class SessionController(
             consoleBuffer.clear()
             _consoleLines.value = emptyList()
             _diagnostic.value = null
+            pendingFinish = null
+            loadTimeline.reset()
+            _blankScreenReport.value = null
+            loadTimeline.beginNavigation("open:$gameId:$mode")
             transitionTo(SessionState.Opening, gameId)
             _sessionError.value = null
             Log.d(TAG, "open($gameId): Opening mode=$mode")
@@ -651,11 +660,15 @@ class SessionController(
 
     fun diagnosticReport(): String {
         val save = _diagnostic.value
+        val view = webView
         return buildString {
             appendLine("Incremental Hub diagnostic report")
+            appendLine("appVersion=${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("gitSha=${BuildConfig.GIT_SHA}")
             appendLine("game=${_activeGameId.value ?: "none"}")
             appendLine("state=${_state.value}")
             appendLine("url=${_launchUrl.value ?: "none"}")
+            appendLine("committedUrl=${view?.url ?: "none"}")
             appendLine("profile=${_activeProfileName.value ?: "none"}")
             appendLine("loadToken=${_loadToken.value}")
             appendLine("reloadEpoch=${_reloadEpoch.value}")
@@ -664,6 +677,7 @@ class SessionController(
             appendLine("openStep=$openStep")
             appendLine("launchMode=$launchMode")
             appendLine("gameDocumentLoads=$gameDocumentLoads")
+            appendLine("navId=${loadTimeline.navId}")
             if (save != null) {
                 appendLine("comparison=${save.comparison}")
                 appendLine("live=${save.liveBytes} bytes ${save.liveDetail}")
@@ -672,17 +686,25 @@ class SessionController(
             }
             appendLine("console:")
             _consoleLines.value.forEach { appendLine("  $it") }
+            appendLine("timeline:")
+            loadTimeline.snapshot().forEach { event ->
+                appendLine(
+                    "  +${event.elapsedMs}ms nav=${event.navId} token=${event.loadToken} " +
+                        "${event.phase}/${event.state} ${event.category}: ${event.message}",
+                )
+            }
             appendLine("events:")
             _diagnosticEvents.value.forEach { event ->
                 appendLine("  ${event.atMillis} ${event.severity} ${event.category}: ${event.message}")
             }
             appendLine("continuity=${continuityFor(activityRecreated = false, webViewRetained = webView != null, captureCompleted = false)}")
             appendLine("A process death before capture completes can drop progress since the previous save.")
+            appendLine("Save payloads are omitted from this report.")
         }
     }
 
-    fun onMainFrameFinished(url: String) {
-        scope.launch { handleDocument(url) }
+    fun onMainFrameFinished(url: String, finishToken: Int = _loadToken.value) {
+        scope.launch { handleDocument(url, finishToken) }
     }
 
     fun onMainFrameFailed(message: String) {
@@ -801,18 +823,42 @@ class SessionController(
 
     internal val isCaptureCadenceActive: Boolean get() = captureJob?.isActive == true
 
-    private suspend fun handleDocument(url: String) {
+    private suspend fun handleDocument(url: String, finishToken: Int) {
         if (url.isBlank() || url == "about:blank") return
         val work = mutex.withLock {
-            if (handlingDocument) {
+            if (_state.value !is SessionState.Opening) return
+            // Stale peek finishes that arrive after beginGameLoad bumped the token.
+            if (openStep == OpenStep.LOAD_GAME && finishToken < _loadToken.value) {
                 recordDiagnostic(
                     DiagnosticSeverity.INFO,
                     "navigation",
-                    "Ignored duplicate main-frame finish for $url during $openStep.",
+                    "Ignored stale finish token=$finishToken current=${_loadToken.value} for $url during $openStep.",
+                )
+                loadTimeline.append(
+                    loadToken = finishToken,
+                    phase = documentGate.phase.name,
+                    state = _state.value.toString(),
+                    category = "navigation",
+                    message = "stale-finish-ignored url=$url",
                 )
                 return
             }
-            if (_state.value !is SessionState.Opening) return
+            if (handlingDocument) {
+                pendingFinish = PendingFinish(url, finishToken)
+                recordDiagnostic(
+                    DiagnosticSeverity.INFO,
+                    "navigation",
+                    "Queued main-frame finish token=$finishToken for $url during $openStep.",
+                )
+                loadTimeline.append(
+                    loadToken = finishToken,
+                    phase = documentGate.phase.name,
+                    state = _state.value.toString(),
+                    category = "navigation",
+                    message = "finish-queued url=$url",
+                )
+                return
+            }
             val gameId = _activeGameId.value ?: return
             val launch = _launchUrl.value
             if (launch.isNullOrBlank()) return
@@ -825,17 +871,33 @@ class SessionController(
                 return
             }
             handlingDocument = true
+            loadTimeline.append(
+                loadToken = finishToken,
+                phase = documentGate.phase.name,
+                state = _state.value.toString(),
+                category = "navigation",
+                message = "finish-handling url=$url step=$openStep",
+            )
             ReadyWork(
                 gameId = gameId,
                 adapter = adapter,
                 view = view,
                 url = url,
+                loadToken = finishToken,
             )
         } ?: return
         try {
             handleDocumentWork(work)
         } finally {
-            mutex.withLock { handlingDocument = false }
+            val replay: PendingFinish?
+            mutex.withLock {
+                handlingDocument = false
+                replay = pendingFinish
+                pendingFinish = null
+            }
+            if (replay != null) {
+                handleDocument(replay.url, replay.finishToken)
+            }
         }
     }
 
@@ -932,13 +994,20 @@ class SessionController(
     private suspend fun finishGameLoad(work: ReadyWork) {
         // A duplicate onPageFinished for the storage-bootstrap document arrives
         // after beginGameLoadLocked flips openStep to LOAD_GAME. Awaiting
-        // readiness there holds handlingDocument for up to 30s and drops the
-        // real game finish, leaving Shark's turquoise body with #app hidden.
-        if (documentStillBootstrap(work)) {
+        // readiness there holds handlingDocument and can drop the real finish.
+        if (shouldIgnoreAsBootstrap(work)) {
             recordDiagnostic(
                 DiagnosticSeverity.INFO,
                 "navigation",
-                "Ignored game-load finish on the storage bootstrap page (phase=${documentGate.phase} step=$openStep). Waiting for the real document.",
+                "Ignored game-load finish on the storage bootstrap page " +
+                    "(phase=${documentGate.phase} step=$openStep token=${work.loadToken}). Waiting for the real document.",
+            )
+            loadTimeline.append(
+                loadToken = work.loadToken,
+                phase = documentGate.phase.name,
+                state = _state.value.toString(),
+                category = "navigation",
+                message = "bootstrap-finish-ignored",
             )
             return
         }
@@ -948,6 +1017,13 @@ class SessionController(
             if (ready) {
                 transitionTo(SessionState.Playing, work.gameId)
                 Log.d(TAG, "handleDocument: Playing ${work.gameId} url=${work.url}")
+                loadTimeline.append(
+                    loadToken = work.loadToken,
+                    phase = documentGate.phase.name,
+                    state = "Playing",
+                    category = "readiness",
+                    message = "ready",
+                )
                 false
             } else {
                 val note = "Adapter was not ready after loading ${work.url}. The page was left in place and was not restored."
@@ -963,6 +1039,7 @@ class SessionController(
                 "Adapter was not ready after loading ${work.url}. The page was left in place and was not restored. " +
                     "probe=$probe console=${_consoleLines.value.takeLast(5)}",
             )
+            freezeBlankScreen("initial-readiness-miss", work, probe)
             watchReadiness(work)
         }
     }
@@ -996,22 +1073,52 @@ class SessionController(
                         "The save was not overwritten and the page was not reloaded. probe=$probe"
                 rememberFailure(work, note)
                 recordDiagnostic(DiagnosticSeverity.WARNING, "readiness", note)
+                freezeBlankScreen("readiness-watch-timeout", work, probe)
                 _sessionError.value = note
                 transitionTo(SessionState.RecoveryRequired, work.gameId)
             }
         }
     }
 
-    private suspend fun documentStillBootstrap(work: ReadyWork): Boolean {
+    /**
+     * True when this finish should be ignored because the document is still the
+     * storage bootstrap page, or the marker check was inconclusive.
+     * Fail closed: timeout/exception means ignore, do not await readiness.
+     */
+    private suspend fun shouldIgnoreAsBootstrap(work: ReadyWork): Boolean {
         bootstrapConfirmTest?.let { return it(work.view) }
         // Unit tests inject peek/readiness hooks and never serve the bootstrap page.
         if (peekClient != null || readinessCheck != null) return false
         return try {
-            work.adapter.confirmBootstrap(work.view)
+            val deferred = kotlinx.coroutines.CompletableDeferred<String?>()
+            work.view.evaluateJavascript(
+                "(function(){ try { return String(window.__hubStorageBootstrap || ''); } catch (e) { return 'error'; } })()",
+            ) { deferred.complete(it) }
+            val raw = withTimeoutOrNull(2_000L) { deferred.await() }
+            if (raw == null) {
+                Log.w(TAG, "bootstrap marker timed out; ignoring finish")
+                return true
+            }
+            val marker = raw.trim().trim('"')
+            marker == "peek" || marker == "write" || marker == "rollback" || marker == "error"
         } catch (e: Exception) {
             Log.e(TAG, "bootstrap check failed", e)
-            false
+            true
         }
+    }
+
+    private fun freezeBlankScreen(reason: String, work: ReadyWork, probe: String) {
+        loadTimeline.append(
+            loadToken = work.loadToken,
+            phase = documentGate.phase.name,
+            state = _state.value.toString(),
+            category = "blank-screen",
+            message = "$reason probe=$probe",
+        )
+        val report = diagnosticReport() + "\nblankReason=$reason\nprobe=$probe\n"
+        loadTimeline.freeze(report)
+        _blankScreenReport.value = report
+        recordDiagnostic(DiagnosticSeverity.WARNING, "blank-screen", "Frozen diagnostic before recovery: $reason")
     }
 
     private suspend fun productionDocumentProbe(work: ReadyWork): String {
@@ -1068,6 +1175,14 @@ class SessionController(
     }
 
     private suspend fun finishRestoreVerify(work: ReadyWork) {
+        if (shouldIgnoreAsBootstrap(work)) {
+            recordDiagnostic(
+                DiagnosticSeverity.INFO,
+                "navigation",
+                "Ignored restore-verify finish on the storage bootstrap page. Waiting for the real document.",
+            )
+            return
+        }
         val prepared = preparedPayload
         val ready = awaitGameReady(work)
         val accepted = ready && prepared != null && try {
@@ -1135,6 +1250,13 @@ class SessionController(
         gameDocumentLoads += 1
         _loadToken.value = _loadToken.value + 1
         recordDiagnostic(DiagnosticSeverity.INFO, "navigation", "Loading the game document.")
+        loadTimeline.append(
+            loadToken = _loadToken.value,
+            phase = DocumentPhase.GAME.name,
+            state = _state.value.toString(),
+            category = "navigation",
+            message = "beginGameLoad token=${_loadToken.value}",
+        )
     }
 
     private fun beginRollbackLocked() {
@@ -1607,5 +1729,11 @@ class SessionController(
         val adapter: GameAdapter,
         val view: WebView,
         val url: String,
+        val loadToken: Int,
+    )
+
+    private data class PendingFinish(
+        val url: String,
+        val finishToken: Int,
     )
 }

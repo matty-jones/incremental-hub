@@ -1,6 +1,7 @@
 package com.example.hub.ui
 
 import android.content.MutableContextWrapper
+import android.graphics.Bitmap
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
@@ -39,10 +40,9 @@ internal fun isMainFrameRequest(request: WebResourceRequest): Boolean = request.
 /**
  * Hosts one WebView for the active session.
  *
- * The view is created only while the session can show a page. Profile binding
- * happens before the first [WebView.loadUrl]. Ordinary recomposition, including
- * a fold or an unfold, updates the same instance and does not navigate.
- * Text zoom, page zoom, and the Shark layout sheet are applied in place.
+ * Each [WebView.loadUrl] stamps [Slot.appliedLoadToken] before navigation starts.
+ * [onPageStarted] copies that into [Slot.finishToken] so [onPageFinished] reports
+ * the token of the document that began loading, not a later navigation.
  */
 @Composable
 fun WebViewHost(
@@ -57,7 +57,7 @@ fun WebViewHost(
     documentGate: DocumentGate,
     onTakeRetained: () -> WebView?,
     onWebViewCreated: (WebView) -> Unit,
-    onPageFinished: (String) -> Unit,
+    onPageFinished: (url: String, finishToken: Int) -> Unit,
     onMainFrameError: (String) -> Unit,
     onResourceDiagnostic: (DiagnosticSeverity, String) -> Unit,
     onExplicitLoad: (String) -> Unit,
@@ -94,6 +94,7 @@ fun WebViewHost(
                         profileName = null,
                         appliedReloadEpoch = reloadEpoch,
                         appliedLoadToken = loadToken,
+                        finishToken = loadToken,
                         textZoomPercent = textZoomPercent,
                         pageZoomPercent = pageZoomPercent,
                         appliedTextZoom = textZoomPercent,
@@ -135,15 +136,25 @@ fun WebViewHost(
                             )
                         }
 
+                        override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                            val current = view.tag as? Slot ?: return
+                            current.finishToken = current.appliedLoadToken
+                            Log.d(
+                                TAG,
+                                "WebViewHost: onPageStarted url=$url token=${current.finishToken} gameId=$gameId",
+                            )
+                        }
+
                         override fun onPageFinished(view: WebView, url: String) {
-                            Log.d(TAG, "WebViewHost: onPageFinished url=$url gameId=$gameId")
                             val current = view.tag as? Slot
+                            val token = current?.finishToken ?: -1
+                            Log.d(TAG, "WebViewHost: onPageFinished url=$url token=$token gameId=$gameId")
                             if (current != null) {
                                 current.layoutAppliedForUrl = null
                                 current.appliedPageZoom = -1
                                 applyPresentation(view, current)
                             }
-                            if (url != "about:blank") onPageFinished(url)
+                            if (url != "about:blank") onPageFinished(url, token)
                         }
 
                         override fun onReceivedError(
@@ -195,7 +206,7 @@ fun WebViewHost(
                         WebViewCompat.setProfile(this, profileName!!)
                         slot.profileName = profileName
                         Log.d(TAG, "WebViewHost: bound profile '$profileName' before $launchUrl")
-                        navigate(this, slot, launchUrl!!, "initial", onExplicitLoad)
+                        navigate(this, slot, launchUrl!!, loadToken, "initial", onExplicitLoad)
                     }
                     onWebViewCreated(this)
                 }
@@ -206,6 +217,7 @@ fun WebViewHost(
                 profileName = null,
                 appliedReloadEpoch = -1,
                 appliedLoadToken = -1,
+                finishToken = -1,
                 textZoomPercent = textZoomPercent,
                 pageZoomPercent = pageZoomPercent,
             ).also { webView.tag = it }
@@ -217,18 +229,17 @@ fun WebViewHost(
                 WebViewCompat.setProfile(webView, profileName!!)
                 slot.profileName = profileName
                 Log.d(TAG, "WebViewHost: bound profile '$profileName' before $launchUrl")
-                navigate(webView, slot, launchUrl!!, "initial", onExplicitLoad)
+                navigate(webView, slot, launchUrl!!, loadToken, "initial", onExplicitLoad)
             }
             if (slot.profileName != null && launchUrl != null && loadToken != slot.appliedLoadToken) {
-                navigate(webView, slot, launchUrl, "load-token", onExplicitLoad)
-                slot.appliedLoadToken = loadToken
+                navigate(webView, slot, launchUrl, loadToken, "load-token", onExplicitLoad)
             }
             if (slot.profileName != null &&
                 launchUrl != null &&
                 reloadEpoch != slot.appliedReloadEpoch &&
                 state is SessionState.Playing
             ) {
-                navigate(webView, slot, launchUrl, "reload-epoch", onExplicitLoad)
+                navigate(webView, slot, launchUrl, loadToken, "reload-epoch", onExplicitLoad)
                 slot.appliedReloadEpoch = reloadEpoch
             }
         },
@@ -244,12 +255,16 @@ private fun navigate(
     webView: WebView,
     slot: Slot,
     url: String,
+    loadToken: Int,
     reason: String,
     onExplicitLoad: (String) -> Unit,
 ) {
     slot.layoutAppliedForUrl = null
     slot.appliedPageZoom = -1
-    Log.d(TAG, "WebViewHost: loadUrl reason=$reason url=$url")
+    // Stamp before loadUrl so onPageStarted/onPageFinished can attribute the document.
+    slot.appliedLoadToken = loadToken
+    slot.finishToken = loadToken
+    Log.d(TAG, "WebViewHost: loadUrl reason=$reason token=$loadToken url=$url")
     onExplicitLoad(reason)
     webView.loadUrl(url)
 }
@@ -275,6 +290,7 @@ private class Slot(
     var profileName: String?,
     var appliedReloadEpoch: Int,
     var appliedLoadToken: Int,
+    var finishToken: Int,
     var textZoomPercent: Int,
     var pageZoomPercent: Int,
     var appliedTextZoom: Int = -1,

@@ -18,6 +18,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BASE_URL", "\"http://192.168.86.3:8006/\"")
+        buildConfigField("String", "GIT_SHA", "\"${gitSha()}\"")
     }
 
     buildTypes {
@@ -85,4 +86,12 @@ dependencies {
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit-ktx:1.2.1")
+}
+
+fun gitSha(): String = try {
+    providers.exec {
+        commandLine("git", "rev-parse", "--short", "HEAD")
+    }.standardOutput.asText.get().trim().ifBlank { "unknown" }
+} catch (_: Exception) {
+    "unknown"
 }

@@ -153,8 +153,9 @@ class SharkStartupProbeTest {
                     "https://hub.test/",
                     """
                     <!DOCTYPE html><html><body style="background:lightseagreen;margin:0">
-                    <div id="app" style="display:none"></div>
-                    <div id="offline" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:#181818;color:#fff">offline</div>
+                    <div id="app" style="display:none"><span id="fish-amount"></span></div>
+                    <div id="offline" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:#181818;color:#fff">
+                    <div id="offline-time">away</div></div>
                     <script>var player = { VERSION: 3 };</script>
                     </body></html>
                     """.trimIndent(),

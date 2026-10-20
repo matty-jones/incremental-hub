@@ -26,7 +26,9 @@ class SharkIncrementalAdapter : GameAdapter {
         internal const val JS_PLAYER_EXISTS =
             "(function(){ return typeof player !== 'undefined' && player !== null; })()"
         internal const val JS_UI_READY =
-            "(function(){ if (typeof player === 'undefined' || player === null) return false;" +
+            "(function(){" +
+                " if (window.__hubStorageBootstrap) return false;" +
+                " if (typeof player === 'undefined' || player === null || player.VERSION == null) return false;" +
                 " function surfaceVisible(node){" +
                 " if (!node) return false;" +
                 " var inline = node.style && node.style.display;" +
@@ -36,8 +38,20 @@ class SharkIncrementalAdapter : GameAdapter {
                 " var rect = node.getBoundingClientRect();" +
                 " return rect.width > 1 && rect.height > 1;" +
                 " }" +
-                " return surfaceVisible(document.getElementById('app'))" +
-                " || surfaceVisible(document.getElementById('offline')); })()"
+                " var offline = document.getElementById('offline');" +
+                " if (surfaceVisible(offline)) {" +
+                " var ot = document.getElementById('offline-time');" +
+                " return !!(ot && (ot.textContent || '').trim().length > 0);" +
+                " }" +
+                " var app = document.getElementById('app');" +
+                " if (!surfaceVisible(app)) return false;" +
+                " var fish = document.getElementById('fish-amount');" +
+                " var antimatter = document.getElementById('antimatter-amount');" +
+                " var god = document.getElementById('god-fish-amount');" +
+                " return !!((fish && (fish.textContent || '').trim().length > 0)" +
+                " || (antimatter && (antimatter.textContent || '').trim().length > 0)" +
+                " || (god && (god.textContent || '').trim().length > 0));" +
+                " })()"
         internal const val JS_PEEK_SAVE =
             "(function(){ return localStorage.getItem('$SAVE_KEY'); })()"
         internal const val JS_READ_SAVE =

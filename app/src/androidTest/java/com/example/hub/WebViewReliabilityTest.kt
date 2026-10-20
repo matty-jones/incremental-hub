@@ -168,7 +168,8 @@ class WebViewReliabilityTest {
                 webRef.get(),
                 "(function(){ document.getElementById('offline').style.display='none';" +
                     " var app=document.getElementById('app'); app.style.display='';" +
-                    " app.style.minHeight='40px'; app.textContent='ready'; return true; })()",
+                    " app.style.minHeight='40px';" +
+                    " app.innerHTML='<span id=\"fish-amount\">1</span>'; return true; })()",
             )
             assertEquals("true", evalJs(webRef.get(), SharkIncrementalAdapter.JS_UI_READY))
             scenario.onActivity { webRef.get().destroy() }
@@ -295,8 +296,8 @@ class WebViewReliabilityTest {
         """.trimIndent()
         private val HIDDEN_SHARK = """
             <!DOCTYPE html><html><body>
-            <div id="app" style="display:none"></div>
-            <div id="offline" style="display:none"></div>
+            <div id="app" style="display:none"><span id="fish-amount"></span></div>
+            <div id="offline" style="display:none"><div id="offline-time"></div></div>
             <script>var player = { VERSION: 3 };</script>
             </body></html>
         """.trimIndent()
