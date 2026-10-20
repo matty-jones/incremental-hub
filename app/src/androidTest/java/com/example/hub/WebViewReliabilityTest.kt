@@ -157,9 +157,18 @@ class WebViewReliabilityTest {
             }
             assertTrue(started.await(15, TimeUnit.SECONDS))
             assertEquals("false", evalJs(webRef.get(), SharkIncrementalAdapter.JS_UI_READY))
+            // Zero-size "shown" offline overlay must not count as ready (WebView % height trap).
             evalJs(
                 webRef.get(),
-                "(function(){ document.getElementById('app').style.display = ''; return true; })()",
+                "(function(){ var o=document.getElementById('offline');" +
+                    " o.style.display=''; o.style.height='0px'; o.style.width='0px'; return true; })()",
+            )
+            assertEquals("false", evalJs(webRef.get(), SharkIncrementalAdapter.JS_UI_READY))
+            evalJs(
+                webRef.get(),
+                "(function(){ document.getElementById('offline').style.display='none';" +
+                    " var app=document.getElementById('app'); app.style.display='';" +
+                    " app.style.minHeight='40px'; app.textContent='ready'; return true; })()",
             )
             assertEquals("true", evalJs(webRef.get(), SharkIncrementalAdapter.JS_UI_READY))
             scenario.onActivity { webRef.get().destroy() }

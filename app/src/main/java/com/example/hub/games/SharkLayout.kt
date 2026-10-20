@@ -10,10 +10,24 @@ import org.json.JSONObject
  * presentation. It does not call the game's save routine or reload the page.
  */
 object SharkLayout {
-    const val VERSION = 1
-    const val STYLE_ID = "hub-shark-layout-v1"
+    const val VERSION = 2
+    const val STYLE_ID = "hub-shark-layout-v2"
 
     val css: String = """
+        /* Android WebView often leaves percentage heights unresolved, so Shark's
+           offline overlay (height:100%) collapses to 0px and only the teal body
+           shows. Returning players hit that path whenever offline progress runs. */
+        html, body {
+          height: 100%;
+          min-height: 100%;
+        }
+        #offline {
+          min-height: 100%;
+          min-height: 100vh;
+          height: 100%;
+          height: 100vh;
+          box-sizing: border-box;
+        }
         @media (max-width: 560px) {
           .shark-upgrade {
             height: auto !important;

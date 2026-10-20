@@ -27,11 +27,17 @@ class SharkIncrementalAdapter : GameAdapter {
             "(function(){ return typeof player !== 'undefined' && player !== null; })()"
         internal const val JS_UI_READY =
             "(function(){ if (typeof player === 'undefined' || player === null) return false;" +
-                " var app = document.getElementById('app');" +
-                " var offline = document.getElementById('offline');" +
-                " var appShown = !!(app && app.style.display !== 'none');" +
-                " var offlineShown = !!(offline && offline.style.display !== 'none');" +
-                " return appShown || offlineShown; })()"
+                " function surfaceVisible(node){" +
+                " if (!node) return false;" +
+                " var inline = node.style && node.style.display;" +
+                " if (inline === 'none') return false;" +
+                " var computed = window.getComputedStyle ? getComputedStyle(node).display : inline;" +
+                " if (computed === 'none') return false;" +
+                " var rect = node.getBoundingClientRect();" +
+                " return rect.width > 1 && rect.height > 1;" +
+                " }" +
+                " return surfaceVisible(document.getElementById('app'))" +
+                " || surfaceVisible(document.getElementById('offline')); })()"
         internal const val JS_PEEK_SAVE =
             "(function(){ return localStorage.getItem('$SAVE_KEY'); })()"
         internal const val JS_READ_SAVE =
