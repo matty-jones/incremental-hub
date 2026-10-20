@@ -1,5 +1,7 @@
 # Shark blank-screen root-cause audit
 
+The v0.1.7 follow-up is `docs/shark-offline-startup.md`. Navigation and readiness fixes below still stand. They do not put Shark's offline Speed and Done controls on the Pixel Fold inner screen.
+
 Date: 2026-10-20  
 Branch: `main` (post v0.1.5 / v0.1.6 fixes)  
 Target release after this audit: **0.1.7**

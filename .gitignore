@@ -83,3 +83,6 @@ server/db/*.db
 server/apks/*.apk
 server/apks/version.json
 PROGRESS.md
+
+# Runtime files from the headless Pixel Fold scripts
+scripts/android/.logs/

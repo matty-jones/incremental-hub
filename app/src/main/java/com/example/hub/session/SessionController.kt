@@ -27,6 +27,8 @@ import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
 import com.example.hub.BuildConfig
 import com.example.hub.games.SharkLayout
+import com.example.hub.games.SharkProbe
+import com.example.hub.games.unwrapJsResult
 import com.example.hub.games.shouldResumeLive
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
@@ -95,18 +97,6 @@ class SessionController(
         private const val CONSOLE_LINE_LIMIT = 500
         private const val DIAGNOSTIC_LIMIT = 200
         private const val READINESS_WATCH_MS = 30_000L
-        private const val DOCUMENT_PROBE_JS =
-            "(function(){ try {" +
-                " var app = document.getElementById('app');" +
-                " var offline = document.getElementById('offline');" +
-                " return JSON.stringify({" +
-                " bootstrap: window.__hubStorageBootstrap || ''," +
-                " player: typeof player !== 'undefined' && player !== null," +
-                " appDisplay: app ? String(app.style.display) : null," +
-                " offlineDisplay: offline ? String(offline.style.display) : null," +
-                " title: document.title || ''," +
-                " readyState: document.readyState || ''" +
-                " }); } catch (e) { return JSON.stringify({ error: String(e) }); } })()"
     }
 
     private enum class OpenStep {
@@ -1011,7 +1001,21 @@ class SessionController(
             )
             return
         }
+        val initialProbe = productionDocumentProbe(work)
+        recordDiagnostic(
+            DiagnosticSeverity.INFO,
+            "readiness",
+            "document-complete probe=$initialProbe",
+        )
+        loadTimeline.append(
+            loadToken = work.loadToken,
+            phase = documentGate.phase.name,
+            state = _state.value.toString(),
+            category = "readiness",
+            message = "document-complete probe=$initialProbe",
+        )
         val ready = awaitGameReady(work)
+        val settledProbe = productionDocumentProbe(work)
         val continueWatch = mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
             if (ready) {
@@ -1022,7 +1026,7 @@ class SessionController(
                     phase = documentGate.phase.name,
                     state = "Playing",
                     category = "readiness",
-                    message = "ready",
+                    message = "ready probe=$settledProbe",
                 )
                 false
             } else {
@@ -1032,14 +1036,13 @@ class SessionController(
             }
         }
         if (continueWatch) {
-            val probe = productionDocumentProbe(work)
             recordDiagnostic(
                 DiagnosticSeverity.WARNING,
                 "readiness",
                 "Adapter was not ready after loading ${work.url}. The page was left in place and was not restored. " +
-                    "probe=$probe console=${_consoleLines.value.takeLast(5)}",
+                    "probe=$settledProbe console=${_consoleLines.value.takeLast(5)}",
             )
-            freezeBlankScreen("initial-readiness-miss", work, probe)
+            freezeBlankScreen("initial-readiness-miss", work, settledProbe)
             watchReadiness(work)
         }
     }
@@ -1047,6 +1050,12 @@ class SessionController(
     private fun watchReadiness(work: ReadyWork) {
         readinessWatch?.cancel()
         readinessWatch = scope.launch {
+            val watchStart = productionDocumentProbe(work)
+            recordDiagnostic(
+                DiagnosticSeverity.INFO,
+                "readiness",
+                "readiness-watch-start probe=$watchStart",
+            )
             val ready = try {
                 readinessCheck?.invoke(work.view, work.adapter)
                     ?: work.adapter.awaitReady(work.view, READINESS_WATCH_MS)
@@ -1063,7 +1072,7 @@ class SessionController(
                     return@withLock
                 }
             }
-            val probe = productionDocumentProbe(work)
+            val probe = productionDocumentProbe(work, chromeOverride = "recovery")
             mutex.withLock {
                 if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) {
                     return@withLock
@@ -1121,21 +1130,40 @@ class SessionController(
         recordDiagnostic(DiagnosticSeverity.WARNING, "blank-screen", "Frozen diagnostic before recovery: $reason")
     }
 
-    private suspend fun productionDocumentProbe(work: ReadyWork): String {
+    private suspend fun productionDocumentProbe(
+        work: ReadyWork,
+        chromeOverride: String? = null,
+    ): String {
         // Unit tests inject peek/readiness hooks and Robolectric WebViews that
         // never invoke evaluateJavascript callbacks.
         if (peekClient != null || readinessCheck != null || bootstrapConfirmTest != null) {
             return "skipped"
         }
-        return try {
+        val body = try {
             withTimeoutOrNull(3_000L) {
                 val deferred = kotlinx.coroutines.CompletableDeferred<String?>()
-                work.view.evaluateJavascript(DOCUMENT_PROBE_JS) { deferred.complete(it) }
-                deferred.await()
-            }.orEmpty().trim('"')
+                work.view.evaluateJavascript(SharkProbe.JS) { deferred.complete(it) }
+                unwrapJsResult(deferred.await())
+            } ?: "probe-timeout"
         } catch (e: Exception) {
             "probe-failed:${e.javaClass.simpleName}"
         }
+        return body + chromeAnnotation(work.view, chromeOverride)
+    }
+
+    /**
+     * Native chrome is invisible to the page. Opening and recovery sheets sit
+     * on top of the WebView; a clear annotation means neither is composed.
+     * Recovery probes run before the sheet is composed, so the caller passes
+     * [chromeOverride] when that sheet is about to cover the WebView.
+     */
+    private fun chromeAnnotation(view: WebView, chromeOverride: String? = null): String {
+        val chrome = chromeOverride ?: when {
+            _state.value is SessionState.RecoveryRequired -> "recovery"
+            _state.value is SessionState.Opening && documentGate.phase != DocumentPhase.GAME -> "opening"
+            else -> "clear"
+        }
+        return " chrome=$chrome web=${view.width}x${view.height}"
     }
 
     private suspend fun finishRestoreWrite(work: ReadyWork) {

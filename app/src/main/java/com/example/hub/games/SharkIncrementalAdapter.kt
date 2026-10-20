@@ -38,10 +38,22 @@ class SharkIncrementalAdapter : GameAdapter {
                 " var rect = node.getBoundingClientRect();" +
                 " return rect.width > 1 && rect.height > 1;" +
                 " }" +
-                " var offline = document.getElementById('offline');" +
-                " if (surfaceVisible(offline)) {" +
+                " var offlineNode = document.getElementById('offline');" +
+                " if (surfaceVisible(offlineNode)) {" +
                 " var ot = document.getElementById('offline-time');" +
-                " return !!(ot && (ot.textContent || '').trim().length > 0);" +
+                " var textOk = !!(ot && (ot.textContent || '').trim().length > 0);" +
+                " var calc = (typeof offline !== 'undefined' && offline) ? offline : null;" +
+                " var active = !!(calc && calc.active);" +
+                " if (!(textOk || active)) return false;" +
+                " return controlUsable('offline-speed') || controlUsable('offline-done');" +
+                " }" +
+                " function controlUsable(id){" +
+                " var node = document.getElementById(id);" +
+                " if (!surfaceVisible(node)) return false;" +
+                " var r = node.getBoundingClientRect();" +
+                " var vw = window.innerWidth || 0;" +
+                " var vh = window.innerHeight || 0;" +
+                " return r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw;" +
                 " }" +
                 " var app = document.getElementById('app');" +
                 " if (!surfaceVisible(app)) return false;" +

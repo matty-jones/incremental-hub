@@ -87,6 +87,12 @@ class SharkStartupProbeTest {
             }
             assertTrue("peek finish", peekDone.await(30, TimeUnit.SECONDS))
             val peekProbe = eval(webRef.get(), PROBE)
+            // The bootstrap document is the Shark origin, so clear any aged save left
+            // by another test. Otherwise loadGame enters simulateOffline and hides #app.
+            eval(
+                webRef.get(),
+                "(function(){ localStorage.removeItem('shark_inc_save'); return 'cleared'; })()",
+            )
             gate.phase = DocumentPhase.GAME
             val gameDone = CountDownLatch(1)
             scenario.onActivity {
@@ -155,7 +161,9 @@ class SharkStartupProbeTest {
                     <!DOCTYPE html><html><body style="background:lightseagreen;margin:0">
                     <div id="app" style="display:none"><span id="fish-amount"></span></div>
                     <div id="offline" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:#181818;color:#fff">
-                    <div id="offline-time">away</div></div>
+                    <div id="offline-time">away</div>
+                    <button id="offline-speed">Speed</button>
+                    <button id="offline-done" style="display:none">Done</button></div>
                     <script>var player = { VERSION: 3 };</script>
                     </body></html>
                     """.trimIndent(),
@@ -190,7 +198,7 @@ class SharkStartupProbeTest {
                     " minH:getComputedStyle(o).minHeight}); })()",
             )
             assertTrue(
-                "SharkLayout 100vh should make offline ready: ready=$ready offline=$offline",
+                "SharkLayout should make the offline control ready: ready=$ready offline=$offline",
                 ready == "true",
             )
             scenario.onActivity { webRef.get().destroy() }
