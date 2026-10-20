@@ -44,6 +44,7 @@ fun HubTopBar(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     Surface(
@@ -61,6 +62,7 @@ fun HubTopBar(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                navigationIcon()
                 Text(
                     text = title,
                     style = MaterialTheme.typography.headlineSmall,

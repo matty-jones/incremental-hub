@@ -1,6 +1,8 @@
 package com.example.hub.ui
 
+import android.graphics.Bitmap
 import android.util.Log
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,8 +18,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,7 +32,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +67,8 @@ fun LauncherScreen(
     instanceDao: GameInstanceDao,
     syncSettled: Boolean,
     onPlay: (String) -> Unit,
+    debugTools: Boolean = false,
+    onOpenSettings: () -> Unit = {},
     onInspect: (String) -> Unit = {},
     onSafeLaunch: (String) -> Unit = {},
     onRecover: (String) -> Unit = {},
@@ -78,7 +93,27 @@ fun LauncherScreen(
     }
 
     HubScaffold(
-        topBar = { HubTopBar(title = stringResource(R.string.app_name)) },
+        topBar = {
+            HubTopBar(
+                title = stringResource(R.string.app_name),
+                actions = {
+                    if (debugTools) {
+                        StatusChip(text = "Debug")
+                    }
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier
+                            .testTag("open-settings")
+                            .semantics { contentDescription = "Settings" },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                        )
+                    }
+                },
+            )
+        },
     ) { padding ->
         val checkingWorkstation = !syncSettled && games.any { it.gameId !in snapshotIds }
         Column(
@@ -126,6 +161,7 @@ fun LauncherScreen(
                             game = game,
                             actionsHeld = !syncSettled && game.gameId !in snapshotIds,
                             hasSnapshot = game.gameId in snapshotIds,
+                            debugTools = debugTools,
                             onPlay = onPlay,
                             onInspect = onInspect,
                             onSafeLaunch = onSafeLaunch,
@@ -148,6 +184,7 @@ private fun GameCard(
     game: RegisteredGame,
     actionsHeld: Boolean,
     hasSnapshot: Boolean,
+    debugTools: Boolean,
     onPlay: (String) -> Unit,
     onInspect: (String) -> Unit,
     onSafeLaunch: (String) -> Unit,
@@ -165,25 +202,11 @@ private fun GameCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (game.displayDefaults.badgeText != null) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(
-                            color = accentColor.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(8.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = game.displayDefaults.badgeText!!,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = accentColor,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-            }
+            GameMark(
+                badgeText = game.displayDefaults.badgeText,
+                launchUrl = game.launchUrl,
+                accentColor = accentColor,
+            )
 
             Text(
                 text = game.displayName,
@@ -238,7 +261,7 @@ private fun GameCard(
                 Text(primaryPlayLabel(hasSession), fontWeight = FontWeight.Medium)
             }
         }
-        if (game.gameId == "shark-incremental") {
+        if (diagnosticLaunchActionsVisible(debugTools)) {
             Spacer(modifier = Modifier.height(4.dp))
             Column(modifier = Modifier.fillMaxWidth()) {
                 TextButton(
@@ -268,4 +291,44 @@ private fun GameCard(
             }
         }
     }
+}
+
+@Composable
+private fun GameMark(
+    badgeText: String?,
+    launchUrl: String,
+    accentColor: Color,
+) {
+    val icon by produceState<Bitmap?>(initialValue = null, launchUrl) {
+        value = SiteIconLoader.load(launchUrl)
+    }
+    if (icon == null && badgeText == null) return
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(accentColor.copy(alpha = 0.15f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        val loaded = icon
+        if (loaded != null) {
+            Image(
+                bitmap = loaded.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(3.dp),
+                contentScale = ContentScale.Fit,
+                filterQuality = FilterQuality.Medium,
+            )
+        } else if (badgeText != null) {
+            Text(
+                text = badgeText,
+                style = MaterialTheme.typography.labelLarge,
+                color = accentColor,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+    Spacer(modifier = Modifier.width(12.dp))
 }

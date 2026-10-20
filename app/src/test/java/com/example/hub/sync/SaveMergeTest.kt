@@ -3,6 +3,8 @@ package com.example.hub.sync
 import com.example.hub.games.SaveComparison
 import com.example.hub.games.SaveStanding
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SaveMergeTest {
@@ -84,6 +86,50 @@ class SaveMergeTest {
                 remoteStanding = SaveStanding.PROGRESSED,
                 comparison = SaveComparison.LIVE_AHEAD,
             ),
+        )
+    }
+
+    @Test
+    fun newerInstallableBuildIsAvailable() {
+        val check = classifyUpdateResponse(
+            installedVersionCode = 9,
+            versionCode = 10,
+            versionName = "0.1.9",
+            downloadUrl = "http://192.168.86.3:8006/app/hub.apk",
+        )
+        assertTrue(check is UpdateCheck.Available)
+        val info = (check as UpdateCheck.Available).info
+        assertEquals(10, info.versionCode)
+        assertEquals("0.1.9", info.versionName)
+        assertNull(updateCheckStatus(check))
+    }
+
+    @Test
+    fun currentOrOlderBuildStaysCurrent() {
+        assertEquals(
+            UpdateCheck.Current,
+            classifyUpdateResponse(9, 9, "0.1.8", "http://example/hub.apk"),
+        )
+        assertEquals(
+            UpdateCheck.Current,
+            classifyUpdateResponse(9, 8, "0.1.7", "http://example/hub.apk"),
+        )
+        assertEquals("This install is current.", updateCheckStatus(UpdateCheck.Current))
+    }
+
+    @Test
+    fun incompleteUpdatePayloadIsUnreachable() {
+        assertEquals(
+            UpdateCheck.Unreachable,
+            classifyUpdateResponse(9, -1, "", ""),
+        )
+        assertEquals(
+            UpdateCheck.Unreachable,
+            classifyUpdateResponse(9, 10, "0.1.9", ""),
+        )
+        assertEquals(
+            "The workstation did not offer an update.",
+            updateCheckStatus(UpdateCheck.Unreachable),
         )
     }
 }

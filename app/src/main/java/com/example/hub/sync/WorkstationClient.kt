@@ -14,7 +14,11 @@ import java.util.concurrent.TimeUnit
 interface WorkstationApi {
     fun fetchSaves(): List<RemoteSave>?
     fun putSave(save: RemoteSave): PutResult?
-    fun checkUpdate(): UpdateInfo?
+    fun lookupUpdate(): UpdateCheck
+    fun checkUpdate(): UpdateInfo? = when (val result = lookupUpdate()) {
+        is UpdateCheck.Available -> result.info
+        else -> null
+    }
     fun download(url: String, destination: File): Boolean
 }
 
@@ -62,18 +66,18 @@ class WorkstationClient(
         }
     }
 
-    override fun checkUpdate(): UpdateInfo? {
-        val response = get(endpoint("app/update")) ?: return null
+    override fun lookupUpdate(): UpdateCheck {
+        val response = get(endpoint("app/update")) ?: return UpdateCheck.Unreachable
         response.use { result ->
-            if (!result.isSuccessful) return null
-            val json = result.body?.string()?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
-            val versionCode = json.optInt("version_code", -1)
-            val versionName = json.optString("version_name")
-            val downloadUrl = json.optString("download_url")
-            if (versionCode <= BuildConfig.VERSION_CODE || versionName.isBlank() || downloadUrl.isBlank()) {
-                return null
-            }
-            return UpdateInfo(versionCode, versionName, downloadUrl)
+            if (!result.isSuccessful) return UpdateCheck.Unreachable
+            val json = result.body?.string()?.let { runCatching { JSONObject(it) }.getOrNull() }
+                ?: return UpdateCheck.Unreachable
+            return classifyUpdateResponse(
+                installedVersionCode = BuildConfig.VERSION_CODE,
+                versionCode = json.optInt("version_code", -1),
+                versionName = json.optString("version_name"),
+                downloadUrl = json.optString("download_url"),
+            )
         }
     }
 

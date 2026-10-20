@@ -24,6 +24,37 @@ data class UpdateInfo(
     val downloadUrl: String,
 )
 
+sealed class UpdateCheck {
+    data class Available(val info: UpdateInfo) : UpdateCheck()
+    data object Current : UpdateCheck()
+    data object Unreachable : UpdateCheck()
+}
+
+/**
+ * A newer installable build is [UpdateCheck.Available]. An older or equal
+ * build that still names a download is [UpdateCheck.Current]. Anything else
+ * cannot be installed.
+ */
+fun classifyUpdateResponse(
+    installedVersionCode: Int,
+    versionCode: Int,
+    versionName: String,
+    downloadUrl: String,
+): UpdateCheck {
+    if (versionCode < 0 || versionName.isBlank() || downloadUrl.isBlank()) {
+        return UpdateCheck.Unreachable
+    }
+    if (versionCode <= installedVersionCode) return UpdateCheck.Current
+    return UpdateCheck.Available(UpdateInfo(versionCode, versionName, downloadUrl))
+}
+
+/** Status line for a manual check. An available build uses the update dialog. */
+fun updateCheckStatus(check: UpdateCheck): String? = when (check) {
+    is UpdateCheck.Available -> null
+    UpdateCheck.Current -> "This install is current."
+    UpdateCheck.Unreachable -> "The workstation did not offer an update."
+}
+
 sealed interface PutResult {
     data object Stored : PutResult
     data class Stale(val remote: RemoteSave) : PutResult

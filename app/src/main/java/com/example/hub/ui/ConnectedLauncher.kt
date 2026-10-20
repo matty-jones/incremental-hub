@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -17,13 +18,16 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.example.hub.database.GameInstanceDao
 import com.example.hub.games.GameRegistry
 import com.example.hub.sync.SaveSync
+import com.example.hub.sync.UpdateCheck
 import com.example.hub.sync.UpdateInfo
 import com.example.hub.sync.WorkstationApi
+import com.example.hub.sync.updateCheckStatus
 import com.example.hub.update.UpdateInstaller
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -50,6 +54,7 @@ fun ConnectedLauncher(
     modifier: Modifier = Modifier,
 ) {
     val installer = remember(context, api) { UpdateInstaller(context, api) }
+    val settingsStore = remember(context) { HubSettingsStore(context) }
     val scope = rememberCoroutineScope()
     var syncSettled by remember { mutableStateOf(false) }
     var networkTick by remember { mutableIntStateOf(0) }
@@ -57,6 +62,14 @@ fun ConnectedLauncher(
     var dismissedVersion by remember { mutableIntStateOf(0) }
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var debugTools by remember { mutableStateOf(settingsStore.debugToolsEnabled()) }
+    var checkingForUpdate by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf<String?>(null) }
+
+    BackHandler(enabled = showSettings && update == null) {
+        showSettings = false
+    }
 
     DisposableEffect(context, saveSync) {
         val manager = context.getSystemService(ConnectivityManager::class.java)
@@ -91,15 +104,46 @@ fun ConnectedLauncher(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        LauncherScreen(
-            registry = registry,
-            instanceDao = instanceDao,
-            syncSettled = syncSettled,
-            onPlay = onPlay,
-            onInspect = onInspect,
-            onSafeLaunch = onSafeLaunch,
-            onRecover = onRecover,
-        )
+        if (showSettings) {
+            SettingsScreen(
+                debugTools = debugTools,
+                checkingForUpdate = checkingForUpdate,
+                updateStatus = updateStatus,
+                onDebugToolsChange = { enabled ->
+                    debugTools = enabled
+                    settingsStore.setDebugToolsEnabled(enabled)
+                },
+                onCheckForUpdate = {
+                    checkingForUpdate = true
+                    updateStatus = null
+                    scope.launch {
+                        val result = installer.lookup()
+                        checkingForUpdate = false
+                        when (result) {
+                            is UpdateCheck.Available -> {
+                                installError = null
+                                update = result.info
+                                updateStatus = null
+                            }
+                            else -> updateStatus = updateCheckStatus(result)
+                        }
+                    }
+                },
+                onBack = { showSettings = false },
+            )
+        } else {
+            LauncherScreen(
+                registry = registry,
+                instanceDao = instanceDao,
+                syncSettled = syncSettled,
+                debugTools = debugTools,
+                onOpenSettings = { showSettings = true },
+                onPlay = onPlay,
+                onInspect = onInspect,
+                onSafeLaunch = onSafeLaunch,
+                onRecover = onRecover,
+            )
+        }
         val available = update
         if (available != null) {
             AlertDialog(
