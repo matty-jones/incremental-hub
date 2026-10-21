@@ -22,7 +22,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Keep the approved icon and splash PNGs from being recompressed.
+            isCrunchPngs = false
+        }
         release {
+            isCrunchPngs = false
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(

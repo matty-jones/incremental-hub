@@ -9,22 +9,32 @@ import com.example.hub.database.HubDatabase
 import com.example.hub.games.GameRegistry
 import com.example.hub.navigation.HubNavigation
 import com.example.hub.session.SessionRuntime
+import com.example.hub.ui.ColdStartSplash
+import com.example.hub.ui.ColdStartSplashHost
 import com.example.hub.ui.theme.HubTheme
 import com.example.hub.ui.theme.enableHubEdgeToEdge
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val freshLaunch = savedInstanceState == null && ColdStartSplash.arm()
+        if (freshLaunch) {
+            ColdStartSplash.preload(applicationContext)
+        } else {
+            Log.i(TAG, "skipping splash intro")
+        }
         enableHubEdgeToEdge()
         val registry = GameRegistry(applicationContext)
         val database = HubDatabase.getInstance(applicationContext)
         setContent {
             HubTheme {
-                HubNavigation(
-                    context = applicationContext,
-                    gameRegistry = registry,
-                    database = database,
-                )
+                ColdStartSplashHost(armed = freshLaunch) {
+                    HubNavigation(
+                        context = applicationContext,
+                        gameRegistry = registry,
+                        database = database,
+                    )
+                }
             }
         }
     }
