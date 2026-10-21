@@ -38,7 +38,7 @@ fun PlaySurfaceStub(gameId: String) {
             Text(
                 text = "Play Surface — $gameId",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

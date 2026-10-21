@@ -1,5 +1,6 @@
 package com.example.hub.ui.chrome
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,9 +9,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -19,7 +22,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.hub.ui.theme.HubBrandTitle
+import com.example.hub.ui.theme.HubColors
+import java.util.Locale
 
 @Composable
 fun HubScaffold(
@@ -44,6 +53,7 @@ fun HubTopBar(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    branded: Boolean = false,
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -59,16 +69,22 @@ fun HubTopBar(
                         WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
                     ),
                 )
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 navigationIcon()
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (branded) title.uppercase(Locale.ROOT) else title,
+                        style = if (branded) HubBrandTitle else MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = if (branded) 1 else Int.MAX_VALUE,
+                        overflow = if (branded) TextOverflow.Ellipsis else TextOverflow.Clip,
+                    )
+                    if (branded) {
+                        HubBrandRule(modifier = Modifier.padding(top = 6.dp))
+                    }
+                }
                 actions()
             }
             if (!subtitle.isNullOrBlank()) {
@@ -80,5 +96,40 @@ fun HubTopBar(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun HubBrandRule(modifier: Modifier = Modifier) {
+    Canvas(
+        modifier = modifier
+            .width(72.dp)
+            .height(10.dp),
+    ) {
+        val y = size.height / 2f
+        val center = size.width / 2f
+        val gap = 5.dp.toPx()
+        val stroke = 1.dp.toPx()
+        drawLine(
+            color = HubColors.Gold,
+            start = Offset(0f, y),
+            end = Offset(center - gap, y),
+            strokeWidth = stroke,
+        )
+        drawLine(
+            color = HubColors.Gold,
+            start = Offset(center + gap, y),
+            end = Offset(size.width, y),
+            strokeWidth = stroke,
+        )
+        val diamond = 3.dp.toPx()
+        val path = Path().apply {
+            moveTo(center, y - diamond)
+            lineTo(center + diamond, y)
+            lineTo(center, y + diamond)
+            lineTo(center - diamond, y)
+            close()
+        }
+        drawPath(path, HubColors.GoldLight)
     }
 }

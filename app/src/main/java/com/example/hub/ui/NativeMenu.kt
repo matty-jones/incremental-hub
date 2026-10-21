@@ -25,7 +25,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.example.hub.ui.chrome.HubTextButton
+import com.example.hub.ui.theme.HubColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -134,7 +135,7 @@ fun NativeMenu(
         }
 
         if (showDisplay || showDiagnostics) {
-            TextButton(onClick = onPanelBack) {
+            HubTextButton(onClick = onPanelBack) {
                 Text("Back")
             }
             if (showDisplay) display() else diagnostics()
@@ -214,10 +215,21 @@ private fun MenuItemRow(
         is MenuAction.ReturnToHub -> Icons.AutoMirrored.Default.ArrowBack
     }
     val label = action.label
-    val tint = if (enabled) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    val principal = action is MenuAction.Resume
+    val protective = action is MenuAction.SnapshotNow || action is MenuAction.Checkpoint
+    val container = when {
+        !enabled -> MaterialTheme.colorScheme.surfaceVariant
+        principal -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val tint = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        principal -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val iconTint = when {
+        enabled && protective -> HubColors.Gold
+        else -> tint
     }
 
     Surface(
@@ -229,11 +241,7 @@ private fun MenuItemRow(
             .semantics {
                 contentDescription = if (enabled) label else "$label (disabled)"
             },
-        color = if (enabled) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant
-        },
+        color = container,
         shape = MaterialTheme.shapes.extraSmall,
     ) {
         Row(
@@ -246,7 +254,7 @@ private fun MenuItemRow(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = tint,
+                tint = iconTint,
                 modifier = Modifier.size(24.dp),
             )
             Text(

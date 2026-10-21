@@ -37,6 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.webkit.ProfileStore
 import com.example.hub.games.GameQualifier
 import com.example.hub.games.QualificationResult
+import com.example.hub.ui.theme.hubOnSuccess
+import com.example.hub.ui.theme.hubOnSuccessContainer
+import com.example.hub.ui.theme.hubSuccess
+import com.example.hub.ui.theme.hubSuccessContainer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -294,7 +298,7 @@ private fun GameResultCard(result: QualificationResult, modifier: Modifier = Mod
         modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (result.passed) {
-                MaterialTheme.colorScheme.primaryContainer
+                hubSuccessContainer()
             } else {
                 MaterialTheme.colorScheme.errorContainer
             },
@@ -306,7 +310,7 @@ private fun GameResultCard(result: QualificationResult, modifier: Modifier = Mod
                     text = result.displayName,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (result.passed) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                        hubOnSuccessContainer()
                     } else {
                         MaterialTheme.colorScheme.onErrorContainer
                     },
@@ -314,7 +318,7 @@ private fun GameResultCard(result: QualificationResult, modifier: Modifier = Mod
                 Spacer(modifier = Modifier.width(8.dp))
                 Surface(
                     color = if (result.passed) {
-                        MaterialTheme.colorScheme.primary
+                        hubSuccess()
                     } else {
                         MaterialTheme.colorScheme.error
                     },
@@ -325,7 +329,7 @@ private fun GameResultCard(result: QualificationResult, modifier: Modifier = Mod
                         text = if (result.passed) "PASSED" else "FAILED",
                         style = MaterialTheme.typography.labelMedium,
                         color = if (result.passed) {
-                            MaterialTheme.colorScheme.onPrimary
+                            hubOnSuccess()
                         } else {
                             MaterialTheme.colorScheme.onError
                         },
@@ -355,7 +359,7 @@ private fun StageEvidenceRow(stage: com.example.hub.games.StageResult, modifier:
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val badgeColor = if (stage.passed) {
-            MaterialTheme.colorScheme.primary
+            hubSuccess()
         } else {
             MaterialTheme.colorScheme.error
         }
@@ -368,7 +372,7 @@ private fun StageEvidenceRow(stage: com.example.hub.games.StageResult, modifier:
                 text = if (stage.passed) "✓" else "✗",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (stage.passed) {
-                    MaterialTheme.colorScheme.onPrimary
+                    hubOnSuccess()
                 } else {
                     MaterialTheme.colorScheme.onError
                 },

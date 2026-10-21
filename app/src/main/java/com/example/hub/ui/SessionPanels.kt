@@ -11,10 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +21,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.DiagnosticEvent
 import com.example.hub.session.DiagnosticSeverity
+import com.example.hub.ui.chrome.HubOutlinedButton
+import com.example.hub.ui.chrome.HubTextButton
+import com.example.hub.ui.theme.hubWarning
 
 @Composable
 fun DisplayPanel(
@@ -90,7 +91,7 @@ fun DisplayPanel(
         )
         if (allowGameFit) {
             if (pageScaleMode == PageScaleMode.GAME_FIT) {
-                TextButton(onClick = { onMode(PageScaleMode.READABLE) }, modifier = Modifier.fillMaxWidth()) {
+                HubTextButton(onClick = { onMode(PageScaleMode.READABLE) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Use readable layout")
                 }
             } else {
@@ -99,12 +100,12 @@ fun DisplayPanel(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { onMode(PageScaleMode.GAME_FIT) }, modifier = Modifier.fillMaxWidth()) {
+                HubTextButton(onClick = { onMode(PageScaleMode.GAME_FIT) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Use the game's fit")
                 }
             }
         }
-        TextButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
+        HubTextButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
             Text("Reset to defaults")
         }
     }
@@ -161,14 +162,14 @@ private fun ZoomRow(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(text = label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        TextButton(onClick = { onChange(stepZoom(percent, -ZOOM_STEP)) }, enabled = percent > MIN_ZOOM) {
+        HubTextButton(onClick = { onChange(stepZoom(percent, -ZOOM_STEP)) }, enabled = percent > MIN_ZOOM) {
             Text("-")
         }
         Text(
             text = "$percent%",
             style = MaterialTheme.typography.bodyLarge,
         )
-        TextButton(onClick = { onChange(stepZoom(percent, ZOOM_STEP)) }, enabled = percent < MAX_ZOOM) {
+        HubTextButton(onClick = { onChange(stepZoom(percent, ZOOM_STEP)) }, enabled = percent < MAX_ZOOM) {
             Text("+")
         }
     }
@@ -192,10 +193,10 @@ fun DiagnosticsPanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { shareReport(context, report) }) {
+            HubOutlinedButton(onClick = { shareReport(context, report) }) {
                 Text("Export")
             }
-            TextButton(onClick = { copyReport(context, report) }) {
+            HubTextButton(onClick = { copyReport(context, report) }) {
                 Text("Copy")
             }
         }
@@ -229,7 +230,7 @@ fun DiagnosticsPanel(
 @Composable
 private fun severityColor(severity: DiagnosticSeverity) = when (severity) {
     DiagnosticSeverity.FATAL -> MaterialTheme.colorScheme.error
-    DiagnosticSeverity.WARNING -> MaterialTheme.colorScheme.tertiary
+    DiagnosticSeverity.WARNING -> hubWarning()
     DiagnosticSeverity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 

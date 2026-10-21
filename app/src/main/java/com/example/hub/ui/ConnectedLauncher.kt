@@ -8,6 +8,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +30,7 @@ import com.example.hub.sync.UpdateCheck
 import com.example.hub.sync.UpdateInfo
 import com.example.hub.sync.WorkstationApi
 import com.example.hub.sync.updateCheckStatus
+import com.example.hub.ui.chrome.HubTextButton
 import com.example.hub.update.UpdateInstaller
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -153,16 +156,25 @@ fun ConnectedLauncher(
                         update = null
                     }
                 },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 title = { Text("Update available") },
                 text = {
                     Text(
-                        installError
+                        text = installError
                             ?: "Version ${available.versionName} is on the workstation.",
+                        color = if (installError != null) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                     )
                 },
                 confirmButton = {
                     TextButton(
                         enabled = !installing,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ),
                         onClick = {
                             installing = true
                             installError = null
@@ -182,7 +194,7 @@ fun ConnectedLauncher(
                     }
                 },
                 dismissButton = {
-                    TextButton(
+                    HubTextButton(
                         enabled = !installing,
                         onClick = {
                             dismissedVersion = available.versionCode

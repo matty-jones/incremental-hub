@@ -10,7 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -24,7 +23,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.hub.BuildConfig
-import com.example.hub.ui.chrome.AccentCard
+import com.example.hub.ui.chrome.HubCard
+import com.example.hub.ui.chrome.HubPrimaryButton
 import com.example.hub.ui.chrome.HubScaffold
 import com.example.hub.ui.chrome.HubTopBar
 
@@ -42,7 +42,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val accent = MaterialTheme.colorScheme.primary
     HubScaffold(
         modifier = modifier,
         topBar = {
@@ -70,7 +69,7 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            AccentCard(accentColor = accent) {
+            HubCard {
                 Text(
                     text = "Version ${BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.titleMedium,
@@ -87,14 +86,13 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
                 )
-                Button(
+                HubPrimaryButton(
                     onClick = onCheckForUpdate,
                     enabled = !checkingForUpdate,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp)
                         .testTag("check-update"),
-                    shape = MaterialTheme.shapes.small,
                 ) {
                     Text(if (checkingForUpdate) "Checking" else "Check for update")
                 }
@@ -106,7 +104,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            AccentCard(accentColor = accent) {
+            HubCard {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,

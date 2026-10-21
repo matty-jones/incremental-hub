@@ -29,6 +29,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.hub.diagnostics.TestResult
 import com.example.hub.diagnostics.WebViewCapabilities
+import com.example.hub.ui.theme.hubOnSuccessContainer
+import com.example.hub.ui.theme.hubSuccess
+import com.example.hub.ui.theme.hubSuccessContainer
 import kotlinx.coroutines.launch
 
 /**
@@ -147,7 +150,7 @@ fun CapabilityScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 val color = if (result.passed) {
-                                    MaterialTheme.colorScheme.primary
+                                    hubSuccess()
                                 } else {
                                     MaterialTheme.colorScheme.error
                                 }
@@ -252,12 +255,12 @@ private fun FeatureCard(label: String, supported: Boolean, modifier: Modifier = 
             }
             Spacer(modifier = Modifier.width(8.dp))
             val badgeColor = if (supported) {
-                MaterialTheme.colorScheme.primaryContainer
+                hubSuccessContainer()
             } else {
                 MaterialTheme.colorScheme.errorContainer
             }
             val badgeTextColor = if (supported) {
-                MaterialTheme.colorScheme.onPrimaryContainer
+                hubOnSuccessContainer()
             } else {
                 MaterialTheme.colorScheme.onErrorContainer
             }

@@ -3,8 +3,6 @@ package com.example.hub.ui
 import android.util.Log
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.SaveDiagnostic
+import com.example.hub.ui.chrome.HubOutlinedButton
+import com.example.hub.ui.chrome.HubPrimaryButton
 import com.example.hub.ui.chrome.OverlaySheet
 import java.text.DateFormat
 import java.util.Date
@@ -53,6 +53,11 @@ fun RecoveryOverlay(
         Text(
             text = if (diagnostic == null) "Session Recovery Required" else "Save diagnostics",
             style = MaterialTheme.typography.headlineSmall,
+            color = if (diagnostic == null) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -76,10 +81,9 @@ fun RecoveryOverlay(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(
+            HubPrimaryButton(
                 onClick = onRetry,
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
             ) {
                 Text("Retry")
             }
@@ -99,21 +103,19 @@ fun RecoveryOverlay(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(
+            HubPrimaryButton(
                 onClick = {
                     confirming = false
                     onRecover()
                 },
                 enabled = diagnostic.recoverAllowed,
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
             ) {
                 Text("Restore this snapshot")
             }
-            Button(
+            HubOutlinedButton(
                 onClick = { confirming = false },
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
             ) {
                 Text("Back")
             }
@@ -179,45 +181,36 @@ fun RecoveryOverlay(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(
+            HubOutlinedButton(
                 onClick = onSafeLaunch,
                 enabled = diagnostic.backupReady,
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
             ) {
                 Text("Safe Launch")
             }
-            Button(
+            HubPrimaryButton(
                 onClick = { confirming = true },
                 enabled = diagnostic.recoverAllowed,
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
             ) {
                 Text("Recover from snapshot")
             }
-            Button(
+            HubOutlinedButton(
                 onClick = onRetry,
                 modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
             ) {
                 Text("Check storage again")
             }
         }
-        Button(
+        HubOutlinedButton(
             onClick = onExport,
             modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.small,
         ) {
             Text("Export diagnostics")
         }
-        Button(
+        HubOutlinedButton(
             onClick = onClose,
             modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.small,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ),
         ) {
             Text("Close")
         }

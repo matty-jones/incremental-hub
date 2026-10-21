@@ -20,13 +20,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -48,18 +45,20 @@ import com.example.hub.R
 import com.example.hub.database.GameInstanceDao
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.RegisteredGame
-import com.example.hub.ui.chrome.AccentCard
+import com.example.hub.ui.chrome.HubCard
+import com.example.hub.ui.chrome.HubChipKind
+import com.example.hub.ui.chrome.HubPrimaryButton
 import com.example.hub.ui.chrome.HubScaffold
+import com.example.hub.ui.chrome.HubTextButton
 import com.example.hub.ui.chrome.HubTopBar
 import com.example.hub.ui.chrome.StatusChip
-import com.example.hub.ui.chrome.hubAccentColor
-import com.example.hub.ui.chrome.onAccentColor
+import com.example.hub.ui.theme.HubGameAccent
 
 private const val TAG = "LauncherScreen"
 
 /**
  * Launcher of registered games. Recently played games come first.
- * Color hints come from each game's display defaults.
+ * Game identity uses [HubGameAccent], not the definition's colorPrimary.
  */
 @Composable
 fun LauncherScreen(
@@ -96,9 +95,10 @@ fun LauncherScreen(
         topBar = {
             HubTopBar(
                 title = stringResource(R.string.app_name),
+                branded = true,
                 actions = {
                     if (debugTools) {
-                        StatusChip(text = "Debug")
+                        StatusChip(text = "Debug", kind = HubChipKind.Warning)
                     }
                     IconButton(
                         onClick = onOpenSettings,
@@ -125,7 +125,7 @@ fun LauncherScreen(
                 Text(
                     text = "Checking the workstation for saves",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
@@ -139,7 +139,7 @@ fun LauncherScreen(
                     Text(
                         text = "No games registered",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             } else {
@@ -192,11 +192,9 @@ private fun GameCard(
 ) {
     val hasSession = hasPlayHistory(game.lastPlayedAtMillis, hasSnapshot)
     val statusText = primaryPlayLabel(hasSession)
-    val accentColor = hubAccentColor(game.displayDefaults.colorPrimary)
-        ?: MaterialTheme.colorScheme.primary
-    val onAccent = onAccentColor(accentColor)
+    val accentColor = HubGameAccent.forGame(game.gameId)
 
-    AccentCard(accentColor = accentColor) {
+    HubCard(identityAccent = accentColor) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -221,12 +219,7 @@ private fun GameCard(
 
             StatusChip(
                 text = statusText,
-                containerColor = if (hasSession) {
-                    accentColor.copy(alpha = 0.16f)
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                },
-                contentColor = if (hasSession) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                kind = if (hasSession) HubChipKind.Ready else HubChipKind.New,
             )
         }
 
@@ -235,7 +228,7 @@ private fun GameCard(
         Text(
             text = game.launchUrl,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -246,25 +239,20 @@ private fun GameCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(
+            HubPrimaryButton(
                 modifier = Modifier
                     .weight(1f)
                     .testTag("play-${game.gameId}"),
                 enabled = !actionsHeld,
                 onClick = { onPlay(game.gameId) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = accentColor,
-                    contentColor = onAccent,
-                ),
-                shape = MaterialTheme.shapes.small,
             ) {
-                Text(primaryPlayLabel(hasSession), fontWeight = FontWeight.Medium)
+                Text(primaryPlayLabel(hasSession))
             }
         }
         if (diagnosticLaunchActionsVisible(debugTools)) {
             Spacer(modifier = Modifier.height(4.dp))
             Column(modifier = Modifier.fillMaxWidth()) {
-                TextButton(
+                HubTextButton(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("inspect-${game.gameId}"),
@@ -272,7 +260,7 @@ private fun GameCard(
                 ) {
                     Text("Inspect Save")
                 }
-                TextButton(
+                HubTextButton(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("safe-${game.gameId}"),
@@ -280,7 +268,7 @@ private fun GameCard(
                 ) {
                     Text("Safe Launch")
                 }
-                TextButton(
+                HubTextButton(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("recover-${game.gameId}"),

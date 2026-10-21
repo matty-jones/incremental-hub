@@ -41,6 +41,10 @@ import com.example.hub.bootstrap.BootstrapDetector
 import com.example.hub.bootstrap.DetectorResult
 import com.example.hub.bootstrap.PreLaunchSnapshot
 import com.example.hub.bootstrap.SnapshotResult
+import com.example.hub.ui.theme.hubOnSuccess
+import com.example.hub.ui.theme.hubOnSuccessContainer
+import com.example.hub.ui.theme.hubSuccess
+import com.example.hub.ui.theme.hubSuccessContainer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -248,7 +252,7 @@ private fun ResultCard(label: String, passed: Boolean, message: String, modifier
         modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (passed) {
-                MaterialTheme.colorScheme.primaryContainer
+                hubSuccessContainer()
             } else {
                 MaterialTheme.colorScheme.errorContainer
             },
@@ -260,14 +264,14 @@ private fun ResultCard(label: String, passed: Boolean, message: String, modifier
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (passed) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                        hubOnSuccessContainer()
                     } else {
                         MaterialTheme.colorScheme.onErrorContainer
                     },
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 val badgeColor = if (passed) {
-                    MaterialTheme.colorScheme.primary
+                    hubSuccess()
                 } else {
                     MaterialTheme.colorScheme.error
                 }
@@ -280,7 +284,7 @@ private fun ResultCard(label: String, passed: Boolean, message: String, modifier
                         text = if (passed) "PASSED" else "FAILED",
                         style = MaterialTheme.typography.labelMedium,
                         color = if (passed) {
-                            MaterialTheme.colorScheme.onPrimary
+                            hubOnSuccess()
                         } else {
                             MaterialTheme.colorScheme.onError
                         },
@@ -292,7 +296,7 @@ private fun ResultCard(label: String, passed: Boolean, message: String, modifier
                 text = message,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (passed) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
+                    hubOnSuccessContainer()
                 } else {
                     MaterialTheme.colorScheme.onErrorContainer
                 },
