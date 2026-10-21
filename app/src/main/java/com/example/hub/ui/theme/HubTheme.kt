@@ -3,6 +3,7 @@ package com.example.hub.ui.theme
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
@@ -14,6 +15,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
@@ -25,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.hub.R
 
 val HubWideWidth = 600.dp
@@ -198,6 +202,37 @@ fun ComponentActivity.enableHubEdgeToEdge() {
         statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
     )
+}
+
+/**
+ * Hides the status and navigation bars while this composable is in the tree.
+ * An edge swipe shows them briefly. The previous cutout mode is restored on leave.
+ */
+@Composable
+fun ImmersiveSystemBars() {
+    val view = LocalView.current
+    if (view.isInEditMode) return
+    DisposableEffect(view) {
+        val activity = view.context.findActivity() ?: return@DisposableEffect onDispose {}
+        val window = activity.window
+        val controller = WindowCompat.getInsetsController(window, view)
+        val previousCutout = window.attributes.layoutInDisplayCutoutMode
+        val previousBehavior = controller.systemBarsBehavior
+        val attributes = window.attributes
+        attributes.layoutInDisplayCutoutMode =
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        window.attributes = attributes
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        onDispose {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = previousBehavior
+            val restored = window.attributes
+            restored.layoutInDisplayCutoutMode = previousCutout
+            window.attributes = restored
+        }
+    }
 }
 
 private fun Context.findActivity(): Activity? {

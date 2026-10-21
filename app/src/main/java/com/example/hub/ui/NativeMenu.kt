@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.SessionState
 import com.example.hub.ui.chrome.OverlaySheet
+import com.example.hub.ui.chrome.SheetEdge
 
 private const val TAG = "NativeMenu"
 
@@ -74,8 +75,8 @@ internal val MenuAction.label: String
 internal fun sessionStateForcesMenuOpen(state: SessionState): Boolean = false
 
 /**
- * In-session menu drawn in an [OverlaySheet] beside the WebView, not around it.
- * Dismissing the sheet only hides it.
+ * In-session menu drawn in an [OverlaySheet] over the WebView.
+ * Compact windows drop it from the top. Dismissing the sheet only hides it.
  */
 @Composable
 fun NativeMenu(
@@ -109,6 +110,7 @@ fun NativeMenu(
     OverlaySheet(
         onDismiss = dismiss,
         modifier = modifier,
+        edge = SheetEdge.Top,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -25,8 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.SessionController
-import com.example.hub.ui.chrome.PlayChrome
 import com.example.hub.session.SessionState
+import com.example.hub.ui.chrome.PlayChrome
+import com.example.hub.ui.theme.ImmersiveSystemBars
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,6 +67,8 @@ fun PlaySurface(
     var menuOpen by remember(gameId) { mutableStateOf(false) }
     var menuPanel by remember(gameId) { mutableStateOf(MenuPanel.Actions) }
 
+    ImmersiveSystemBars()
+
     fun updateZoom(next: GameDisplayPreferences) {
         displayPrefs = next
         displayStore.write(gameId, next)
@@ -96,7 +99,6 @@ fun PlaySurface(
             Column(modifier = Modifier.fillMaxSize()) {
                 if (!menuOpen && state !is SessionState.Closed) {
                     PlayChrome(
-                        title = gameId,
                         onMenuClick = {
                             menuPanel = MenuPanel.Actions
                             menuOpen = true

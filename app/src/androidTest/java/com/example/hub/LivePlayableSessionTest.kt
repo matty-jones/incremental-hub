@@ -3,9 +3,11 @@ package com.example.hub
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -66,7 +68,7 @@ class LivePlayableSessionTest {
             composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isNotEmpty(),
         )
 
-        composeRule.onNodeWithText("Menu").performClick()
+        composeRule.onNodeWithContentDescription("Menu").performClick()
         composeRule.onNodeWithText("Snapshot now").performScrollTo().performClick()
 
         val dao = HubDatabase.getInstance(
@@ -90,7 +92,7 @@ class LivePlayableSessionTest {
         )
         composeRule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         composeRule.waitUntil(timeoutMillis = 20_000) {
-            val sessionUi = composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().isNotEmpty() ||
+            val sessionUi = composeRule.onAllNodesWithContentDescription("Menu").fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithText("Return to hub").fetchSemanticsNodes().isNotEmpty()
             val recovery = composeRule.onAllNodesWithText("Session Recovery Required")
                 .fetchSemanticsNodes().isNotEmpty()
@@ -103,7 +105,7 @@ class LivePlayableSessionTest {
         )
 
         if (composeRule.onAllNodesWithText("Return to hub").fetchSemanticsNodes().isEmpty()) {
-            composeRule.onNodeWithText("Menu").performClick()
+            composeRule.onNodeWithContentDescription("Menu").performClick()
         }
         composeRule.onNodeWithText("Return to hub").performScrollTo().performClick()
         composeRule.waitUntil(timeoutMillis = 30_000) {
@@ -112,13 +114,13 @@ class LivePlayableSessionTest {
         composeRule.activityRule.scenario.recreate()
         clickWhenEnabled("play-$gameId")
         composeRule.waitUntil(timeoutMillis = 90_000) {
-            composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().isNotEmpty() &&
+            composeRule.onAllNodesWithContentDescription("Menu").fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isEmpty()
         }
         val resumed = runBlocking { dao.get(gameId) }!!
         assertTrue(validate(resumed.snapshotPayload ?: error("snapshot missing after resume")))
         assertTrue(resumed.lastCaptureSuccessAtMillis >= saved.lastCaptureSuccessAtMillis)
-        composeRule.onNodeWithText("Menu").performClick()
+        composeRule.onNodeWithContentDescription("Menu").performClick()
         composeRule.onNodeWithText("Return to hub").performScrollTo().performClick()
         composeRule.waitUntil(timeoutMillis = 30_000) {
             composeRule.onAllNodesWithTag("play-$gameId").fetchSemanticsNodes().isNotEmpty()

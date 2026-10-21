@@ -1,40 +1,37 @@
 package com.example.hub.ui.chrome
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.hub.ui.theme.HubChipCorner
 
 /**
- * Slim hub header above the game WebView. Laid out in a column with the page
- * below it so top-of-document controls stay visible. The menu label stays the
- * word "Menu" so existing device tests can find it.
+ * Thin strip above the game WebView. The page sits below it so top-of-document
+ * controls stay visible. The control is announced as "Menu".
+ * Side cutouts shift the icon inward. The top cutout safe inset is not reserved:
+ * it is the status-bar band, and the trailing icon clears a centered camera.
  */
 @Composable
 fun PlayChrome(
-    title: String,
     onMenuClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -43,39 +40,34 @@ fun PlayChrome(
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 0.dp,
     ) {
-        Column {
-            Row(
+        Column(
+            modifier = Modifier.windowInsetsPadding(
+                WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal),
+            ),
+        ) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .height(32.dp),
+                contentAlignment = Alignment.CenterEnd,
             ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                FilledTonalButton(
-                    onClick = onMenuClick,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(HubChipCorner),
+                CompositionLocalProvider(
+                    LocalMinimumInteractiveComponentSize provides 0.dp,
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Menu,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Menu")
+                    IconButton(
+                        onClick = onMenuClick,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Menu,
+                            contentDescription = "Menu",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 }
             }
-            Spacer(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(1.dp)
