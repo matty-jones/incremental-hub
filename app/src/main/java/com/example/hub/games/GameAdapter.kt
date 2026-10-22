@@ -221,11 +221,16 @@ interface GameAdapter {
     }
 
     /**
-     * The first candidate is the profile pointer. Return it when it is
-     * progressed. Do not scan later candidates for a longer payload.
+     * The first candidate is the profile pointer. Return it when it is a
+     * valid fresh or progressed save. Do not scan later candidates.
      */
     fun chooseStored(candidates: List<String>): String? {
         val pointer = candidates.firstOrNull() ?: return null
-        return if (summarize(pointer).standing == SaveStanding.PROGRESSED) pointer else null
+        val standing = summarize(pointer).standing
+        return if (standing == SaveStanding.PROGRESSED || standing == SaveStanding.FRESH) {
+            pointer
+        } else {
+            null
+        }
     }
 }

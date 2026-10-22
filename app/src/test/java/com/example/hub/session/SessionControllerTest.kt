@@ -12,8 +12,12 @@ import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.EnvelopeProbeAdapter
 import com.example.hub.games.GameRegistry
+import com.example.hub.games.LzString
 import com.example.hub.games.PeekOutcome
+import com.example.hub.games.SaveEnvelope
 import com.example.hub.games.SharkProgress
+import com.example.hub.games.StorageSlot
+import com.example.hub.games.TrimpsSave
 import com.example.hub.bootstrap.DetectorResult
 import androidx.lifecycle.Lifecycle
 import kotlinx.coroutines.Dispatchers
@@ -1096,6 +1100,79 @@ class SessionControllerTest {
     }
 
     @Test
+    fun freshTrimpsSnapshotResumesWhenLiveMatches() = runTest {
+        registry.injectGame(StubGame("trimps", "https://trimps.github.io/"))
+        val fresh = freshTrimpsEnvelope()
+        val snapshots = StubSnapshotDao()
+        dao.upsert(
+            GameInstance(
+                gameId = "trimps",
+                profileName = "hub-game-trimps",
+                sessionIdentity = "fresh-trimps",
+                lastPlayedAtMillis = 40L,
+                lastCaptureAtMillis = 40L,
+                snapshotPayload = fresh,
+                lastCaptureSuccessAtMillis = 40L,
+            ),
+        )
+        snapshots.insert(
+            SnapshotRecord(
+                id = "trimps-fresh",
+                gameId = "trimps",
+                sequence = 1,
+                capturedAtMillis = 40L,
+                reason = SnapshotReasons.WORKSTATION,
+                pinned = true,
+                payload = fresh,
+                progressJson = null,
+            ),
+        )
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(fresh) },
+            snapshots = snapshots,
+        )
+        session.open("trimps")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://trimps.github.io/")
+        session.onMainFrameFinished("https://trimps.github.io/")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(1, session.gameDocumentLoads)
+        assertTrue(session.diagnosticReport().contains("comparison=MATCH"))
+        assertEquals(fresh, dao.get("trimps")!!.snapshotPayload)
+    }
+
+    @Test
+    fun freshTrimpsLiveDoesNotReplaceProgressedSnapshot() = runTest {
+        registry.injectGame(StubGame("trimps", "https://trimps.github.io/"))
+        val stored = freshTrimpsEnvelope(portals = 3, zone = 20, helium = "100")
+        val live = freshTrimpsEnvelope()
+        dao.upsert(
+            GameInstance(
+                gameId = "trimps",
+                profileName = "hub-game-trimps",
+                sessionIdentity = "progressed-trimps",
+                lastPlayedAtMillis = 50L,
+                lastCaptureAtMillis = 50L,
+                snapshotPayload = stored,
+                lastCaptureSuccessAtMillis = 50L,
+            ),
+        )
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(live) },
+            snapshots = StubSnapshotDao(),
+        )
+        session.open("trimps")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://trimps.github.io/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(0, session.gameDocumentLoads)
+        assertTrue(session.diagnosticReport().contains("comparison=LIVE_BEHIND"))
+        assertEquals(stored, dao.get("trimps")!!.snapshotPayload)
+    }
+
+    @Test
     fun freshLiveSaveDoesNotReplaceProgressedSnapshot() = runTest {
         val stored = progressedSharkPayload()
         val live = freshSharkPayload()
@@ -1583,6 +1660,28 @@ class SessionControllerTest {
             .put("humanoid", JSONObject().put("times", 0))
             .put("singularity", JSONObject().put("first", false))
         return Base64.getEncoder().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun freshTrimpsEnvelope(portals: Int = 0, zone: Int = 0, helium: String = "0"): String {
+        val global = JSONObject()
+            .put("stringVersion", "5.10.1")
+            .put("version", java.math.BigDecimal("4.914"))
+            .put("universe", 1)
+            .put("totalPortals", portals)
+            .put("highestLevelCleared", zone)
+            .put("highestRadonLevelCleared", 0)
+            .put("totalHeliumEarned", java.math.BigDecimal(helium))
+            .put("totalRadonEarned", java.math.BigDecimal.ZERO)
+            .put("challengeActive", "")
+            .put("runningChallengeSquared", false)
+            .put("isBeta", false)
+        val primary = LzString.compressToBase64(JSONObject().put("global", global).toString())
+        return SaveEnvelope.encode(
+            listOf(
+                StorageSlot(TrimpsSave.PRIMARY, primary),
+                StorageSlot(TrimpsSave.BACKUP, null),
+            ),
+        )
     }
 
     private fun progressedInstance(payload: String, playedAt: Long): GameInstance {

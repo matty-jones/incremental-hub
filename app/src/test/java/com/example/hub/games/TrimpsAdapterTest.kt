@@ -76,7 +76,9 @@ class TrimpsAdapterTest {
         val earlier = envelope(save(portals = 4, zone = 40, helium = "30"))
         assertEquals(SaveComparison.INCONCLUSIVE, adapter.compare(mixed, earlier))
         assertEquals(plain, adapter.chooseStored(listOf(plain, mixed)))
-        assertNull(adapter.chooseStored(listOf(envelope(save()), plain)))
+        val fresh = envelope(save())
+        assertEquals(fresh, adapter.chooseStored(listOf(fresh, plain)))
+        assertEquals(SaveComparison.MATCH, adapter.compare(fresh, fresh))
     }
 
     @Test
