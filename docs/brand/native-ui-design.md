@@ -44,7 +44,7 @@ Manrope, SIL Open Font License 1.1. Source pin and checksum: `third_party/fonts/
 
 `HubFontFamily` maps those files to Normal, Medium, SemiBold, and Bold. `HubTypography` applies that family to every Material 3 role and keeps the default sizes and line heights. Headlines and `titleLarge` / `titleMedium` are SemiBold. `titleSmall` and `labelLarge` are Medium. Body, labels, errors, game titles, and buttons do not use wide tracking. Font scale is the platform scale; nothing locks text to px.
 
-`HubBrandTitle` is Manrope SemiBold, 22sp, `0.12.em`. `HubTopBar(branded = true)` uppercases the title and draws a 72dp gold rule with a small central diamond. Only the launcher sets `branded`. At large font scale that one line ellipsizes instead of growing the header.
+`HubBrandTitle` is Manrope SemiBold, 22sp, `0.12.em`. `HubTopBar(branded = true)` uppercases the title and draws a full-width gold rule with a small diamond at the screen centre. The rule sits under the title row and runs edge to edge, outside the header's horizontal padding. Only the launcher sets `branded`. At large font scale that one line ellipsizes instead of growing the header.
 
 ## Chrome
 

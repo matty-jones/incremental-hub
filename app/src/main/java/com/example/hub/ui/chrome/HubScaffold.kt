@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -64,14 +63,16 @@ fun HubTopBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .windowInsetsPadding(
-                    WindowInsets.safeDrawing.only(
-                        WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-                    ),
-                )
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .padding(vertical = 12.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 navigationIcon()
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -81,18 +82,20 @@ fun HubTopBar(
                         maxLines = if (branded) 1 else Int.MAX_VALUE,
                         overflow = if (branded) TextOverflow.Ellipsis else TextOverflow.Clip,
                     )
-                    if (branded) {
-                        HubBrandRule(modifier = Modifier.padding(top = 6.dp))
-                    }
                 }
                 actions()
+            }
+            if (branded) {
+                HubBrandRule(modifier = Modifier.padding(top = 6.dp))
             }
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                        .padding(start = 20.dp, end = 20.dp, top = 4.dp),
                 )
             }
         }
@@ -103,7 +106,7 @@ fun HubTopBar(
 private fun HubBrandRule(modifier: Modifier = Modifier) {
     Canvas(
         modifier = modifier
-            .width(72.dp)
+            .fillMaxWidth()
             .height(10.dp),
     ) {
         val y = size.height / 2f

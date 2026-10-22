@@ -22,7 +22,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.SessionController
 import com.example.hub.session.SessionState
@@ -61,6 +63,11 @@ fun PlaySurface(
     var displayPrefs by remember(gameId) { mutableStateOf(displayStore.read(gameId)) }
     var presentation by remember(gameId) { mutableStateOf<PresentationAck?>(null) }
     val folded = !isWideWindow()
+    val smallestWidth = LocalConfiguration.current.smallestScreenWidthDp
+    val trimpsInset = with(LocalDensity.current) {
+        TrimpsFrame.bottomInsetPx(gameId, smallestWidth).toDp()
+    }
+    TrimpsCoverOrientation(gameId)
     val zoom = displayPrefs.forPosture(folded)
     val pageScaleMode = pageScaleModeFor(gameId, displayPrefs.pageScaleMode)
     val scope = rememberCoroutineScope()
@@ -107,7 +114,12 @@ fun PlaySurface(
                     )
                 }
 
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(bottom = trimpsInset),
+                ) {
                     androidx.compose.runtime.key(gameId, generation) {
                         WebViewHost(
                             gameId = gameId,
