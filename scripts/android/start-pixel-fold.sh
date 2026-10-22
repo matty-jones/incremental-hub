@@ -6,6 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 if adb devices | awk -v serial="$ANDROID_SERIAL" '$1 == serial && $2 == "device" { found = 1 } END { exit !found }'; then
   echo "$ANDROID_SERIAL is already online"
+  "$(dirname "${BASH_SOURCE[0]}")/provision-webview.sh"
   exit 0
 fi
 
@@ -37,3 +38,4 @@ setsid -f emulator \
 sleep 1
 pgrep -f "qemu-system.*${AVD_NAME}|emulator -avd ${AVD_NAME}" | head -n 1 >"${LOG_DIR}/pixel-fold.pid" || true
 echo "pid $(cat "${LOG_DIR}/pixel-fold.pid" 2>/dev/null || echo unknown)"
+echo "After boot, wait-ready.sh checks the WebView provider and installs the pinned APK when it is below 118."

@@ -45,4 +45,4 @@ adb -s "$ANDROID_SERIAL" shell settings put global transition_animation_scale 0
 adb -s "$ANDROID_SERIAL" shell settings put global animator_duration_scale 0
 
 echo "Booted ${ANDROID_SERIAL}. WebView provider: ${webview}"
-adb -s "$ANDROID_SERIAL" shell dumpsys webviewupdate | awk 'NR <= 20 { print }'
+"$(dirname "${BASH_SOURCE[0]}")/provision-webview.sh"

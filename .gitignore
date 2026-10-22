@@ -86,3 +86,5 @@ PROGRESS.md
 
 # Runtime files from the headless Pixel Fold scripts
 scripts/android/.logs/
+scripts/android/*.apk
+scripts/android/webview-cache/

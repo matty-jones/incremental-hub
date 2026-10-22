@@ -8,7 +8,7 @@ Synthetic saves only. A test that writes, imports, corrupts, or ages a save uses
 
 The workstation already has `scripts/android/start-pixel-fold.sh` and the hinge postures in `docs/pixel-fold-emulator.md`. Unfolded is 2208×1840. Folded is 1080×2092. `wm size` is not a substitute.
 
-`PixelFold_API34` (`emulator-5556`) now runs WebView `155.0.8059.43`, so `ProfileStore.getInstance()` succeeds. The stock image provider is still 113 and will return if userdata is wiped. `scripts/android/check-webview.sh` refuses instrumentation below major version 118. `Pixel6_API34_PS` is unchanged. A `cmd device_state` override sticks across a later hinge change until `cmd device_state state reset`. Fold evidence has to name which control moved the posture. Details are in `emulator-webview-report.md`.
+`PixelFold_API34` (`emulator-5556`) now runs WebView `155.0.8059.43`, so `ProfileStore.getInstance()` succeeds. The stock image provider is still 113 and will return if userdata is wiped. `scripts/android/provision-webview.sh` installs the pinned cache APK in that case. `scripts/android/check-webview.sh` refuses instrumentation below major version 118. `Pixel6_API34_PS` is unchanged. A `cmd device_state` override sticks across a later hinge change until `cmd device_state state reset`. Fold evidence has to name which control moved the posture. Details are in `emulator-webview-report.md`.
 
 The suite is an instrumentation test like `SharkOfflineAcceptanceTest`, one process per game, profile name `hub-qual-<gameId>-<runId>`, destroyed at the end. Room uses a test database or a game id that is not `shark-incremental` or `fe000000`.
 

@@ -48,7 +48,7 @@ Differences from a physical Pixel Fold:
 - The inner panel in this profile is landscape 2208 x 1840. The phone's inner panel is portrait 1840 x 2208.
 - Density is 420 dpi for both panels. The phone is about 408 dpi on the cover and about 380 dpi on the inner panel.
 - The cover resolution 1080 x 2092 matches the phone.
-- The API 34 Play image ships `com.google.android.webview` 113.0.5672.136. That build throws `UnsupportedOperationException` from `ProfileStore.getInstance()` because multi-profile needs WebView 118. `PixelFold_API34` now has a user-installed provider `155.0.8059.43` (same package name, installed with `adb install -r -d`). Wiping userdata restores 113. `scripts/android/check-webview.sh` fails closed below major 118. The APK is not in this repository. `Pixel6_API34_PS` was not deleted or modified. See `docs/expansion/emulator-webview-report.md`.
+- The API 34 Play image ships `com.google.android.webview` 113.0.5672.136. That build throws `UnsupportedOperationException` from `ProfileStore.getInstance()` because multi-profile needs WebView 118. `scripts/android/provision-webview.sh` installs the pinned 155.0.8059.43 provider from a local cache when the current provider is below 118. A newer install of the same package and certificate is left in place. The APK is not in this repository. `Pixel6_API34_PS` is not modified. See below and `docs/expansion/emulator-webview-report.md`.
 
 Layout viewport measured inside Shark, below the system bars:
 
@@ -62,6 +62,7 @@ Run the scripts with bash. They select serial `emulator-5556` and do not touch `
 ```bash
 scripts/android/start-pixel-fold.sh
 scripts/android/wait-ready.sh
+scripts/android/provision-webview.sh
 scripts/android/install-debug.sh
 scripts/android/posture.sh unfold
 scripts/android/posture.sh fold
@@ -74,5 +75,33 @@ scripts/android/stop-pixel-fold.sh
 ```
 
 Startup flags: `-port 5556 -no-window -no-audio -no-boot-anim -no-snapshot-load -gpu swiftshader_indirect -accel on`. Boot timeout defaults to 240 seconds. `setsid -f` keeps the process after the launching shell exits.
+
+`start-pixel-fold.sh` provisions WebView when the emulator is already online. A cold start prints a reminder, and `wait-ready.sh` provisions after boot. `check-webview.sh`, which `run-instrumentation.sh` runs first, does the same check. The production floor stays major version 118. The scripts do not wipe userdata and they refuse serial `emulator-5554`.
+
+## WebView cache
+
+The only APK these scripts will install is described in `scripts/android/webview-provider.pin`:
+
+- Package `com.google.android.webview` 155.0.8059.43, versionCode 805904308
+- SHA-256 `4c481c062eadc296bd7afa93295cba95c224f95ee4595a6ae5f95627c985438b`
+- Signer certificate SHA-256 `6faf3c4140407473400934d117815a21af1cfefc5c0bee61c858bc3d72ba6fe5`
+
+Cache path, outside the repo and outside build outputs:
+
+```text
+${XDG_CACHE_HOME:-$HOME/.cache}/incremental-hub/webview/com.google.android.webview-155.0.8059.43.apk
+```
+
+After a machine reset the cache is gone. Copy the known-good file back to that path. If an emulator already has this provider, this pull is read-only and does not wipe the AVD:
+
+```bash
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/incremental-hub/webview"
+adb -s emulator-5556 shell pm path com.google.android.webview
+adb -s emulator-5556 pull <printed base.apk path> \
+  "${XDG_CACHE_HOME:-$HOME/.cache}/incremental-hub/webview/com.google.android.webview-155.0.8059.43.apk"
+scripts/android/provision-webview.sh
+```
+
+`provision-webview.sh` checks the file hash, then `aapt` package name and version, then `apksigner` certificate SHA-256. A mismatch is refused. The script does not download a package. If the cache is missing and the emulator is still below version 118, it exits with these same instructions.
 
 `posture.sh fold` runs `adb emu sensor set hinge-angle0 0`. The sensor name is `hinge-angle0`. `hinge_angle0` is rejected. `cmd device_state state 0` also switches the physical displays; the scripts use the hinge so the posture stays sensor-driven.
