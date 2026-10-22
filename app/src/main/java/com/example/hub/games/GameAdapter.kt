@@ -120,17 +120,99 @@ interface GameAdapter {
 
     fun summarize(payload: String?): SaveSummary
 
-    fun compare(livePayload: String?, storedPayload: String?): SaveComparison
-
-    /**
-     * Pick the stored payload that should be treated as the recovery source.
-     * Shark prefers the furthest progressed candidate.
-     */
-    fun chooseStored(candidates: List<String>): String?
-
     /**
      * True when the running game's in-memory progress matches [importedPayload].
      * Must not call the game's save routine.
      */
     suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean
+
+    /**
+     * When true, snapshots are version-1 envelopes and restores are journaled.
+     * Shark and FE000000 stay on the raw string.
+     */
+    val usesSaveEnvelope: Boolean get() = false
+
+    /** Keys this adapter captures. The default is the single [storageKey]. */
+    val storageEntries: List<StorageEntry>
+        get() = listOf(StorageEntry(storageKey, required = true, role = StorageRole.PROGRESS))
+
+    /** Credentials and account tokens. They are never part of an envelope. */
+    val deniedStorageKeys: Set<String> get() = emptySet()
+
+    /** JS expression returning extra key names. Default discovers nothing. */
+    fun discoveryScript(): String = "[]"
+
+    /** True for a runtime-discovered name such as an NG+3 slot key. */
+    fun allowsDiscoveredKey(name: String): Boolean = false
+
+    /**
+     * Diagnostic probe for this adapter. Shark's probe must not be the gate
+     * for every game. An empty script means there is no page probe.
+     */
+    val readinessScript: String get() = ""
+
+    /**
+     * Save string used only when a qualification run has to inject storage.
+     * Null refuses the injection. A shared synthetic blob is not a fixture.
+     */
+    val qualificationFixture: String? get() = null
+
+    fun envelopePolicy(): EnvelopePolicy = EnvelopePolicy(
+        allowedNames = storageEntries.map { it.name }.toSet(),
+        requiredNames = storageEntries.filter { it.required }.map { it.name }.toSet(),
+        deniedNames = deniedStorageKeys,
+        allowDynamic = ::allowsDiscoveredKey,
+    )
+
+    /**
+     * Every owned key from one evaluation. The default wraps [capture].
+     * Envelope adapters override this so the keys come from one script.
+     */
+    suspend fun captureBundle(webView: WebView, result: QualificationResult): SaveBundle? {
+        val payload = capture(webView, result) ?: return null
+        return SaveBundle(listOf(StorageSlot(storageKey, payload)))
+    }
+
+    suspend fun prepareRestoreBundle(payload: String): SaveBundle {
+        val prepared = prepareRestore(payload)
+        return if (usesSaveEnvelope) {
+            when (val decoded = SaveEnvelope.decode(prepared, envelopePolicy())) {
+                is EnvelopeDecode.Ok -> decoded.bundle
+                is EnvelopeDecode.Rejected -> SaveBundle(emptyList())
+            }
+        } else {
+            SaveBundle(listOf(StorageSlot(storageKey, prepared)))
+        }
+    }
+
+    /**
+     * Null when this payload has no total order. The default compare then
+     * returns [SaveComparison.INCONCLUSIVE] for unequal valid saves.
+     */
+    fun progressView(payload: String?): ProgressView? = null
+
+    /** The session does not guess a game's import function. */
+    suspend fun nativeImport(webView: WebView, exportText: String): ImportOutcome =
+        ImportOutcome.Unsupported
+
+    fun compare(livePayload: String?, storedPayload: String?): SaveComparison {
+        val storedStanding = summarize(storedPayload).standing
+        if (storedStanding == SaveStanding.ABSENT) return SaveComparison.NO_SNAPSHOT
+        val liveStanding = summarize(livePayload).standing
+        if (liveStanding == SaveStanding.ABSENT) return SaveComparison.LIVE_MISSING
+        if (liveStanding == SaveStanding.INVALID || storedStanding == SaveStanding.INVALID) {
+            return SaveComparison.INCONCLUSIVE
+        }
+        if (livePayload != null && livePayload == storedPayload) return SaveComparison.MATCH
+        return rankProgress(progressView(livePayload), progressView(storedPayload))
+    }
+
+    /**
+     * The first candidate is the profile pointer. Return it when it is
+     * progressed. Do not scan later candidates for a longer payload.
+     */
+    fun chooseStored(candidates: List<String>): String? {
+        val pointer = candidates.firstOrNull() ?: return null
+        return if (summarize(pointer).standing == SaveStanding.PROGRESSED) pointer else null
+    }
 }

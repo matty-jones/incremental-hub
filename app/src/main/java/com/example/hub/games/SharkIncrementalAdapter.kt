@@ -89,12 +89,18 @@ class SharkIncrementalAdapter : GameAdapter {
                 " }); })()"
         private const val JS_SET_SAVE =
             "(function(){ localStorage.setItem('$SAVE_KEY', __PAYLOAD__); return true; })()"
+
+        /** Minimal Shark save used only by the qualification injector. */
+        internal const val QUALIFICATION_FIXTURE =
+            "eyJWRVJTSU9OIjozLCJnb2xkIjoxMDAwLCJjbGlja3MiOjUwfQ=="
     }
 
     override val storageKey: String = SAVE_KEY
 
     override val adapterId = "shark-incremental-adapter"
     override val adapterVersion = "1.0.0"
+    override val readinessScript: String = SharkProbe.JS
+    override val qualificationFixture: String? = QUALIFICATION_FIXTURE
 
     // ── probe ──────────────────────────────────────────────────────────────
     override suspend fun probe(webView: WebView): Boolean {

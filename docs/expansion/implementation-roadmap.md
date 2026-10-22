@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-Research only. Nothing in this list is implemented. Shark Incremental and FE000000 stay as they are until a milestone says their tests must still pass. No APK, no catalogue registration, and no import of real saves.
+Milestones 0 and 1 are implemented on `expansion/save-envelope`. No new game is registered and no release APK is produced. Later milestones in this list are still research. Shark Incremental and FE000000 keep their existing save and comparison behaviour.
 
 Estimates are relative: **S** is a few files and the existing test style, **M** is a new adapter plus instrumentation, **L** is multi-key or import UI. They are not calendar time.
 
@@ -8,14 +8,16 @@ Estimates are relative: **S** is a few files and the existing test style, **M** 
 
 | Id | Blocker | Why it blocks | Done when |
 | --- | --- | --- | --- |
-| B1 | Pixel Fold AVD dies in `ProfileStore.getInstance()` before Compose. WebView 113.0.5672.136. | The qualification plan's fold gates cannot run. | A headless `PixelFold_API34` loads the Hub, creates `hub-game-shark-incremental`, and shows Shark or a blank disposable page. Recorded in `PROGRESS.md`. |
-| B2 | JS dialog, file input, and `data:` download are unobserved on the WebView the suite will use. | NG+3 migrations call `prompt`. File import is optional if text import exists. | The experiment in `qualification-plan.md` is written up with the WebView version and the five results. |
-| B3 | Ethereal Farm live `document.title` suffix is not in the bundle as a literal. | The adapter must know the running version it refuses to exceed. The numeric code `525444` is verified. | Disposable load prints `document.title` and `Object.keys(localStorage)` after `saveNow()`. |
-| B4 | AD user agent versus `supportedBrowsers` is unverified on-device. | A failed check never calls `init()`, so there is no save to capture. | Disposable load records `navigator.userAgent` and the computed display of `#browser-warning`. |
+| B1 | Pixel Fold AVD died in `ProfileStore.getInstance()` on WebView 113.0.5672.136. | The qualification plan's fold gates cannot run. | Done on this branch. WebView 155.0.8059.43 is installed on `PixelFold_API34`. `FoldProfileContinuityTest` launches the Hub, creates a profile, and keeps one Shark WebView across folded and unfolded postures. `Pixel6_API34_PS` was not deleted. |
+| B2 | JS dialog, file input, and `data:` download were unobserved. | NG+3 migrations call `prompt`. File import is optional if text import exists. | Done. On WebView 155.0.8059.43, `alert`, `confirm`, and `prompt` appear and return. A file input and a `data:` download return without a system UI. Recorded in `game-compatibility-matrix.md`. |
+| B3 | Ethereal Farm live `document.title` suffix was not in the bundle as a literal. | The adapter must know the running version it refuses to exceed. The numeric code `525444` is verified. | Title verified: `Ethereal Farm v0.18.4d`, prefix `ef_state`. The key list after `saveNow()` is still blocked: `saveNow` is not a global, and a fresh profile's `localStorage` stayed empty. |
+| B4 | AD user agent versus `supportedBrowsers` was unverified on-device. | A failed check never calls `init()`, so there is no save to capture. | Done. UA contains `Chrome/155.0.8059.43`. `#browser-warning` display is `none`. |
 
-B2 does not block Trimps. B3 blocks only the Ethereal Farm version ceiling. B4 blocks only vanilla AD. B1 blocks fold evidence for every game and does not block phone-AVD logic tests.
+B2 does not block Trimps. B3's remaining gap blocks only the Ethereal Farm key list, not the version ceiling. B4 does not block vanilla AD's browser gate on this WebView. B1 does not block fold evidence.
 
 ## Milestone 0 — Close the evidence gaps
+
+**Status:** done, with one remaining gap. B1, B2, and B4 are verified on WebView 155.0.8059.43. B3's title and `ef_state` prefix are verified. The key list after `saveNow()` is blocked because that function is not global. See `game-compatibility-matrix.md`.
 
 **Depends on:** this research. **Complexity:** S. **Release:** none.
 
@@ -28,6 +30,8 @@ Definition of done:
 - No production behaviour change. A temporary instrumentation activity is allowed only if it is not registered as a launcher game and is not required to ship.
 
 ## Milestone 1 — Envelope bootstrap, without new games
+
+**Status:** done on this branch. No new game id is registered.
 
 **Depends on:** Milestone 0 for B2, because the import API should not grow a file picker that the experiment showed is unnecessary. The bootstrap itself does not depend on B2. **Complexity:** M.
 

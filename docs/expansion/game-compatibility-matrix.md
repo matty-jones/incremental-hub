@@ -75,7 +75,7 @@ It then loads `minified.js?v=20261018`. Repo `index.html` line 49 sets `localsto
 
 `utils.js` `setLocalStorage` / `getLocalStorage` (lines 233-242) use `window.localStorage[name]`.
 
-`main.js` lines 26-31 set `version_major = 0`, `version_minor = 18`, `version_patch = 4`, `version_sub = 3`. `formatVersion` appends a letter when `version_sub > 0`, so this source displays `0.18.4d`. The numeric code is `525444`. The live bundle contains the literal `525444` and the changelog text `0.18.4 (2026-09-19)`. It does not contain the literal `0.18.4d` or `ef_state`. The prefix is applied by the live HTML, and the minified decoder uses `window.localstorageNameHTML` (found in the bundle). **Unverified:** the running `document.title` suffix. Experiment: load the live URL in a disposable WebView and read `document.title` plus `Object.keys(localStorage)` after one `saveNow()`.
+`main.js` lines 26-31 set `version_major = 0`, `version_minor = 18`, `version_patch = 4`, `version_sub = 3`. `formatVersion` appends a letter when `version_sub > 0`, so this source displays `0.18.4d`. The numeric code is `525444`. The live bundle contains the literal `525444` and the changelog text `0.18.4 (2026-09-19)`. It does not contain the literal `0.18.4d` or `ef_state`. The prefix is applied by the live HTML, and the minified decoder uses `window.localstorageNameHTML` (found in the bundle). **Verified** on WebView 155.0.8059.43: `document.title` is `Ethereal Farm v0.18.4d` and `window.localstorageNameHTML` is `ef_state`. `typeof saveNow` is `undefined` on that page, and a fresh profile's `localStorage` was still empty two seconds later, so the suffix keys are not yet observed at runtime.
 
 `save.js` `save` (line 3284) calls `presave` then `encState`. `presave` (line 3250) writes notation and precision onto `state`. `game.js` `saveNow` (line 48) stores the encoded string on the primary key and, unless the window is unloading, copies it onto the daily key. Autosave is `time > lastSaveTime + 180` in `game.js` line 7009. `util.getTime` (`utils.js` line 659) is `Date.now()/1000`. The action autosave is lines 7028-7030.
 
@@ -122,7 +122,7 @@ get localStorageKey(){return y?"dimensionTestSave":"dimensionSave"}
 
 `init` (`game.js` lines 1085-1097) calls `Cloud.init()` then `GameStorage.load()`. The live bundle contains `firebaseio.com`. `Cloud.init` (cloud-saving.js line 284) returns immediately when Firebase is absent, and otherwise only registers `onAuthStateChanged`. Local load does not wait for the network. **Unverified:** whether a failed Firebase request stalls the WebView. Experiment: load the production URL with Firebase hosts blocked and confirm `player.version === 25` still appears.
 
-`supportedBrowsers` (`supported-browsers.js`) accepts Chrome/Chromium 79 and later, among other browsers. Android System WebView user agents include a Chrome token. **Unverified** on the workstation WebView: read `navigator.userAgent` and `document.getElementById('browser-warning').style.display` after load. The Pixel Fold AVD's WebView is 113 (`docs/pixel-fold-emulator.md`), which is in range if the UA contains `Chrome/113`.
+`supportedBrowsers` (`supported-browsers.js`) accepts Chrome/Chromium 79 and later, among other browsers. Android System WebView user agents include a Chrome token. **Verified** on WebView 155.0.8059.43: the user agent contains `Chrome/155.0.8059.43` and `; wv`, and `#browser-warning` computed display is `none`.
 
 Import modal (`ImportSaveModal.vue` `importSave`, line 135) calls `GameStorage.import`. That migrates, may simulate offline, and `save(true)`s. File import is `OptionsSavingTab.vue` lines 176-180. Export-to-clipboard uses `document.execCommand('copy')` (`extensions.js` lines 75-90). File download is a `data:` anchor (`storage.js` `download`, line 552).
 
@@ -182,23 +182,42 @@ Viewport meta is on the live page. `ticksPerSecond` is 200 on web (`Config.ts` l
 
 These constraints are why the games do not drop in unchanged.
 
-- `GameAdapter.storageKey` is one string (`GameAdapter.kt` line 109). `StorageBootstrap.document` writes or removes that one key (`StorageBootstrap.kt` lines 19-40).
-- `SessionController` peeks before the game scripts run, then loads the real document only when `shouldResumeLive` is true (`SessionController.kt` `decideResume`, lines 927-984). `shouldResumeLive` is false for `LIVE_BEHIND`, `LIVE_MISSING`, and `INCONCLUSIVE` (`SaveSummary.kt` lines 39-42).
-- Shark ranks progress and will not treat a merely different payload as ahead (`SharkProgress.kt`). FE000000's `compare` returns `LIVE_AHEAD` for any two valid unequal payloads (`Fe000000Adapter.kt` lines 243-251). Do not copy the FE000000 comparison.
-- Capture runs only in `Playing`, validates, and refuses to replace `snapshotPayload` on failure (`SessionController.kt` `performCaptureLocked`, lines 1527-1597). Cadence is 60 seconds.
-- Automatic snapshots keep the latest 10 unpinned rows. Pinned rows and the reasons `migrated-baseline`, `diagnostic-backup`, `pre-restore`, `workstation`, and `checkpoint` are not pruned (`SnapshotDao.kt` lines 29-45).
-- Profiles are `hub-game-<gameId>` (`SessionController.kt` line 1647). Separate game IDs already isolate vanilla AD from NG+3.
-- `WebViewHost` enables JavaScript and DOM storage. Its `WebChromeClient` only records console messages (`WebViewHost.kt` lines 95-117). It does not implement file chooser, downloads, or JS dialogs. `navigationRules` are validated in JSON and not enforced.
-- Shark-only layout CSS is injected when the URL contains `shark-incremental` (`WebViewHost.kt` lines 337-339). FE000000 is the only game allowed to leave Hub page zoom (`DisplayPreferences.kt` lines 56-63). `productionDocumentProbe` always evaluates `SharkProbe.JS` (`SessionController.kt` lines 1135-1153). That probe reads Shark fields and does not write the save. It is diagnostic noise on other games, not a save migration.
-- The Pixel Fold AVD (`PixelFold_API34`, `emulator-5556`) still dies in `ProfileStore.getInstance()` before the first Compose frame. Its WebView is 113.0.5672.136. Folded and unfolded checks so far used `wm size` on the phone AVD, which `docs/pixel-fold-emulator.md` says is not the same as the hinge. A qualification suite on that AVD is blocked until the profile crash is fixed.
+- `GameAdapter.storageKey` remains the single raw key for Shark and FE000000. `StorageBootstrap.document` writes that raw string unless the payload is a `hubEnvelope` 1 document.
+- `SessionController` peeks before the game scripts run, then loads the real document only when `shouldResumeLive` is true. `shouldResumeLive` is false for `LIVE_BEHIND`, `LIVE_MISSING`, and `INCONCLUSIVE`.
+- Shark ranks progress and will not treat a merely different payload as ahead (`SharkProgress.kt`). FE000000's comparison is unchanged and is described below. Do not copy it.
+- Capture runs only in `Playing`, validates, and refuses to replace `snapshotPayload` on failure. Cadence is 60 seconds. A failed envelope capture also leaves the pointer where it was.
+- Automatic snapshots keep the latest 10 unpinned rows. Pinned rows and the reasons `migrated-baseline`, `diagnostic-backup`, `pre-restore`, `workstation`, and `checkpoint` are not pruned.
+- Profiles are `hub-game-<gameId>`. Separate game IDs already isolate vanilla AD from NG+3.
+- `WebViewHost` enables JavaScript and DOM storage. Its `WebChromeClient` only records console messages. It does not implement a file chooser, a download listener, or JS dialog callbacks. `navigationRules` are validated in JSON and not enforced.
+- Shark-only layout CSS is injected when the URL contains `shark-incremental`. FE000000 is the only game allowed to leave Hub page zoom.
+- Readiness probes are adapter-specific. `productionDocumentProbe` evaluates `adapter.readinessScript`. Shark's script is `SharkProbe.JS`. FE000000's script does not read Shark fields. An empty script reports `no-adapter-probe`.
+- Opted-in adapters can store several `localStorage` keys in one `hubEnvelope` 1 string. Shark and FE000000 stay on the raw single-key path. A missing `value` removes that key. `"value": ""` stores an empty string. Diagnostics record SHA-256 and length, not save text.
+- FE000000 `compare` still returns `LIVE_AHEAD` for any two valid unequal payloads (`Fe000000Adapter.kt`). That is not a progress order. New adapters do not copy it. Their default compare returns `INCONCLUSIVE` when progress views are missing or disagree.
+- The Pixel Fold AVD (`PixelFold_API34`, `emulator-5556`) launches the Hub on WebView `155.0.8059.43`. The image's stock provider is still `113.0.5672.136`, which throws from `ProfileStore.getInstance()`. See `emulator-webview-report.md`.
+
+## Device checks on WebView 155.0.8059.43
+
+Disposable profiles on `PixelFold_API34` (`emulator-5556`), 21 October 2026. No production file picker was added. `ProfileStore.deleteProfile` cannot remove a profile that `getOrCreateProfile` has already loaded in the same process, so these profiles are deleted at the start of the next process.
+
+| Check | Result |
+| --- | --- |
+| B1 Hub launch and Shark across postures | Verified. `FoldProfileContinuityTest` got past `ProfileStore`, created `hub-game-shark-incremental` and `hub-qual-fold-probe`, and reached Shark's usable UI. The same WebView object, in-page token, and page-finish count survived `cmd device_state state 0` (physical 1080x2092) and `state 2` (physical 2208x1840). |
+| B2 `alert()` | Appeared. The default dialog blocked JavaScript until it was accepted, then the call returned. |
+| B2 `confirm()` | Appeared. Same as `alert()`. |
+| B2 `prompt()` | Appeared. The dialog blocked JavaScript. Accepting the focused field required moving to the button, then the call returned. |
+| B2 `<input type="file">` | Returned. A tap on a visible file input did not open DocumentsUI or another chooser within 3 seconds, and the page stayed responsive. |
+| B2 `data:` download | Returned. A tap on `<a download href="data:text/plain,...">` did not show a chooser or a notification for that file within 3 seconds. |
+| B3 Ethereal Farm title | Verified. `document.title` is `Ethereal Farm v0.18.4d`. `window.localstorageNameHTML` is `ef_state`. |
+| B3 keys after `saveNow()` | Blocked. On the live page `typeof saveNow` is `undefined`, and `Object.keys(localStorage)` was `[]` two seconds later on a fresh profile. The suffix list is not yet observed at runtime. |
+| B4 AD browser gate | Verified. `navigator.userAgent` contains `Chrome/155.0.8059.43` and `; wv`. `#browser-warning` computed display is `none`. The document title is `Antimatter Dimensions`. |
 
 ## Unresolved experiments
 
 Run these on disposable profiles. Do not use a personal save.
 
-1. Ethereal Farm live title and key list after `saveNow()`, as above.
-2. Pixel Fold WebView user agent against AD `supportedBrowsers`, and whether `#browser-warning` stays hidden.
-3. Default WebView behaviour of `alert`, `confirm`, `prompt`, `<input type="file">`, and a `data:` download, on the WebView build the suite will actually use. The Hub does not override those callbacks.
-4. NG+3: a synthetic slot with a non-obvious id, kill the WebView, and confirm `btoa("dsAM_" + id)` still loads. Then a synthetic save that hits the `prompt("Welcome to the NG+3.1 update!...")` migration (`load_functions.js` line 1322), to see if it stalls.
+1. Ethereal Farm key names after a real save. Title and `ef_state` are verified above. `saveNow` is not global, so the key list is still unobserved.
+2. Done for this WebView. See B4 above. NG+3 still has its own prompt-migration experiment.
+3. Done for this WebView. See B2 above. A file picker is not required for Trimps text import.
+4. NG+3: a synthetic slot with a non-obvious id, kill the WebView, and confirm `btoa("dsAM_" + id)` still loads. Then a synthetic save that hits the `prompt("Welcome to the NG+3.1 update!...")` migration (`load_functions.js` line 1322), to see if it stalls. `prompt()` itself appears and returns on this WebView once the dialog is accepted.
 5. Synergism: call `saveSynergy()` twice and record which player fields change besides `offlinetick` and `talismans`. The source shows those two writes; a runtime diff is the check that minification did not add another.
 6. AD: call `GameStorage.save()` during glyph selection and confirm storage is unchanged (`canSave` returns false). Source is clear; the experiment is only to confirm the live bundle matches.

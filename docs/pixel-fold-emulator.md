@@ -48,7 +48,7 @@ Differences from a physical Pixel Fold:
 - The inner panel in this profile is landscape 2208 x 1840. The phone's inner panel is portrait 1840 x 2208.
 - Density is 420 dpi for both panels. The phone is about 408 dpi on the cover and about 380 dpi on the inner panel.
 - The cover resolution 1080 x 2092 matches the phone.
-- The API 34 Play image's WebView provider is `com.google.android.webview` 113.0.5672.136. A current phone WebView is newer.
+- The API 34 Play image ships `com.google.android.webview` 113.0.5672.136. That build throws `UnsupportedOperationException` from `ProfileStore.getInstance()` because multi-profile needs WebView 118. `PixelFold_API34` now has a user-installed provider `155.0.8059.43` (same package name, installed with `adb install -r -d`). Wiping userdata restores 113. `scripts/android/check-webview.sh` fails closed below major 118. The APK is not in this repository. `Pixel6_API34_PS` was not deleted or modified. See `docs/expansion/emulator-webview-report.md`.
 
 Layout viewport measured inside Shark, below the system bars:
 

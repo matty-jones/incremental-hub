@@ -17,16 +17,19 @@ import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.database.originForReason
+import com.example.hub.games.EnvelopeDecode
 import com.example.hub.games.GameAdapter
 import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
+import com.example.hub.games.PayloadDigest
 import com.example.hub.games.PeekOutcome
 import com.example.hub.games.QualificationResult
 import com.example.hub.games.SaveComparison
+import com.example.hub.games.SaveEnvelope
 import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
+import com.example.hub.games.StorageSlot
 import com.example.hub.BuildConfig
-import com.example.hub.games.SharkProbe
 import com.example.hub.games.unwrapJsResult
 import com.example.hub.games.shouldResumeLive
 import org.json.JSONObject
@@ -87,6 +90,11 @@ class SessionController(
      * Production leaves this null and asks the adapter.
      */
     internal val bootstrapConfirmTest: (suspend (WebView) -> Boolean)? = null,
+    /**
+     * Unit tests supply an adapter that is not registered in [GameAdapters].
+     * Production leaves this null.
+     */
+    internal val adapterForTest: ((String) -> GameAdapter?)? = null,
 ) : LifecycleEventObserver {
 
     companion object {
@@ -104,6 +112,7 @@ class SessionController(
         RESTORE_WRITE,
         RESTORE_VERIFY,
         ROLLBACK,
+        JOURNAL_APPLY,
     }
 
     private val _state = MutableStateFlow<SessionState>(SessionState.Closed)
@@ -153,6 +162,7 @@ class SessionController(
     val diagnosticEvents: StateFlow<List<DiagnosticEvent>> = _diagnosticEvents.asStateFlow()
 
     val documentGate = DocumentGate()
+    private val journalStore = RestoreJournalStore(context)
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private val mutex = Mutex()
@@ -283,7 +293,7 @@ class SessionController(
             val game = gameRegistry.getGame(activeInstance.gameId)
             if (game != null) {
                 _launchUrl.value = game.launchUrl
-                activeAdapter = GameAdapters.create(game.adapterId)
+                activeAdapter = adapterForTest?.invoke(game.adapterId) ?: GameAdapters.create(game.adapterId)
                 _activeProfile.value = obtainProfile(activeInstance.profileName)
             } else {
                 _sessionError.value = "Recovery row ${activeInstance.gameId} is not in the registry"
@@ -358,6 +368,7 @@ class SessionController(
                 failOpenLocked(gameId, "No adapter for $gameId (${bound.second})")
                 return
             }
+            if (blockForPendingJournal(gameId)) return
             if (mode == LaunchMode.SAFE) {
                 val backups = snapshotDao?.countPinned(gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0
                 if (backups == 0) {
@@ -479,7 +490,8 @@ class SessionController(
 
     fun requestReload() {
         if (restoreInProgress || openStep == OpenStep.RESTORE_WRITE ||
-            openStep == OpenStep.RESTORE_VERIFY || openStep == OpenStep.ROLLBACK
+            openStep == OpenStep.RESTORE_VERIFY || openStep == OpenStep.ROLLBACK ||
+            openStep == OpenStep.JOURNAL_APPLY
         ) {
             _sessionError.value = "Reload is unavailable during restore"
             return
@@ -547,6 +559,7 @@ class SessionController(
                     failOpenLocked(gameId, "Retry failed: $gameId is not in the registry")
                     return@withLock
                 }
+                if (blockForPendingJournal(gameId)) return@withLock
                 when (documentReadyTest?.invoke(gameId)) {
                     true -> transitionTo(SessionState.Playing, gameId)
                     false -> failOpenLocked(gameId, "Retry readiness failed for ${bound.second}")
@@ -672,8 +685,8 @@ class SessionController(
             appendLine("navId=${loadTimeline.navId}")
             if (save != null) {
                 appendLine("comparison=${save.comparison}")
-                appendLine("live=${save.liveBytes} bytes ${save.liveDetail}")
-                appendLine("stored=${save.storedBytes} bytes ${save.storedDetail}")
+                appendLine("live=${save.liveBytes} bytes sha256=${save.liveHash} ${save.liveDetail}")
+                appendLine("stored=${save.storedBytes} bytes sha256=${save.storedHash} ${save.storedDetail}")
                 appendLine("note=${save.note}")
             }
             appendLine("console:")
@@ -802,7 +815,7 @@ class SessionController(
         _activeProfileName.value = profileName
         _launchUrl.value = game.launchUrl
         _activeGameId.value = gameId
-        activeAdapter = GameAdapters.create(game.adapterId)
+        activeAdapter = adapterForTest?.invoke(game.adapterId) ?: GameAdapters.create(game.adapterId)
         documentGate.launchUrl = game.launchUrl
         documentGate.storageKey = activeAdapter?.storageKey.orEmpty()
         Log.d(TAG, "bindProfileAndNavigate($gameId): profile=$profileName url=${game.launchUrl} profileNull=${profile == null}")
@@ -921,6 +934,7 @@ class SessionController(
             OpenStep.RESTORE_WRITE -> finishRestoreWrite(work)
             OpenStep.RESTORE_VERIFY -> finishRestoreVerify(work)
             OpenStep.ROLLBACK -> finishRollback(work)
+            OpenStep.JOURNAL_APPLY -> finishJournalApply(work)
         }
     }
 
@@ -962,8 +976,10 @@ class SessionController(
             comparison = comparison,
             liveDetail = liveSummary.detail,
             liveBytes = liveSummary.byteLength,
+            liveHash = PayloadDigest.sha256OrAbsent(livePayload),
             storedDetail = storedSummary.detail,
             storedBytes = storedSummary.byteLength,
+            storedHash = PayloadDigest.sha256OrAbsent(stored),
             history = historyEntries(snapshotDao?.history(work.gameId).orEmpty()),
             note = note,
             backupReady = backupReady,
@@ -1141,10 +1157,14 @@ class SessionController(
         if (peekClient != null || readinessCheck != null || bootstrapConfirmTest != null) {
             return "skipped"
         }
+        val script = work.adapter.readinessScript
+        if (script.isBlank()) {
+            return "no-adapter-probe" + chromeAnnotation(work.view, chromeOverride)
+        }
         val body = try {
             withTimeoutOrNull(3_000L) {
                 val deferred = kotlinx.coroutines.CompletableDeferred<String?>()
-                work.view.evaluateJavascript(SharkProbe.JS) { deferred.complete(it) }
+                work.view.evaluateJavascript(script) { deferred.complete(it) }
                 unwrapJsResult(deferred.await())
             } ?: "probe-timeout"
         } catch (e: Exception) {
@@ -1192,7 +1212,10 @@ class SessionController(
         }
         mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
-            if (expected != null && readback == expected) {
+            if (expected != null && storageMatches(work.adapter, readback, expected)) {
+                if (work.adapter.usesSaveEnvelope) {
+                    markEnvelopePointerCommitted(work.gameId, expected)
+                }
                 openStep = OpenStep.RESTORE_VERIFY
                 documentGate.phase = DocumentPhase.GAME
                 documentGate.payload = null
@@ -1225,6 +1248,9 @@ class SessionController(
         mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
             if (accepted) {
+                if (work.adapter.usesSaveEnvelope) {
+                    _activeProfileName.value?.let { journalStore.delete(it) }
+                }
                 restoreInProgress = false
                 transitionTo(SessionState.Playing, work.gameId)
                 Log.d(TAG, "restore verified ${work.gameId}")
@@ -1274,6 +1300,23 @@ class SessionController(
 
     private fun beginGameLoadLocked() {
         if (openStep == OpenStep.LOAD_GAME) return
+        val profileName = _activeProfileName.value
+        val pendingPhase = profileName?.let { name ->
+            runCatching { journalStore.read(name)?.phase }.getOrNull()
+        }
+        val journalBlocksLoad = activeAdapter?.usesSaveEnvelope == true &&
+            profileName != null &&
+            journalStore.unfinished(profileName) &&
+            pendingPhase != JournalPhase.VERIFIED &&
+            pendingPhase != JournalPhase.POINTER_COMMITTED
+        if (journalBlocksLoad) {
+            recordDiagnostic(
+                DiagnosticSeverity.WARNING,
+                "restore",
+                "Refused to load the game over an unfinished restore.",
+            )
+            return
+        }
         openStep = OpenStep.LOAD_GAME
         documentGate.phase = DocumentPhase.GAME
         documentGate.payload = null
@@ -1289,10 +1332,202 @@ class SessionController(
         )
     }
 
-    private fun beginRollbackLocked() {
+    private fun blockForPendingJournal(gameId: String): Boolean {
+        val adapter = activeAdapter ?: return false
+        if (!adapter.usesSaveEnvelope) return false
+        val profileName = _activeProfileName.value ?: return false
+        if (!journalStore.unfinished(profileName)) return false
+        val journal = try {
+            journalStore.read(profileName)
+        } catch (e: Exception) {
+            Log.e(TAG, "restore journal unreadable", e)
+            null
+        }
+        openStep = OpenStep.JOURNAL_APPLY
+        documentGate.storageKey = adapter.storageKey
+        if (journal == null) {
+            documentGate.phase = DocumentPhase.PEEK
+            documentGate.payload = null
+            _sessionError.value = "An unfinished restore could not be read. The game was not loaded."
+        } else {
+            documentGate.phase = DocumentPhase.WRITE
+            documentGate.payload = journal.applyPayload()
+            _sessionError.value = "An unfinished restore was found. The game was not loaded."
+        }
+        recordDiagnostic(
+            DiagnosticSeverity.WARNING,
+            "restore",
+            "Unfinished restore for $gameId. The game was not loaded.",
+        )
+        return true
+    }
+
+    private suspend fun finishJournalApply(work: ReadyWork) {
+        val profileName = _activeProfileName.value ?: return
+        val journal = try {
+            journalStore.read(profileName)
+        } catch (e: Exception) {
+            Log.e(TAG, "restore journal unreadable", e)
+            null
+        }
+        if (journal == null) {
+            mutex.withLock {
+                if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+                _sessionError.value = "An unfinished restore could not be read. The game was not loaded."
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+            }
+            return
+        }
+        val expected = journal.applyPayload()
+        onBootstrapWrite?.invoke(expected)
+        val readback = when (val outcome = readPeek(work)) {
+            is PeekOutcome.Value -> outcome.payload
+            else -> null
+        }
+        val matched = storageMatches(work.adapter, readback, expected)
+        if (!matched && journal.direction == RestoreDirection.INTENDED) {
+            val rolled = journal.copy(
+                direction = RestoreDirection.PREVIOUS,
+                phase = JournalPhase.APPLYING,
+                appliedKeys = 0,
+            )
+            journalStore.write(rolled)
+            mutex.withLock {
+                if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+                documentGate.phase = DocumentPhase.WRITE
+                documentGate.payload = rolled.applyPayload()
+                _loadToken.value = _loadToken.value + 1
+                _sessionError.value = "Interrupted restore did not verify. The previous complete state is being written."
+            }
+            return
+        }
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (!matched) {
+                _sessionError.value = "Restore is incomplete. The game was not loaded."
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+                return
+            }
+            commitEnvelopePointer(work.gameId, journal.targetPointer())
+            journalStore.write(journal.copy(phase = JournalPhase.POINTER_COMMITTED))
+            journalStore.delete(profileName)
+            openStep = OpenStep.DECIDE
+            documentGate.phase = DocumentPhase.PEEK
+            documentGate.payload = null
+            _loadToken.value = _loadToken.value + 1
+            _sessionError.value = null
+            recordDiagnostic(
+                DiagnosticSeverity.INFO,
+                "restore",
+                "Restore verified. Game loading can continue.",
+            )
+        }
+    }
+
+    private fun storageMatches(adapter: GameAdapter, actual: String?, expected: String): Boolean {
+        if (actual == expected) return true
+        if (!adapter.usesSaveEnvelope || actual == null) return false
+        return SaveEnvelope.sameDocument(actual, expected, adapter.envelopePolicy())
+    }
+
+    private suspend fun commitEnvelopePointer(gameId: String, payload: String?) {
+        val instance = instanceDao.get(gameId) ?: return
+        if (instance.snapshotPayload == payload) return
+        instanceDao.upsert(instance.copy(snapshotPayload = payload))
+    }
+
+    private suspend fun markEnvelopePointerCommitted(gameId: String, payload: String?) {
+        val profileName = _activeProfileName.value ?: return
+        val journal = runCatching { journalStore.read(profileName) }.getOrNull()
+        if (journal != null) {
+            journalStore.write(journal.copy(phase = JournalPhase.VERIFIED))
+        }
+        commitEnvelopePointer(gameId, payload)
+        val verified = runCatching { journalStore.read(profileName) }.getOrNull()
+        if (verified != null) {
+            journalStore.write(verified.copy(phase = JournalPhase.POINTER_COMMITTED))
+        }
+    }
+
+    private suspend fun journalPreparedRestore(
+        gameId: String,
+        adapter: GameAdapter,
+        livePayload: String?,
+        prepared: String,
+    ): Boolean {
+        val policy = adapter.envelopePolicy()
+        val intended = SaveEnvelope.decode(prepared, policy)
+        if (intended !is EnvelopeDecode.Ok) {
+            _sessionError.value = "Restore refused because the snapshot envelope is invalid."
+            return false
+        }
+        val previousSlots = if (livePayload == null) {
+            adapter.storageEntries.map { StorageSlot(it.name, null) }
+        } else {
+            when (val live = SaveEnvelope.decode(livePayload, policy)) {
+                is EnvelopeDecode.Ok -> live.bundle.slots
+                is EnvelopeDecode.Rejected -> {
+                    _sessionError.value = "Restore refused because live storage is not a valid envelope."
+                    return false
+                }
+            }
+        }
+        val profileName = _activeProfileName.value ?: "hub-game-$gameId"
+        val currentPointer = instanceDao.get(gameId)?.snapshotPayload
+        journalStore.write(
+            RestoreJournal(
+                profileName = profileName,
+                gameId = gameId,
+                phase = JournalPhase.PREPARED,
+                appliedKeys = 0,
+                previousSlots = previousSlots,
+                intendedSlots = intended.bundle.slots,
+                previousPointer = currentPointer,
+                intendedPointer = prepared,
+                direction = RestoreDirection.INTENDED,
+            ),
+        )
+        val preparedJournal = journalStore.read(profileName) ?: return false
+        journalStore.write(preparedJournal.copy(phase = JournalPhase.APPLYING))
+        return true
+    }
+
+    private suspend fun captureThroughAdapter(
+        view: WebView,
+        adapter: GameAdapter,
+        gameId: String,
+    ): String? {
+        val result = QualificationResult(gameId = gameId, displayName = gameId, stages = emptyList())
+        if (!adapter.usesSaveEnvelope) return adapter.capture(view, result)
+        val bundle = adapter.captureBundle(view, result) ?: return null
+        val encoded = SaveEnvelope.encode(bundle.slots)
+        return when (SaveEnvelope.decode(encoded, adapter.envelopePolicy())) {
+            is EnvelopeDecode.Ok -> encoded
+            is EnvelopeDecode.Rejected -> null
+        }
+    }
+
+    private suspend fun beginRollbackLocked() {
         openStep = OpenStep.ROLLBACK
         documentGate.phase = DocumentPhase.ROLLBACK
         documentGate.payload = liveBeforeRestore
+        if (activeAdapter?.usesSaveEnvelope == true) {
+            val profileName = _activeProfileName.value
+            val journal = profileName?.let { name ->
+                runCatching { journalStore.read(name) }.getOrNull()
+            }
+            val gameId = _activeGameId.value
+            if (journal != null && gameId != null) {
+                commitEnvelopePointer(gameId, journal.previousPointer)
+                val rolled = journal.copy(
+                    direction = RestoreDirection.PREVIOUS,
+                    phase = JournalPhase.APPLYING,
+                    appliedKeys = 0,
+                )
+                journalStore.write(rolled)
+                documentGate.payload = rolled.applyPayload()
+            }
+        }
         _loadToken.value = _loadToken.value + 1
     }
 
@@ -1339,6 +1574,9 @@ class SessionController(
             pinCopy(gameId, adapter, roomPayload, SnapshotReasons.PRE_RESTORE)
         }
         val prepared = adapter.prepareRestore(stored)
+        if (adapter.usesSaveEnvelope && !journalPreparedRestore(gameId, adapter, livePayload, prepared)) {
+            return
+        }
         liveBeforeRestore = livePayload
         preparedPayload = prepared
         openStep = OpenStep.RESTORE_WRITE
@@ -1558,10 +1796,7 @@ class SessionController(
             transitionTo(SessionState.Capturing, gameId)
             val payload = try {
                 captureClient?.invoke(view, adapter)
-                    ?: adapter.capture(
-                        view!!,
-                        QualificationResult(gameId = gameId, displayName = gameId, stages = emptyList()),
-                    )
+                    ?: captureThroughAdapter(view!!, adapter, gameId)
             } catch (e: Exception) {
                 Log.e(TAG, "capture threw ($reason)", e)
                 null

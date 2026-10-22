@@ -44,7 +44,6 @@ class GameQualifier(private val context: Context) {
         private const val REPORT_FILENAME = "qualification_report.json"
         private const val SYNTHETIC_PROFILE = "s03-synthetic-test"
         private const val FRESH_PROFILE = "s03-fresh-test"
-        private const val SYNTHETIC_BASE64 = "eyJWRVJTSU9OIjozLCJnb2xkIjoxMDAwLCJjbGlja3MiOjUwfQ=="
         private const val PROBE_TIMEOUT_MS = 5_000L
         private const val READY_TIMEOUT_MS = 10_000L
         private const val CAPTURE_TIMEOUT_MS = 15_000L
@@ -154,8 +153,7 @@ class GameQualifier(private val context: Context) {
             }
             val captureOk = capturedPayload != null && capturedPayload.isNotEmpty()
             accumulator.addStage("capture", captureOk, listOf(
-                "Capture payload length: ${capturedPayload?.length ?: 0}",
-                "Capture payload preview: ${capturedPayload?.take(80)}",
+                "Capture ${PayloadDigest.describe(capturedPayload)}",
             ))
             if (!captureOk) {
                 accumulator.blocker = "Capture returned null or empty payload"
@@ -185,8 +183,7 @@ class GameQualifier(private val context: Context) {
                 capturedPayload!!
             }
             accumulator.addStage("prepare-restore", true, listOf(
-                "Import payload length: ${importedPayload?.length ?: 0}",
-                "Import payload preview: ${importedPayload?.take(80)}",
+                "Import ${PayloadDigest.describe(importedPayload)}",
             ))
 
             // Step 8: Create fresh WebView and import
@@ -325,13 +322,16 @@ class GameQualifier(private val context: Context) {
      */
     private suspend fun injectSyntheticSave(webView: WebView, adapter: GameAdapter): Boolean =
         withContext(Dispatchers.Main) {
+            val fixture = adapter.qualificationFixture ?: return@withContext false
+            val accepted = try {
+                adapter.validate(fixture)
+            } catch (_: Exception) {
+                false
+            }
+            if (!accepted) return@withContext false
             runCatching {
-                val saveKey = when (adapter) {
-                    is SharkIncrementalAdapter -> "shark_inc_save"
-                    is Fe000000Adapter -> "fe000000-save"
-                    else -> "synthetic_save"
-                }
-                val js = "localStorage.setItem('$saveKey', '$SYNTHETIC_BASE64'); 'injected'"
+                val quoted = JSONObject.quote(fixture)
+                val js = "localStorage.setItem(${JSONObject.quote(adapter.storageKey)}, $quoted); 'injected'"
                 val jsResult: String? = withTimeoutOrNull(5_000L) { evaluateJs(webView, js) }
                 "injected" == jsResult
             }.getOrDefault(false)

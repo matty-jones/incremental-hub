@@ -1,10 +1,10 @@
 # Adapter designs for the five catalogue games
 
-Research only. This specifies adapters. It does not add them to `GameAdapters` or `assets/games/`.
+The five adapters are still not registered. `GameAdapters.create` returns null for their ids. No catalogue JSON was added.
 
-Hub contract today (`GameAdapter.kt`, `main` `6e22863`): one `storageKey`, `peekStorage`, `capture` (which may call the game save), `validate`, `prepareRestore`, `verifyLoaded`, `summarize`, `compare`, `chooseStored`, `acceptsRuntime`, `confirmBootstrap`. `StorageBootstrap` writes that one key before game scripts. `SessionController.decideResume` resumes only when the comparison is `MATCH`, `LIVE_AHEAD`, or `NO_SNAPSHOT`.
+The opt-in contract below is implemented. Shark and FE000000 do not set `usesSaveEnvelope`. Their raw save strings, profiles, and recovery behaviour stay on the previous path. FE000000 `compare` is intentionally unchanged: two valid unequal saves still return `LIVE_AHEAD`. That result is not a progress order. New adapters use the default compare, which returns `INCONCLUSIVE` when a progress view is missing or the two views disagree. Do not copy FE000000 when those adapters are written.
 
-Shark and FE000000 stay on that contract. Their profiles, keys, and recovery behaviour are not part of this work.
+Hub contract for the existing games: one `storageKey`, `peekStorage`, `capture`, `validate`, `prepareRestore`, `verifyLoaded`, `summarize`, `compare`, `chooseStored`, `acceptsRuntime`, `confirmBootstrap`. `StorageBootstrap` writes that one key before game scripts unless the payload is a `hubEnvelope` 1 document. `SessionController.decideResume` resumes only when the comparison is `MATCH`, `LIVE_AHEAD`, or `NO_SNAPSHOT`.
 
 ## Contract changes
 
@@ -17,7 +17,7 @@ Add these with Kotlin default implementations so the two existing adapters keep 
 | `prepareRestoreBundle` | today's `prepareRestore` on the single payload | Bootstrap must write every key, or remove keys that are absent in the snapshot, before any game script. |
 | `progressView(payload): ProgressView?` | null | Comparison must be able to return `INCONCLUSIVE` when two valid saves cannot be ordered. |
 | `nativeImport(webView, exportText): ImportOutcome` | unsupported | Each game's import function is different. The session must not paste into a guessed UI. |
-| `readinessScript` | today's `awaitReady` | `productionDocumentProbe` currently always runs `SharkProbe.JS`. New games need their own probe. Shark's probe may keep running as a diagnostic; it must not gate these games. |
+| `readinessScript` | empty | `productionDocumentProbe` evaluates this script. Shark's is `SharkProbe.JS`. It must not gate other games. |
 
 `StorageEntry` is `name`, `required`, and `role` (`progress`, `backup`, `preference`). Preference keys are not progress and are not restored unless the adapter lists them.
 
@@ -27,7 +27,9 @@ Add these with Kotlin default implementations so the two existing adapters keep 
 {"hubEnvelope":1,"entries":[{"name":"...","value":"..."}, ...]}
 ```
 
-A missing `value` means the key must be removed. Single-key Shark and FE000000 payloads stay the raw save string. `StorageBootstrap` learns the envelope only when `hubEnvelope` is 1. Otherwise it keeps the current one-key write. That is the compatibility boundary.
+A missing `value` means the key must be removed. `"value": ""` stores an empty string and is not removal. JSON `null`, a non-string value, a duplicate name, an unexpected name, a denied name (`playFabPass`, `playFabName`, `accountToken`), or a missing required entry is rejected. Single-key Shark and FE000000 payloads stay the raw save string. `StorageBootstrap` learns the envelope only when `hubEnvelope` is 1. Otherwise it keeps the current one-key write. That is the compatibility boundary.
+
+Several `setItem` calls in one bootstrap page are not one atomic write across process death. An opted-in restore writes a journal file under `filesDir/restore-journals/<profile>.json` before those calls, then again after the Room snapshot pointer is committed. On the next launch an unfinished journal keeps the game unloaded. The session re-applies the intended slots and checks every expected key, including keys that must be absent. If that check fails it restores the previous slots and the previous pointer. If the previous state cannot be verified, the journal stays and the game stays unloaded. A failed capture does not move the pointer. `INCONCLUSIVE` stays distinct from a rejected envelope.
 
 `compare` for a new adapter must not use payload length, `Date`, or "different means ahead". If the progress view cannot order the two sides, return `INCONCLUSIVE`. `chooseStored` must not pick a winner among incomparable candidates. It may return the current profile pointer when that pointer still validates, and null when it does not. Null plus a live save that is not a clear resume becomes recovery, which is the existing `decideResume` behaviour.
 
@@ -50,7 +52,7 @@ Launch `https://lodev.org/etherealfarm/`. Origin `https://lodev.org`.
 
 ### Storage
 
-Read the prefix from the page before any encode: `window.localstorageNameHTML` if it is a non-empty string, otherwise `local`. On the live page that prefix is `ef_state`. Do not hard-code `state_soft`. That string is the repo's unbundled `index.html` only.
+Read the prefix from the page before any encode: `window.localstorageNameHTML` if it is a non-empty string, otherwise `local`. On the live page that prefix is `ef_state`, verified on WebView 155.0.8059.43. Do not hard-code `state_soft`. That string is the repo's unbundled `index.html` only. `saveNow` is not a global on that page, so the suffix keys were not observed in a fresh profile.
 
 Required progress key: `<prefix>`.
 

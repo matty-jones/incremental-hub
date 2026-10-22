@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 class="${1:-com.example.hub.SharkOfflineGeometryTest}"
+"$(dirname "${BASH_SOURCE[0]}")/check-webview.sh"
 (cd "$ROOT" && ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon)
 
 debug_apk="${ROOT}/app/build/outputs/apk/debug/app-debug.apk"

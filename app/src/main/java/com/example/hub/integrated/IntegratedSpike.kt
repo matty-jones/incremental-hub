@@ -56,7 +56,6 @@ class IntegratedSpike(private val context: Context) {
         private const val DESTROY_VERIFY_TIMEOUT_MS = 10_000L
         private const val IMPORT_TIMEOUT_MS = 15_000L
         private const val NAVIGATION_TIMEOUT_MS = 20_000L
-        private const val SYNTHETIC_BASE64 = "eyJWRVJTSU9OIjozLCJnb2xkIjoxMDAwLCJjbGlja3MiOjUwfQ=="
     }
 
     /**
@@ -174,8 +173,7 @@ class IntegratedSpike(private val context: Context) {
                 }
                 accumulator.addStage("poll-save", pollOk, listOf(
                     "Polling result: $pollOk",
-                    "Save value length: ${saveValue?.length ?: 0}",
-                    "Save value preview: ${saveValue?.take(80)}",
+                    "Save value ${com.example.hub.games.PayloadDigest.describe(saveValue)}",
                 ))
                 if (!pollOk && saveValue.isNullOrEmpty()) {
                     accumulator.blocker = "No save data found within ${CAPTURE_TIMEOUT_MS}ms timeout"
@@ -206,7 +204,7 @@ class IntegratedSpike(private val context: Context) {
                 val captureOk = capturedPayload != null && capturedPayload.isNotEmpty()
                 accumulator.addStage("capture", captureOk, listOf(
                     "Capture payload length: ${capturedPayload?.length ?: 0}",
-                    "Capture payload preview: ${capturedPayload?.take(80)}",
+                    "Capture ${com.example.hub.games.PayloadDigest.describe(capturedPayload)}",
                 ))
                 if (!captureOk) {
                     accumulator.blocker = "Capture returned null or empty payload"
@@ -292,7 +290,7 @@ class IntegratedSpike(private val context: Context) {
                 }
                 accumulator.addStage("prepare-restore", true, listOf(
                     "Import payload length: ${importedPayload?.length ?: 0}",
-                    "Import payload preview: ${importedPayload?.take(80)}",
+                    "Import ${com.example.hub.games.PayloadDigest.describe(importedPayload)}",
                 ))
 
                 freshWebView = createBoundWebView(freshProfile, SHARK_URL)
@@ -467,8 +465,15 @@ class IntegratedSpike(private val context: Context) {
      */
     private suspend fun injectSyntheticSave(webView: WebView): Boolean =
         withContext(Dispatchers.Main) {
+            val fixture = SharkIncrementalAdapter.QUALIFICATION_FIXTURE
+            val accepted = try {
+                SharkIncrementalAdapter().validate(fixture)
+            } catch (_: Exception) {
+                false
+            }
+            if (!accepted) return@withContext false
             runCatching {
-                val js = "localStorage.setItem('$SHARK_SAVE_KEY', '$SYNTHETIC_BASE64'); true"
+                val js = "localStorage.setItem('$SHARK_SAVE_KEY', ${JSONObject.quote(fixture)}); true"
                 val jsResult: String? = withTimeoutOrNull(5_000L) { evaluateJs(webView, js) }
                 "true" == jsResult
             }.getOrDefault(false)

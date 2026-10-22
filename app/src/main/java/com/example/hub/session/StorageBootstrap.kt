@@ -1,5 +1,6 @@
 package com.example.hub.session
 
+import com.example.hub.games.SaveEnvelope
 import org.json.JSONObject
 
 /**
@@ -17,11 +18,10 @@ object StorageBootstrap {
     }
 
     fun document(phase: DocumentPhase, storageKey: String, payload: String?): String {
-        val key = JSONObject.quote(storageKey)
         val action = when (phase) {
             DocumentPhase.PEEK, DocumentPhase.GAME -> "window.$MARKER='peek';"
-            DocumentPhase.WRITE -> writeAction(key, payload, "write")
-            DocumentPhase.ROLLBACK -> writeAction(key, payload, "rollback")
+            DocumentPhase.WRITE -> writeBody(storageKey, payload, "write")
+            DocumentPhase.ROLLBACK -> writeBody(storageKey, payload, "rollback")
         }
         return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body><script>$action</script></body></html>"
     }
@@ -29,6 +29,18 @@ object StorageBootstrap {
     fun shouldServe(phase: DocumentPhase, requestUrl: String, launchUrl: String, mainFrame: Boolean): Boolean {
         if (!mainFrame || phase == DocumentPhase.GAME) return false
         return matchesLaunch(requestUrl, launchUrl)
+    }
+
+    private fun writeBody(storageKey: String, payload: String?, marker: String): String {
+        if (payload != null && SaveEnvelope.looksLikeEnvelope(payload)) {
+            val quoted = JSONObject.quote(payload)
+            return "var envelope=JSON.parse($quoted);var entries=envelope.entries;" +
+                "for(var i=0;i<entries.length;i++){var entry=entries[i];" +
+                "if(!Object.prototype.hasOwnProperty.call(entry,'value'))localStorage.removeItem(entry.name);" +
+                "else localStorage.setItem(entry.name, entry.value);}" +
+                "window.$MARKER='$marker';"
+        }
+        return writeAction(JSONObject.quote(storageKey), payload, marker)
     }
 
     private fun writeAction(quotedKey: String, payload: String?, marker: String): String {

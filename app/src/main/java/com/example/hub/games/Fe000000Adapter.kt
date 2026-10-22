@@ -48,6 +48,12 @@ class Fe000000Adapter : GameAdapter {
             "(function(){ if (typeof player === 'undefined' || player === null || player.lastUpdate === undefined) return null; return String(player.lastUpdate); })()"
         internal const val JS_FLUSH_AND_READ =
             "(function(){ if (typeof Saving !== 'undefined' && typeof Saving.saveGame === 'function') { Saving.saveGame(true, false); } return localStorage.getItem('$SAVE_KEY'); })()"
+        internal const val JS_READINESS_PROBE =
+            "(function(){ try {" +
+                " var playerReady = typeof player !== 'undefined' && player !== null;" +
+                " var savingReady = typeof Saving !== 'undefined' && typeof Saving.saveGame === 'function';" +
+                " return JSON.stringify({game:'fe000000', player:playerReady, saving:savingReady});" +
+                " } catch (e) { return 'probe-failed'; } })()"
 
         private const val CAPTURE_TIMEOUT_MS = 10_000L
 
@@ -140,6 +146,7 @@ class Fe000000Adapter : GameAdapter {
     override val adapterId = "fe000000-adapter"
     override val adapterVersion = "1.1.0"
     override val storageKey: String = SAVE_KEY
+    override val readinessScript: String = JS_READINESS_PROBE
 
     override suspend fun probe(webView: WebView): Boolean {
         val hasGlobal: String? = withTimeoutOrNull(5_000L) {
