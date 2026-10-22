@@ -22,6 +22,7 @@ data class UpdateInfo(
     val versionCode: Int,
     val versionName: String,
     val downloadUrl: String,
+    val commitMessage: String? = null,
 )
 
 sealed class UpdateCheck {
@@ -40,12 +41,30 @@ fun classifyUpdateResponse(
     versionCode: Int,
     versionName: String,
     downloadUrl: String,
+    commitMessage: String? = null,
 ): UpdateCheck {
     if (versionCode < 0 || versionName.isBlank() || downloadUrl.isBlank()) {
         return UpdateCheck.Unreachable
     }
     if (versionCode <= installedVersionCode) return UpdateCheck.Current
-    return UpdateCheck.Available(UpdateInfo(versionCode, versionName, downloadUrl))
+    return UpdateCheck.Available(
+        UpdateInfo(
+            versionCode = versionCode,
+            versionName = versionName,
+            downloadUrl = downloadUrl,
+            commitMessage = commitMessage?.trim()?.takeIf { it.isNotEmpty() },
+        ),
+    )
+}
+
+/** Dialog copy for a commit message. Short notes stay whole; a long one keeps its line breaks up to [maxChars]. */
+fun truncateCommitMessage(message: String, maxChars: Int = 280): String {
+    val trimmed = message.trim()
+    if (trimmed.length <= maxChars) return trimmed
+    val cut = trimmed.take(maxChars)
+    val boundary = cut.lastIndexOfAny(charArrayOf(' ', '\n'))
+    val end = if (boundary >= maxChars / 2) boundary else cut.length
+    return cut.take(end).trimEnd() + "..."
 }
 
 /** Status line for a manual check. An available build uses the update dialog. */

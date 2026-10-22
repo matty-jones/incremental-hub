@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from contextlib import closing
 from pathlib import Path
 
@@ -17,6 +18,7 @@ class UpdateInfo(BaseModel):
     version_code: int
     version_name: str
     download_url: str
+    commit_message: str | None = None
 
 
 class SaveBody(BaseModel):
@@ -42,15 +44,36 @@ def _save_content(game_id: str, body: SaveBody) -> dict:
     }
 
 
+def _commit_message() -> str | None:
+    root = Path(__file__).resolve().parents[2]
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--pretty=%B"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    message = result.stdout.strip()
+    return message or None
+
+
 def _read_update_info() -> UpdateInfo:
     path = apk_dir() / "version.json"
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no release published")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return UpdateInfo.model_validate(payload)
+        info = UpdateInfo.model_validate(payload)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="version metadata is unreadable") from exc
+    message = (info.commit_message or "").strip() or _commit_message()
+    return info.model_copy(update={"commit_message": message})
 
 
 def _apk_path(filename: str) -> Path:

@@ -53,7 +53,7 @@ Manrope, SIL Open Font License 1.1. Source pin and checksum: `third_party/fonts/
 - Chips: Resume/ready uses success, Play/no save uses a neutral surface, Debug uses warning. The workstation line stays sentence text in TextSecondary.
 - Menu: Resume is the gold row. Snapshot now and Checkpoint keep a gold icon on a neutral row. Other rows are SurfaceRaised. Disabled rows stay faded and keep the "(disabled)" description. Labels are unchanged.
 - Recovery title "Session Recovery Required" uses the error colour. Close is outlined, not an error button. One gold action per state: Retry, Restore this snapshot, or Recover from snapshot.
-- Update dialogue: Update is primary, Later is muted, and a failed download sentence uses the error colour.
+- Update dialogue: Update is primary, Later is muted, and a failed download sentence uses the error colour. A workstation commit message, when present, sits under the version sentence in TextSecondary and is cut at 280 characters.
 - The in-game bar stays slim. Its Menu control is tonal and at least 48dp. No gold rule sits over the WebView.
 - Game marks keep the site icon. The backing colour is the game accent. Letter fallbacks use that accent too.
 

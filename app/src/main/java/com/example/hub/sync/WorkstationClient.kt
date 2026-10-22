@@ -77,6 +77,7 @@ class WorkstationClient(
                 versionCode = json.optInt("version_code", -1),
                 versionName = json.optString("version_name"),
                 downloadUrl = json.optString("download_url"),
+                commitMessage = json.optionalString("commit_message"),
             )
         }
     }

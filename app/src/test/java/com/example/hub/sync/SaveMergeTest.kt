@@ -101,7 +101,39 @@ class SaveMergeTest {
         val info = (check as UpdateCheck.Available).info
         assertEquals(10, info.versionCode)
         assertEquals("0.1.9", info.versionName)
+        assertNull(info.commitMessage)
         assertNull(updateCheckStatus(check))
+    }
+
+    @Test
+    fun availableBuildKeepsTheCommitMessage() {
+        val check = classifyUpdateResponse(
+            installedVersionCode = 9,
+            versionCode = 10,
+            versionName = "0.1.9",
+            downloadUrl = "http://example/hub.apk",
+            commitMessage = "  Show the note in the update dialog.\n\nSecond paragraph.  ",
+        )
+        val info = (check as UpdateCheck.Available).info
+        assertEquals(
+            "Show the note in the update dialog.\n\nSecond paragraph.",
+            info.commitMessage,
+        )
+    }
+
+    @Test
+    fun longCommitMessageTruncatesOnAWord() {
+        val message = "word ".repeat(80).trim()
+        val shown = truncateCommitMessage(message, maxChars = 40)
+        assertTrue(shown.endsWith("..."))
+        assertTrue(shown.length <= 43)
+        assertTrue(shown.dropLast(3).endsWith("word"))
+    }
+
+    @Test
+    fun shortCommitMessageStaysWhole() {
+        val message = "Fix the launcher rule.\n\nIt now spans the screen."
+        assertEquals(message, truncateCommitMessage(message))
     }
 
     @Test

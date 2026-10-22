@@ -5,7 +5,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -23,12 +25,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.example.hub.database.GameInstanceDao
 import com.example.hub.games.GameRegistry
 import com.example.hub.sync.SaveSync
 import com.example.hub.sync.UpdateCheck
 import com.example.hub.sync.UpdateInfo
 import com.example.hub.sync.WorkstationApi
+import com.example.hub.sync.truncateCommitMessage
 import com.example.hub.sync.updateCheckStatus
 import com.example.hub.ui.chrome.HubTextButton
 import com.example.hub.update.UpdateInstaller
@@ -159,15 +163,27 @@ fun ConnectedLauncher(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 title = { Text("Update available") },
                 text = {
-                    Text(
-                        text = installError
-                            ?: "Version ${available.versionName} is on the workstation.",
-                        color = if (installError != null) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
+                    val note = available.commitMessage
+                        ?.let(::truncateCommitMessage)
+                        ?.takeIf { it.isNotEmpty() }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = installError
+                                ?: "Version ${available.versionName} is on the workstation.",
+                            color = if (installError != null) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        if (installError == null && note != null) {
+                            Text(
+                                text = note,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 },
                 confirmButton = {
                     TextButton(

@@ -89,6 +89,45 @@ def test_update_metadata_and_apk_download(tmp_path, monkeypatch):
     missing = client.get("/app/download/missing.apk")
     assert missing.status_code == 404
 
+    noted = apk_dir / "version.json"
+    noted.write_text(
+        json.dumps(
+            {
+                "version_code": 3,
+                "version_name": "0.1.2",
+                "download_url": "http://192.168.86.3:8006/app/download/latest.apk",
+                "commit_message": "Explain the build.\n\nIt keeps a second line.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    published = client.get("/app/update")
+    assert published.status_code == 200
+    assert published.json()["commit_message"] == "Explain the build.\n\nIt keeps a second line."
+
     with pytest.raises(HTTPException) as escaped:
         download_apk("../version.json")
     assert escaped.value.status_code == 400
+
+
+def test_update_commit_message_falls_back_to_git(tmp_path, monkeypatch):
+    apk_dir = tmp_path / "apks"
+    apk_dir.mkdir()
+    (apk_dir / "version.json").write_text(
+        json.dumps(
+            {
+                "version_code": 2,
+                "version_name": "0.1.1",
+                "download_url": "http://192.168.86.3:8006/app/download/latest.apk",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HUB_APK_DIR", str(apk_dir))
+    monkeypatch.setenv("HUB_DB_PATH", str(tmp_path / "saves.db"))
+    monkeypatch.setattr("app.main._commit_message", lambda: "Latest subject\n\nWhy this build exists.")
+    client = TestClient(app)
+
+    info = client.get("/app/update")
+    assert info.status_code == 200
+    assert info.json()["commit_message"] == "Latest subject\n\nWhy this build exists."

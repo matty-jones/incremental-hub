@@ -88,21 +88,23 @@ fi
 mkdir -p "$apk_dir" server/db
 cp "$apk_src" "$apk_dest"
 
-python3 - "$version_file" "$version_code" "$version_name" "$download_url" <<'PY'
+commit_message="$(git -C "$root" log -1 --pretty=%B 2>/dev/null || true)"
+HUB_COMMIT_MESSAGE="$commit_message" python3 - "$version_file" "$version_code" "$version_name" "$download_url" <<'PY'
 import json
+import os
 import sys
 
 path, code, name, url = sys.argv[1:]
+payload = {
+    "version_code": int(code),
+    "version_name": name,
+    "download_url": url,
+}
+message = os.environ.get("HUB_COMMIT_MESSAGE", "").strip()
+if message:
+    payload["commit_message"] = message
 with open(path, "w", encoding="utf-8") as handle:
-    json.dump(
-        {
-            "version_code": int(code),
-            "version_name": name,
-            "download_url": url,
-        },
-        handle,
-        indent=2,
-    )
+    json.dump(payload, handle, indent=2)
     handle.write("\n")
 PY
 
