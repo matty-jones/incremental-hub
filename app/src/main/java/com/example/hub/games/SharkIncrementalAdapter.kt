@@ -3,6 +3,7 @@ package com.example.hub.games
 import java.util.Base64
 import android.webkit.ValueCallback
 import android.webkit.WebView
+import com.example.hub.session.StorageBootstrap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -218,7 +219,7 @@ class SharkIncrementalAdapter : GameAdapter {
             return false
         } ?: return false
         val marker = unwrapJsResult(raw)
-        return marker == "peek" || marker == "write" || marker == "rollback"
+        return StorageBootstrap.markerConfirms(marker)
     }
 
     override fun summarize(payload: String?): SaveSummary = SharkProgress.summarize(payload)

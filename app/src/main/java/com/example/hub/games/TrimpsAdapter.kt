@@ -2,6 +2,7 @@ package com.example.hub.games
 
 import android.webkit.ValueCallback
 import android.webkit.WebView
+import com.example.hub.session.StorageBootstrap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -122,7 +123,7 @@ class TrimpsAdapter : GameAdapter {
     override suspend fun confirmBootstrap(webView: WebView): Boolean {
         val raw = withTimeoutOrNull(2_000L) { evaluateJs(webView, JS_BOOTSTRAP) }
         val marker = unwrapJsResult(raw)
-        return marker == "write" || marker == "remove"
+        return StorageBootstrap.markerConfirms(marker)
     }
 
     override fun summarize(payload: String?): SaveSummary {

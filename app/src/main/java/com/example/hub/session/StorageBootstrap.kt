@@ -10,6 +10,14 @@ import org.json.JSONObject
 object StorageBootstrap {
     const val MARKER = "__hubStorageBootstrap"
 
+    /**
+     * True when [marker] is one this page sets after a successful peek, write,
+     * or rollback. `error` is not success: a later finish-ignore check uses it
+     * only to recognize that the bootstrap document is still showing.
+     */
+    fun markerConfirms(marker: String?): Boolean =
+        marker == "peek" || marker == "write" || marker == "rollback"
+
     fun matchesLaunch(requestUrl: String, launchUrl: String): Boolean {
         if (launchUrl.isBlank()) return false
         val request = requestUrl.substringBefore('#')

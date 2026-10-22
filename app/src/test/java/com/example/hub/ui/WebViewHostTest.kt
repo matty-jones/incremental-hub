@@ -57,6 +57,25 @@ class WebViewHostTest {
     }
 
     @Test
+    fun bootstrapMarkerConfirmsPeekWriteAndRollback() {
+        val peek = StorageBootstrap.document(DocumentPhase.PEEK, "trimpSave1", null)
+        val game = StorageBootstrap.document(DocumentPhase.GAME, "trimpSave1", null)
+        val write = StorageBootstrap.document(DocumentPhase.WRITE, "trimpSave1", null)
+        val rollback = StorageBootstrap.document(DocumentPhase.ROLLBACK, "trimpSave1", null)
+        assertTrue(peek.contains("__hubStorageBootstrap='peek'"))
+        assertTrue(game.contains("__hubStorageBootstrap='peek'"))
+        assertTrue(write.contains("__hubStorageBootstrap='write'"))
+        assertTrue(rollback.contains("__hubStorageBootstrap='rollback'"))
+        assertTrue(StorageBootstrap.markerConfirms("peek"))
+        assertTrue(StorageBootstrap.markerConfirms("write"))
+        assertTrue(StorageBootstrap.markerConfirms("rollback"))
+        assertFalse(StorageBootstrap.markerConfirms("remove"))
+        assertFalse(StorageBootstrap.markerConfirms("error"))
+        assertFalse(StorageBootstrap.markerConfirms(""))
+        assertFalse(StorageBootstrap.markerConfirms(null))
+    }
+
+    @Test
     fun mainFrameFlagIsTheSessionFailureGate() {
         assertTrue(isMainFrame(true))
         assertFalse(isMainFrame(false))
