@@ -52,6 +52,17 @@ sealed class ImportOutcome {
 }
 
 /**
+ * Result of checking a restored save against the running game.
+ * [DEFERRED] means the page is busy, such as an offline warp: keep the
+ * restored storage and do not capture or roll back.
+ */
+enum class RuntimeVerdict {
+    ACCEPTED,
+    REJECTED,
+    DEFERRED,
+}
+
+/**
  * Length and SHA-256 of a save string. The text itself is not included.
  */
 object PayloadDigest {

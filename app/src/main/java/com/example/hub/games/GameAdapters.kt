@@ -7,6 +7,7 @@ object GameAdapters {
     fun create(adapterId: String): GameAdapter? = when (adapterId) {
         "shark-incremental-adapter" -> SharkIncrementalAdapter()
         "fe000000-adapter" -> Fe000000Adapter()
+        "trimps-adapter" -> TrimpsAdapter()
         else -> null
     }
 }

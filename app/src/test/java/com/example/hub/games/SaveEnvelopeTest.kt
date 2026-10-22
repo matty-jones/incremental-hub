@@ -15,6 +15,7 @@ import com.example.hub.session.StorageBootstrap
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -292,9 +293,10 @@ class SaveEnvelopeTest {
         val sharkFixture = SharkIncrementalAdapter.QUALIFICATION_FIXTURE
         assertTrue(SharkIncrementalAdapter().validate(sharkFixture))
         assertFalse(Fe000000Adapter().validate(sharkFixture))
+        assertFalse(TrimpsAdapter().validate(sharkFixture))
         assertFalse(PayloadDigest.describe("super-secret-save").contains("super-secret"))
         assertTrue(PayloadDigest.describe("super-secret-save").contains("length="))
-        assertNull(GameAdapters.create("trimps-adapter"))
+        assertNotNull(GameAdapters.create("trimps-adapter"))
         assertNull(GameAdapters.create("ethereal-farm-adapter"))
         assertNull(GameAdapters.create("antimatter-dimensions-adapter"))
         assertNull(GameAdapters.create("antimatter-dimensions-ng3-adapter"))

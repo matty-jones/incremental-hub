@@ -24,6 +24,7 @@ import com.example.hub.games.GameRegistry
 import com.example.hub.games.PayloadDigest
 import com.example.hub.games.PeekOutcome
 import com.example.hub.games.QualificationResult
+import com.example.hub.games.RuntimeVerdict
 import com.example.hub.games.SaveComparison
 import com.example.hub.games.SaveEnvelope
 import com.example.hub.games.SaveStanding
@@ -1238,24 +1239,47 @@ class SessionController(
         }
         val prepared = preparedPayload
         val ready = awaitGameReady(work)
-        val accepted = ready && prepared != null && try {
-            runtimeCheck?.invoke(work.view, work.adapter, prepared)
-                ?: work.adapter.acceptsRuntime(work.view, prepared)
-        } catch (e: Exception) {
-            Log.e(TAG, "runtime verify failed", e)
-            false
+        val verdict = if (!ready || prepared == null) {
+            RuntimeVerdict.REJECTED
+        } else {
+            try {
+                val check = runtimeCheck
+                if (check != null) {
+                    if (check.invoke(work.view, work.adapter, prepared)) {
+                        RuntimeVerdict.ACCEPTED
+                    } else {
+                        RuntimeVerdict.REJECTED
+                    }
+                } else {
+                    work.adapter.runtimeVerdict(work.view, prepared)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "runtime verify failed", e)
+                RuntimeVerdict.REJECTED
+            }
         }
         mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
-            if (accepted) {
-                if (work.adapter.usesSaveEnvelope) {
-                    _activeProfileName.value?.let { journalStore.delete(it) }
+            when (verdict) {
+                RuntimeVerdict.ACCEPTED -> {
+                    if (work.adapter.usesSaveEnvelope) {
+                        _activeProfileName.value?.let { journalStore.delete(it) }
+                    }
+                    restoreInProgress = false
+                    transitionTo(SessionState.Playing, work.gameId)
+                    Log.d(TAG, "restore verified ${work.gameId}")
                 }
-                restoreInProgress = false
-                transitionTo(SessionState.Playing, work.gameId)
-                Log.d(TAG, "restore verified ${work.gameId}")
-            } else {
-                beginRollbackLocked()
+                RuntimeVerdict.DEFERRED -> {
+                    if (work.adapter.usesSaveEnvelope) {
+                        _activeProfileName.value?.let { journalStore.delete(it) }
+                    }
+                    restoreInProgress = false
+                    val note = "Offline warp is still running. The restored save was kept. No snapshot was captured."
+                    _sessionError.value = note
+                    recordDiagnostic(DiagnosticSeverity.INFO, "restore", note)
+                    transitionTo(SessionState.RecoveryRequired, work.gameId)
+                }
+                RuntimeVerdict.REJECTED -> beginRollbackLocked()
             }
         }
     }
@@ -1807,19 +1831,21 @@ class SessionController(
                 false
             }
             if (payload == null || !valid) {
+                val decline = adapter?.captureDecline()
+                val error = decline ?: "Capture failed validation ($reason). Last good snapshot was kept."
                 writeCaptureResult(
                     gameId,
                     successPayload = null,
-                    error = "Capture failed validation ($reason). Last good snapshot was kept.",
+                    error = error,
                 )
-                _sessionError.value = "Capture failed ($reason). Last good snapshot was kept."
+                _sessionError.value = error
                 if (_state.value is SessionState.Capturing) {
                     transitionTo(SessionState.Playing, gameId)
                 }
                 return false
             }
             writeCaptureResult(gameId, payload, null, reason)
-            if (_sessionError.value?.startsWith("Capture failed") == true) {
+            if (_sessionError.value?.startsWith("Capture ") == true) {
                 _sessionError.value = null
             }
             if (_state.value is SessionState.Capturing) {

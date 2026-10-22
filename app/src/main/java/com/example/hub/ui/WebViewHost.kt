@@ -19,6 +19,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.Profile
 import androidx.webkit.WebViewCompat
 import com.example.hub.games.SharkLayout
+import com.example.hub.games.TrimpsLayout
 import com.example.hub.session.DiagnosticSeverity
 import com.example.hub.session.DocumentGate
 import com.example.hub.session.SessionState
@@ -95,6 +96,10 @@ fun WebViewHost(
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.textZoom = textZoomPercent
+                    if (launchUrl?.contains("trimps.github.io") == true) {
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                    }
                     val slot = Slot(
                         profileName = null,
                         appliedReloadEpoch = reloadEpoch,
@@ -336,6 +341,10 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
     val textZoom = slot.textZoomPercent
     if (url.contains("shark-incremental") && (flush || slot.layoutAppliedForUrl != url)) {
         webView.evaluateJavascript(SharkLayout.injectionScript(), null)
+        slot.layoutAppliedForUrl = url
+    }
+    if (url.contains("trimps.github.io") && (flush || slot.layoutAppliedForUrl != url)) {
+        webView.evaluateJavascript(TrimpsLayout.injectionScript(), null)
         slot.layoutAppliedForUrl = url
     }
     Log.d(

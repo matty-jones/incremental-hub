@@ -13,6 +13,7 @@ object HubGameAccent {
     fun forGame(gameId: String): Color = when (gameId) {
         "fe000000" -> HubColors.Cyan
         "shark-incremental" -> HubColors.Azure
+        "trimps" -> HubColors.Teal
         else -> HubColors.GameAccents[stableIndex(gameId)]
     }
 

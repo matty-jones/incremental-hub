@@ -195,6 +195,19 @@ interface GameAdapter {
     suspend fun nativeImport(webView: WebView, exportText: String): ImportOutcome =
         ImportOutcome.Unsupported
 
+    /**
+     * Why [capture] or [captureBundle] returned null. Null means an ordinary failure.
+     * A deferred offline warp uses this so the session can say the snapshot was kept.
+     */
+    fun captureDecline(): String? = null
+
+    /**
+     * [ACCEPTED] enters play. [REJECTED] rolls the restore back.
+     * [DEFERRED] keeps the restored keys and does not capture.
+     */
+    suspend fun runtimeVerdict(webView: WebView, importedPayload: String): RuntimeVerdict =
+        if (acceptsRuntime(webView, importedPayload)) RuntimeVerdict.ACCEPTED else RuntimeVerdict.REJECTED
+
     fun compare(livePayload: String?, storedPayload: String?): SaveComparison {
         val storedStanding = summarize(storedPayload).standing
         if (storedStanding == SaveStanding.ABSENT) return SaveComparison.NO_SNAPSHOT

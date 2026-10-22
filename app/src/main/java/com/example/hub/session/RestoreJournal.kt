@@ -102,6 +102,25 @@ class RestoreJournalStore(private val directory: File) {
                 error("Could not replace restore journal")
             }
         }
+        armProcessDeath(journal)
+    }
+
+    /**
+     * Debug-only. filesDir/restore-kill-after contains a phase name, or
+     * PHASE:appliedKeys, and the process ends after that record is flushed.
+     * The marker is removed first so the next process can recover.
+     */
+    private fun armProcessDeath(journal: RestoreJournal) {
+        if (!com.example.hub.BuildConfig.DEBUG) return
+        val marker = directory.parentFile?.let { File(it, "restore-kill-after") } ?: return
+        if (!marker.isFile) return
+        val wanted = marker.readText(Charsets.UTF_8).trim()
+        val phaseName = wanted.substringBefore(':')
+        val count = wanted.substringAfter(':', "").toIntOrNull()
+        if (phaseName != journal.phase.name) return
+        if (count != null && count != journal.appliedKeys) return
+        marker.delete()
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     fun delete(profileName: String) {

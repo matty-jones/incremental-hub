@@ -104,7 +104,11 @@ If the primary key is missing or fails the `EF` check, the candidate is the undo
 
 ## `trimps-adapter` 1.0.0
 
-Launch `https://trimps.github.io/`. Origin `https://trimps.github.io`.
+Implemented. Catalogue `assets/games/trimps.json`, profile `hub-game-trimps`, launch `https://trimps.github.io/`.
+
+The envelope always lists `trimpSave1` and `trimpBackup1`. A missing backup value removes that key. PlayFab names are denied. `TrimpsLayout` adds a viewport meta when the page has none, pins `#offlineWrapper` above the board, and sets a readable type size. It does not change zoom and does not reload.
+
+`save(true)` on a disposable profile returned an export string. `load` of that string was then captured by the normal `save()` path. No Hub import screen was added.
 
 ### Storage
 

@@ -99,6 +99,26 @@ Other keys: `playFabName` and `playFabPass` (`main.js` lines 19878-19889). Those
 
 No IndexedDB, no service worker, no viewport meta. Kongregate is feature-detected; the Pages build shows an error on the bone button when `kongregate` is undefined (`main.js` lines 24-29) and continues.
 
+Qualification on Pixel Fold, WebView 155.0.8059.43, disposable profile `hub-qual-trimps`, live title `Trimps 5.10.1`:
+
+| Case | Result |
+| --- | --- |
+| Fresh launch and readiness | PASS. `stringVersion` 5.10.1, food text `0`. |
+| Progress, native `save()`, Hub capture | PASS. Envelope length 19476, primary sha256 `0cfb7963e64e6f39d427a06209986f8b23a0cab94ec4d940f36321cd8129b696`. |
+| Force-close and resume | PASS. Primary sha256 `7e9659c35ece2b2821c10369f7ca9e6a0275ae2cb278eb12e29ec8ba9bd071c6` matched after `am force-stop`. |
+| Envelope, backup absent | PASS. |
+| Envelope, backup present | PASS. Length 38861. |
+| Truncated save | PASS. `AAAA` rejected, length 90. |
+| Incomparable saves | PASS. Universe 2 against universe 1 returned `INCONCLUSIVE`. |
+| Aged save, offline progress | PASS. `lastOnline` set 2 hours back. Warp showed "Welcome back! You were offline for 2 hours." |
+| No capture during warp | PASS. Decline: offline warp is running, last good snapshot kept. |
+| Capture after warp | PASS. After `offlineProgress.finish()`. Primary sha256 `0dbdb7d061ea099137fc415d10919788ff39a3a02b84ffc7c3989089ebd84b03`. |
+| Folded, unfolded, folded | PASS. Same WebView, 2 page loads before and after, same primary hash, folded scale 0.9818 both times. Food 57x129 and Gather 40x32 on the cover. |
+| Process death during restore | PASS. Killed after journal phase `APPLYING` with 1 key applied. Recovery completed, backup absent, journal removed, game not loaded. Primary sha256 `4ca378f28c8b010c97e589617ae0563dc54fb14d5a8e5112bcc484cc1699b744`. |
+| Shark and FE000000 | PASS. `:app:testDebugUnitTest` passed, including the FE000000 comparisons. `SharkOfflineAcceptanceTest` passed on the fold in 119s. |
+
+The launcher lists Trimps next to Shark Incremental and FE000000. Cover layout still uses Trimps' two columns, so the log tabs and the last menu cells sit at the edge. The settings bar scrolls. The warp overlay is pinned above the board for this game only.
+
 ### Vanilla Antimatter Dimensions
 
 Source commit `5409e320cecef96a917cca1dfb68f1f183e499ca` on `master`. `release` `0b70035ab849f3d79c3a873e94171c62b3d08cf5` is "Merge remote-tracking branch 'origin/master' into release" at 2026-07-17T20:19:03Z. The public site's latest deploy commit (`IvarK/AntimatterDimensions` `6872931a`, 2026-08-28) says it deployed source `0b70035a`.

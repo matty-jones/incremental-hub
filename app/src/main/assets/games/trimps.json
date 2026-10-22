@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": 1,
+  "gameId": "trimps",
+  "displayName": "Trimps",
+  "sourceUrl": "https://trimps.github.io/",
+  "launchUrl": "https://trimps.github.io/",
+  "navigationRules": {
+    "maxDepth": 1,
+    "allowSameOriginNavigation": true,
+    "blockCrossOriginNavigation": false
+  },
+  "storageContext": {
+    "origin": "https://trimps.github.io",
+    "type": "top-level",
+    "keys": [
+      {
+        "name": "trimpSave1",
+        "format": "lz-string-base64-json",
+        "freshness": "persisted-only",
+        "description": "Primary Trimps save. LZString compressToBase64 of the game JSON."
+      },
+      {
+        "name": "trimpBackup1",
+        "format": "lz-string-base64-json",
+        "freshness": "persisted-only",
+        "description": "Optional native backup written by Trimps when migrating an older save. Not a second progress pointer."
+      }
+    ]
+  },
+  "adapterId": "trimps-adapter",
+  "adapterVersion": "1.0.0",
+  "saveCoverage": {
+    "mode": "persisted-only",
+    "autosaveIntervalMs": 60000,
+    "keys": ["trimpSave1", "trimpBackup1"],
+    "coverage": "complete"
+  },
+  "displayDefaults": {
+    "showIcon": true,
+    "badgeText": "T",
+    "colorPrimary": "#35C7B7",
+    "colorSecondary": "#1A6B62"
+  },
+  "versionProbe": {
+    "enabled": true,
+    "minVersion": null,
+    "field": "stringVersion",
+    "javascript": "return (typeof game !== 'undefined' && game && game.global) ? game.global.stringVersion : '';"
+  },
+  "compatibility": {
+    "minSdkVersion": 30,
+    "features": ["MULTI_PROFILE", "WEB_MESSAGE_LISTENER"],
+    "notes": "Reference upstream 5.10.1. Newer stringVersion saves are rejected. PlayFab keys are not captured."
+  },
+  "resourceObservations": [
+    {
+      "type": "save-js",
+      "url": "https://trimps.github.io/",
+      "observed": "save() writes localStorage trimpSave1 via LZString.compressToBase64. trimpBackup1 is written only by the pre-5.0 migration."
+    }
+  ]
+}

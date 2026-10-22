@@ -53,6 +53,8 @@ Rollback: bootstrap the pre-import envelope, including backup keys. Do not call 
 
 Native function: `load(exportString)` with the LZ string, not `load(true)`.
 
+Observed on a disposable profile: `save(true)` returned a string, `load` of that string returned, and the next Hub capture validated. The captured primary hash differed from the pre-import capture, which is expected because `save()` rewrites `lastOnline`. No Hub import UI was added.
+
 `load(true)` reads `#importBox` and clears PlayFab (`main.js` lines 266-278). `load(string)` migrates without that side effect. If the string is from before 5.0.0, the game writes `trimpBackup1` itself. The Hub's pre-import envelope already has the previous `trimpSave1`. After `load`, call `save()` only if `usingRealTimeOffline` is false, so the migrated game is what storage holds. If a warp starts, wait until it finishes, then `save()`, then peek.
 
 Do not pass the string through the tooltip. The tooltip is a valid player path and is harder to verify.

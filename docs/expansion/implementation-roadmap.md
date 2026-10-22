@@ -47,7 +47,7 @@ Definition of done:
 
 ## Milestone 2 — Trimps
 
-**Depends on:** Milestone 1. **Complexity:** M.
+**Depends on:** Milestone 1. **Complexity:** M. Implemented on `expansion/trimps`. Not published as an APK. Qualification is recorded under Trimps in `game-compatibility-matrix.md`.
 
 First game. One progress key, live files hash-match `b9edb1df`, import is `load(string)`, offline warp has an explicit flag the capture must obey.
 

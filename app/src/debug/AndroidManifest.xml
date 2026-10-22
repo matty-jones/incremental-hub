@@ -11,6 +11,9 @@
             android:name=".WebViewProbeActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|uiMode|fontScale|keyboard|keyboardHidden|navigation"
             android:exported="false" />
+        <activity
+            android:name=".RestoreDeathHarnessActivity"
+            android:exported="true" />
     </application>
 
 </manifest>
