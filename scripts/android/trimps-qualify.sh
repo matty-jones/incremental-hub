@@ -5,6 +5,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 log="$LOG_DIR/trimps-qualify.log"
 exec > >(tee "$log") 2>&1
 
+"$(dirname "${BASH_SOURCE[0]}")/check-webview.sh"
 "$(dirname "${BASH_SOURCE[0]}")/run-instrumentation.sh" com.example.hub.TrimpsQualificationTest#liveSession || true
 
 adb -s "$ANDROID_SERIAL" shell am force-stop com.example.hub

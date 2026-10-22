@@ -1,54 +1,57 @@
-# Headless Pixel Fold emulator
+# Pixel Fold emulator
 
-The Pixel 6 AVD (`Pixel6_API34_PS`, adb serial `emulator-5554`) is left in place. The foldable AVD is separate.
+The Android SDK and the host OS own the emulators. Incremental Hub only connects to a Pixel Fold virtual device that is already running. Creating, deleting, wiping, starting, stopping, or editing an AVD is not a step in this repository. Neither is installing a WebView provider.
 
-## Host
+## Devices
 
-- SDK: `/opt/android-sdk` (`ANDROID_SDK_ROOT`)
-- Emulator 36.1.9, platform android-34, image `system-images;android-34;google_apis_playstore;x86_64` (already installed; nothing else was downloaded)
-- KVM is present (`/dev/kvm`, VT-x) and `emulator -accel-check` reports KVM usable
-- This user is in group `kvm`
-- RAM about 46 GiB, disk free about 300 GiB on `/`
+| AVD | Role |
+| --- | --- |
+| `PixelFold_API34` | The only device these scripts target. |
+| `Pixel6_API34_PS` | Owned outside Incremental Hub. These scripts never select it and never change it. |
 
-## AVD
+Other attached devices, including physical hardware, are not a fallback. Emulator images, AVD configuration, and WebView APKs stay off this repository. Local script logs and APKs under `scripts/android/` are gitignored.
 
-Name: `PixelFold_API34`
+## How a serial is chosen
 
-```bash
-avdmanager create avd -n PixelFold_API34 \
-  -k "system-images;android-34;google_apis_playstore;x86_64" \
-  -d pixel_fold
-```
+`scripts/android/env.sh` lists adb devices in the `device` state and reads each emulator's AVD name. The emulator console command `avd name` is the identity. The boot property `ro.boot.qemu.avd_name` is that same name when the console command is unavailable. If both are present and they disagree, that device is not a match.
 
-`pixel_fold` is a Google hardware profile in this SDK (`avdmanager list device`, id 50). It was not replaced with the generic 7.6" foldable.
+Exactly one running device must report `PixelFold_API34`. That device's adb serial is `ANDROID_SERIAL` for every later command. The port is not assumed, so `emulator-5556` is not special.
 
-Config adjustments in `~/.android/avd/PixelFold_API34.avd/config.ini`:
+The scripts exit before doing any work when:
 
-- `hw.ramSize=3072`
-- `disk.dataPartition.size=6G`
-- `hw.gpu.mode=swiftshader_indirect` and `hw.gpu.enabled=yes` so the emulator can render without a desktop
-- `firstboot.bootFromDownloadableSnapshot=no`
+- `PixelFold_API34` is not running
+- more than one running device reports that AVD name
+- no device can be identified as that AVD
 
-The profile's own display values were not rewritten.
+`adb` comes from `PATH`, or from `platform-tools` under `ANDROID_SDK_ROOT` or `ANDROID_HOME` when one of those is set. This repository does not install the SDK.
 
-### Screen
+## WebView
 
-Measured with the hinge sensor, not with `wm size` as an input:
+Multi-profile support needs WebView major version 118 or later. `ProfileStore.getInstance()` throws `UnsupportedOperationException` on older providers. The API 34 Play image ships `com.google.android.webview` 113.0.5672.136, which is below that line.
+
+`scripts/android/check-webview.sh` reads the current provider on the resolved Pixel Fold serial. It fails if the provider is missing or older than 118. It does not install, replace, or configure a provider. `run-instrumentation.sh` runs that check before it builds or installs the Hub. `trimps-qualify.sh` runs it before any qualification command.
+
+Updating WebView is an external prerequisite, done on the AVD outside this project. It is not an application build step. Wiping the AVD restores the image's stock provider until that external update is done again. The historical install that put a newer provider on this AVD is recorded in `docs/expansion/emulator-webview-report.md`.
+
+## Posture
+
+`scripts/android/posture.sh` drives the hinge sensor on the already-running Pixel Fold. It does not call `wm size` to set a size. Folding turns one built-in display off and the other on. `wm size` changes as a result.
+
+The console sensor is named `hinge-angle0`. `hinge_angle0` is rejected.
 
 | Posture | Hinge | Device state | Active display | Size |
 | --- | --- | --- | --- | --- |
-| Unfolded (boot default) | `hinge-angle0` 180 | 2 OPENED | inner `local:4619827259835644672` | 2208 x 1840 px, 420 dpi |
-| Folded | `hinge-angle0` 0 | 0 CLOSED | outer `local:4619827551948147201` | 1080 x 2092 px, 420 dpi |
-| Half open | `hinge-angle0` 90 | 1 HALF_OPENED | inner, same as unfolded | 2208 x 1840 px, 420 dpi |
+| Unfolded | `hinge-angle0` 180 | 2 OPENED | inner | 2208 x 1840 px, 420 dpi |
+| Folded | `hinge-angle0` 0 | 0 CLOSED | outer | 1080 x 2092 px, 420 dpi |
+| Half open | `hinge-angle0` 90 | 1 HALF_OPENED | inner | 2208 x 1840 px, 420 dpi |
 
-Folding turns one built-in display off and the other on. `wm size` changes as a result. Setting `wm size` is not used and is not equivalent.
+A `cmd device_state` override sticks across a later hinge change until `cmd device_state state reset`. `trimps-qualify.sh` resets that override at the end of the Trimps qualification, because that run moves the posture. Nothing else in these scripts writes emulator settings.
 
 Differences from a physical Pixel Fold:
 
 - The inner panel in this profile is landscape 2208 x 1840. The phone's inner panel is portrait 1840 x 2208.
 - Density is 420 dpi for both panels. The phone is about 408 dpi on the cover and about 380 dpi on the inner panel.
 - The cover resolution 1080 x 2092 matches the phone.
-- The API 34 Play image ships `com.google.android.webview` 113.0.5672.136. That build throws `UnsupportedOperationException` from `ProfileStore.getInstance()` because multi-profile needs WebView 118. `scripts/android/provision-webview.sh` installs the pinned 155.0.8059.43 provider from a local cache when the current provider is below 118. A newer install of the same package and certificate is left in place. The APK is not in this repository. `Pixel6_API34_PS` is not modified. See below and `docs/expansion/emulator-webview-report.md`.
 
 Layout viewport measured inside Shark, below the system bars:
 
@@ -57,51 +60,26 @@ Layout viewport measured inside Shark, below the system bars:
 
 ## Commands
 
-Run the scripts with bash. They select serial `emulator-5556` and do not touch `emulator-5554`.
+Run the scripts with bash. Each one resolves `PixelFold_API34` and passes that serial to every device command.
 
 ```bash
-scripts/android/start-pixel-fold.sh
-scripts/android/wait-ready.sh
-scripts/android/provision-webview.sh
+scripts/android/check-webview.sh
 scripts/android/install-debug.sh
 scripts/android/posture.sh unfold
 scripts/android/posture.sh fold
+scripts/android/posture.sh half
 scripts/android/posture.sh status
 scripts/android/display-metrics.sh
 scripts/android/screenshot.sh shark-folded
 scripts/android/logcat.sh shark
 scripts/android/run-instrumentation.sh com.example.hub.SharkOfflineAcceptanceTest
-scripts/android/stop-pixel-fold.sh
+scripts/android/run-instrumentation.sh com.example.hub.LivePlayableSessionTest
+scripts/android/trimps-qualify.sh
+scripts/android/device-target-test.sh
 ```
 
-Startup flags: `-port 5556 -no-window -no-audio -no-boot-anim -no-snapshot-load -gpu swiftshader_indirect -accel on`. Boot timeout defaults to 240 seconds. `setsid -f` keeps the process after the launching shell exits.
+`SharkOfflineAcceptanceTest` is the Shark offline regression. `LivePlayableSessionTest` loads Shark Incremental and FE000000. `trimps-qualify.sh` runs `TrimpsQualificationTest`. Those three entry points install the debug Hub on the resolved Pixel Fold serial. They do not target `Pixel6_API34_PS`.
 
-`start-pixel-fold.sh` provisions WebView when the emulator is already online. A cold start prints a reminder, and `wait-ready.sh` provisions after boot. `check-webview.sh`, which `run-instrumentation.sh` runs first, does the same check. The production floor stays major version 118. The scripts do not wipe userdata and they refuse serial `emulator-5554`.
+`device-target-test.sh` uses a fake adb. It checks serial discovery and the WebView gate, including a missing or outdated provider, without contacting a real device.
 
-## WebView cache
-
-The only APK these scripts will install is described in `scripts/android/webview-provider.pin`:
-
-- Package `com.google.android.webview` 155.0.8059.43, versionCode 805904308
-- SHA-256 `4c481c062eadc296bd7afa93295cba95c224f95ee4595a6ae5f95627c985438b`
-- Signer certificate SHA-256 `6faf3c4140407473400934d117815a21af1cfefc5c0bee61c858bc3d72ba6fe5`
-
-Cache path, outside the repo and outside build outputs:
-
-```text
-${XDG_CACHE_HOME:-$HOME/.cache}/incremental-hub/webview/com.google.android.webview-155.0.8059.43.apk
-```
-
-After a machine reset the cache is gone. Copy the known-good file back to that path. If an emulator already has this provider, this pull is read-only and does not wipe the AVD:
-
-```bash
-mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/incremental-hub/webview"
-adb -s emulator-5556 shell pm path com.google.android.webview
-adb -s emulator-5556 pull <printed base.apk path> \
-  "${XDG_CACHE_HOME:-$HOME/.cache}/incremental-hub/webview/com.google.android.webview-155.0.8059.43.apk"
-scripts/android/provision-webview.sh
-```
-
-`provision-webview.sh` checks the file hash, then `aapt` package name and version, then `apksigner` certificate SHA-256. A mismatch is refused. The script does not download a package. If the cache is missing and the emulator is still below version 118, it exits with these same instructions.
-
-`posture.sh fold` runs `adb emu sensor set hinge-angle0 0`. The sensor name is `hinge-angle0`. `hinge_angle0` is rejected. `cmd device_state state 0` also switches the physical displays; the scripts use the hinge so the posture stays sensor-driven.
+Screenshots and logcat captures go to `scripts/android/.logs/`.

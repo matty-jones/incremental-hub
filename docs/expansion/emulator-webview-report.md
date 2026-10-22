@@ -1,6 +1,6 @@
 # Pixel Fold emulator and WebView capability
 
-Checked on `PixelFold_API34` (`emulator-5556`) with emulator 36.1.9. `Pixel6_API34_PS` (`emulator-5554`) was not deleted and was not written. No new AVD was created.
+Checked on `PixelFold_API34` (adb serial `emulator-5556` during this check) with emulator 36.1.9. `Pixel6_API34_PS` (`emulator-5554` during this check) was not deleted and was not written. No new AVD was created. Those serials were observations, not a contract. Scripts now take the serial from the running AVD name.
 
 ## Root cause
 
@@ -16,7 +16,7 @@ java.lang.UnsupportedOperationException: This method is not supported by the cur
 
 The image's stock provider is `com.google.android.webview` 113.0.5672.136 (versionCode 567263637). The WebView factory log on the crashing launch was `Loading com.google.android.webview version 113.0.5672.136`. Multi-profile needs WebView 118 or newer. Compose never got a frame because the session controller constructs `ProfileStore` during the first composition.
 
-The phone AVD already had provider 155.0.8059.43 (versionCode 805904308), signed with the same certificate as the system stub. Installing that APK onto the fold AVD with `adb install -r -d` replaced the provider. The APK is not in this repository. Wiping the fold userdata restores 113. `scripts/android/provision-webview.sh` installs it again from `${XDG_CACHE_HOME:-$HOME/.cache}/incremental-hub/webview/` only when the hash, package, and certificate match `scripts/android/webview-provider.pin`. An already-compatible provider is not replaced, and a newer same-certificate provider is not downgraded. `scripts/android/check-webview.sh` runs that provision step and still refuses instrumentation below major version 118. How to rebuild the cache is in `docs/pixel-fold-emulator.md`.
+The phone AVD already had provider 155.0.8059.43 (versionCode 805904308), signed with the same certificate as the system stub. Installing that APK onto the fold AVD with `adb install -r -d` replaced the provider. The APK is not in this repository. Wiping the fold userdata restores 113. This project no longer installs a provider. `scripts/android/check-webview.sh` only reads the current package and refuses instrumentation below major version 118. Putting a compatible WebView on the AVD is an external prerequisite, described in `docs/pixel-fold-emulator.md`.
 
 After the install, `dumpsys webviewupdate` reports current and preferred package `(com.google.android.webview, 155.0.8059.43)`. The Hub process stays up, `MainActivity` is displayed, and `FoldProfileContinuityTest` creates `hub-game-shark-incremental` plus a disposable profile.
 
