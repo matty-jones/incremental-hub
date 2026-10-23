@@ -131,11 +131,11 @@ Unsupported games can appear as candidates with an explanation, but MUST NOT dis
 
 The game occupies available space with correct cutout, hinge and keyboard handling. Provide a small movable, accessible menu handle. Android Back opens the native game menu when no modal is open; it must not silently navigate back to a reset/start page or close the session. Back closes the menu first when already open.
 
-The menu contains Resume, Snapshot now, Checkpoint, Vault, Reload, Display, and Return to hub. Add Notes and Assistant only when implemented. Compact windows use a bottom sheet; wider windows may use a side panel. Opening a menu MUST NOT recreate or reload the WebView.
+The menu contains Resume, Save, Vault, Reload, Display, Diagnostics, and Return to hub. Save captures the live game and pins that snapshot. Add Notes and Assistant only when implemented. Compact windows use a bottom sheet; wider windows may use a side panel. Opening a menu MUST NOT recreate or reload the WebView.
 
 No edge swipe is the only way to access controls: it can conflict with Android navigation and game input. Native controls need accessible labels and at least 48 dp touch targets. No pull-to-refresh.
 
-Use accurate labels: `Snapshot now` copies state into the Hub vault. Show `Game save freshness unknown` when the adapter cannot force or observe game persistence. A checkpoint pins a successful snapshot and optionally adds a title; it is not a separate save format.
+Use accurate labels: `Save` copies state into the Hub vault and pins that snapshot. Show `Game saved` only after that capture has succeeded. Show `Game save freshness unknown` when the adapter cannot force or observe game persistence. A pinned snapshot is not a separate save format.
 
 ### 4.3 Vault and destructive actions
 

@@ -80,6 +80,10 @@ fun stepZoom(percent: Int, delta: Int): Int = clampZoom(percent + delta)
 /** Cover-screen widths sit under the hub's wide-window threshold. */
 fun isFoldedWidth(widthDp: Float): Boolean = widthDp < 600f
 
+/** Pixel Fold cover, including landscape. The inner screen is at least 600dp. */
+fun isFoldedPosture(smallestScreenWidthDp: Int): Boolean =
+    isFoldedWidth(smallestScreenWidthDp.toFloat())
+
 fun zoomLiteral(percent: Int): String =
     String.format(java.util.Locale.US, "%.2f", clampZoom(percent) / 100f)
 

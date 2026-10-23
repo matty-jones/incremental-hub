@@ -63,6 +63,8 @@ fun PlaySurface(
     var displayPrefs by remember(gameId) { mutableStateOf(displayStore.read(gameId)) }
     var presentation by remember(gameId) { mutableStateOf<PresentationAck?>(null) }
     val folded = !isWideWindow()
+    val saveNotice by controller.manualSaveNotice.collectAsState()
+    val saveBusy by controller.manualSaveInFlight.collectAsState()
     val smallestWidth = LocalConfiguration.current.smallestScreenWidthDp
     val trimpsInset = with(LocalDensity.current) {
         TrimpsFrame.bottomInsetPx(gameId, smallestWidth).toDp()
@@ -172,8 +174,7 @@ fun PlaySurface(
                                         menuOpen = false
                                         controller.requestForeground()
                                     }
-                                    MenuAction.SnapshotNow -> controller.requestCapture()
-                                    MenuAction.Checkpoint -> controller.requestCheckpoint()
+                                    MenuAction.Save -> controller.requestCheckpoint()
                                     MenuAction.Reload -> controller.requestReload()
                                     MenuAction.Vault -> Unit
                                     MenuAction.Display -> menuPanel = MenuPanel.Display
@@ -183,6 +184,8 @@ fun PlaySurface(
                             },
                             showDisplay = menuPanel == MenuPanel.Display,
                             showDiagnostics = menuPanel == MenuPanel.Diagnostics,
+                            saveBusy = saveBusy,
+                            saveNotice = saveNotice,
                             onPanelBack = { menuPanel = MenuPanel.Actions },
                             display = {
                                 DisplayPanel(

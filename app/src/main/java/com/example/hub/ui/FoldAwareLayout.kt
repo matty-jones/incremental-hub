@@ -19,7 +19,6 @@ import androidx.compose.ui.unit.dp
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import com.example.hub.session.SessionState
-import com.example.hub.ui.theme.HubWideWidth
 
 /**
  * Fold-aware layout. PlaySurface places hub chrome above the WebView so game
@@ -80,17 +79,14 @@ fun FoldAwareLayout(
 }
 
 /**
- * Returns true when the current window is wide enough to host a side-panel
- * menu alongside the WebView without crowding.
+ * True when the current posture is the unfolded inner screen.
  *
- * Uses the current configuration width, which changes when a Pixel Fold
- * opens or closes. The maximum window size does not.
+ * [Configuration.smallestScreenWidthDp] stays under [HubWideWidth] on the
+ * cover, including after the cover rotates. The current width does not.
  */
 @Composable
-fun isWideWindow(): Boolean {
-    val widthDp = LocalConfiguration.current.screenWidthDp
-    return widthDp >= HubWideWidth.value.toInt()
-}
+fun isWideWindow(): Boolean =
+    !isFoldedPosture(LocalConfiguration.current.smallestScreenWidthDp)
 
 internal fun pxToDp(px: Int, density: Float): Float {
     if (density <= 0f) return px.toFloat()

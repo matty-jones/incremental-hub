@@ -15,6 +15,7 @@ import com.example.hub.ui.GameDisplayPreferences
 import com.example.hub.ui.ZoomPreference
 import com.example.hub.ui.clampZoom
 import com.example.hub.ui.hasPlayHistory
+import com.example.hub.ui.isFoldedPosture
 import com.example.hub.ui.isFoldedWidth
 import com.example.hub.ui.pageZoomScript
 import com.example.hub.ui.primaryPlayLabel
@@ -82,6 +83,10 @@ class GameplayReliabilityTest {
         assertEquals(100, read.unfolded.pageZoomPercent)
         assertTrue(isFoldedWidth(400f))
         assertFalse(isFoldedWidth(700f))
+        assertTrue(isFoldedPosture(411))
+        assertTrue(isFoldedPosture(599))
+        assertFalse(isFoldedPosture(600))
+        assertFalse(isFoldedPosture(701))
         assertEquals(75, clampZoom(10))
         assertEquals(125, clampZoom(400))
         assertEquals(100, stepZoom(100, 0))
@@ -121,7 +126,11 @@ class GameplayReliabilityTest {
         val script = SharkLayout.injectionScript()
         assertTrue(script.contains(SharkLayout.STYLE_ID))
         assertTrue(script.contains("shark-upgrade-div"))
-        assertEquals(3, SharkLayout.VERSION)
+        assertEquals(4, SharkLayout.VERSION)
+        assertTrue(script.contains(".explore-desc"))
+        assertTrue(script.contains("flex-flow: column nowrap"))
+        assertTrue(script.contains(".explore-cost"))
+        assertTrue(script.contains("min-width: 0"))
         assertTrue(script.contains("position: fixed"))
         assertTrue(script.contains("offline-done"))
         assertTrue(script.contains("#offline"))

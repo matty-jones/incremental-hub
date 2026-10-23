@@ -29,15 +29,15 @@ class NativeMenuTest {
     @Test
     fun menuActionCountMatchesTheMenu() {
         val actions = menuActions()
-        assertEquals("Must have exactly 8 menu actions", 8, actions.size)
+        assertEquals("Must have exactly one Save and no snapshot row", 7, actions.size)
+        assertEquals(1, actions.count { it is MenuAction.Save })
     }
 
     @Test
     fun menuActionsIncludeAllRequired() {
         val actions = menuActions()
         assertTrue("Must include Resume", actions.contains(MenuAction.Resume))
-        assertTrue("Must include SnapshotNow", actions.contains(MenuAction.SnapshotNow))
-        assertTrue("Must include Checkpoint", actions.contains(MenuAction.Checkpoint))
+        assertTrue("Must include Save", actions.contains(MenuAction.Save))
         assertTrue("Must include Vault", actions.contains(MenuAction.Vault))
         assertTrue("Must include Reload", actions.contains(MenuAction.Reload))
         assertTrue("Must include Display", actions.contains(MenuAction.Display))
@@ -61,13 +61,8 @@ class NativeMenuTest {
     }
 
     @Test
-    fun snapshotNowActionLabel() {
-        assertEquals("Snapshot now", MenuAction.SnapshotNow.label)
-    }
-
-    @Test
-    fun checkpointActionLabel() {
-        assertEquals("Checkpoint", MenuAction.Checkpoint.label)
+    fun saveActionLabel() {
+        assertEquals("Save", MenuAction.Save.label)
     }
 
     @Test
@@ -216,13 +211,15 @@ class NativeMenuTest {
     }
 
     @Test
-    fun snapshotNowDisabled_whenClosed() {
-        assertFalse("SnapshotNow should be disabled when Closed", isActionEnabled(MenuAction.SnapshotNow, SessionState.Closed))
+    fun saveDisabled_whenClosedOrBusy() {
+        assertFalse(isActionEnabled(MenuAction.Save, SessionState.Closed))
+        assertFalse(isActionEnabled(MenuAction.Save, SessionState.Capturing))
+        assertFalse(isActionEnabled(MenuAction.Save, SessionState.Playing, saveBusy = true))
     }
 
     @Test
-    fun snapshotNowEnabled_whenPlaying() {
-        assertTrue("SnapshotNow should be enabled when Playing", isActionEnabled(MenuAction.SnapshotNow, SessionState.Playing))
+    fun saveEnabled_whenPlaying() {
+        assertTrue(isActionEnabled(MenuAction.Save, SessionState.Playing))
     }
 
     @Test
@@ -239,18 +236,7 @@ class NativeMenuTest {
     // Helpers
     // -----------------------------------------------------------------
 
-    private fun menuActions(): List<MenuAction> {
-        return listOf(
-            MenuAction.Resume,
-            MenuAction.SnapshotNow,
-            MenuAction.Checkpoint,
-            MenuAction.Vault,
-            MenuAction.Reload,
-            MenuAction.Display,
-            MenuAction.Diagnostics,
-            MenuAction.ReturnToHub,
-        )
-    }
+    private fun menuActions(): List<MenuAction> = sessionMenuActions
 
     private fun allStates(): List<SessionState> {
         return listOf(

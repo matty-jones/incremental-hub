@@ -69,7 +69,10 @@ class LivePlayableSessionTest {
         )
 
         composeRule.onNodeWithContentDescription("Menu").performClick()
-        composeRule.onNodeWithText("Snapshot now").performScrollTo().performClick()
+        composeRule.onNodeWithText("Save").performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 30_000) {
+            composeRule.onAllNodesWithText("Game saved").fetchSemanticsNodes().isNotEmpty()
+        }
 
         val dao = HubDatabase.getInstance(
             InstrumentationRegistry.getInstrumentation().targetContext,

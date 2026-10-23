@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         Log.i(TAG, "Configuration changed; resizing the existing WebView")
-        SessionRuntime.controller?.noteConfigurationChange()
+        SessionRuntime.controller?.noteConfigurationChange(newConfig)
     }
 
     @Suppress("OVERRIDE_DEPRECATION")

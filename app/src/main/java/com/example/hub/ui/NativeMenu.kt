@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,21 +34,24 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.hub.session.ManualSaveNotice
+import com.example.hub.session.ManualSaveOutcome
 import com.example.hub.session.SessionState
 import com.example.hub.ui.chrome.OverlaySheet
 import com.example.hub.ui.chrome.SheetEdge
+import com.example.hub.ui.theme.hubSuccess
 
 private const val TAG = "NativeMenu"
 
 private val MinTouchTarget: Dp = 48.dp
 
 /**
- * Seven actions available in the in-session native menu.
+ * Actions available in the in-session native menu.
+ * Save captures a pinned checkpoint. Ordinary snapshots stay on the cadence.
  */
 sealed class MenuAction {
     data object Resume : MenuAction()
-    data object SnapshotNow : MenuAction()
-    data object Checkpoint : MenuAction()
+    data object Save : MenuAction()
     data object Vault : MenuAction()
     data object Reload : MenuAction()
     data object Display : MenuAction()
@@ -57,11 +59,20 @@ sealed class MenuAction {
     data object ReturnToHub : MenuAction()
 }
 
+internal val sessionMenuActions: List<MenuAction> = listOf(
+    MenuAction.Resume,
+    MenuAction.Save,
+    MenuAction.Vault,
+    MenuAction.Reload,
+    MenuAction.Display,
+    MenuAction.Diagnostics,
+    MenuAction.ReturnToHub,
+)
+
 internal val MenuAction.label: String
     get() = when (this) {
         is MenuAction.Resume -> "Resume"
-        is MenuAction.SnapshotNow -> "Snapshot now"
-        is MenuAction.Checkpoint -> "Checkpoint"
+        is MenuAction.Save -> "Save"
         is MenuAction.Vault -> "Vault"
         is MenuAction.Reload -> "Reload"
         is MenuAction.Display -> "Display"
@@ -87,6 +98,8 @@ fun NativeMenu(
     modifier: Modifier = Modifier,
     showDisplay: Boolean = false,
     showDiagnostics: Boolean = false,
+    saveBusy: Boolean = false,
+    saveNotice: ManualSaveNotice? = null,
     onPanelBack: () -> Unit = {},
     display: @Composable () -> Unit = {},
     diagnostics: @Composable () -> Unit = {},
@@ -142,8 +155,23 @@ fun NativeMenu(
             }
             if (showDisplay) display() else diagnostics()
         } else {
+            val notice = saveNotice
+            if (notice != null && notice.message.isNotBlank()) {
+                val noticeColor = when (notice.outcome) {
+                    ManualSaveOutcome.SAVED -> hubSuccess()
+                    ManualSaveOutcome.FAILED -> MaterialTheme.colorScheme.error
+                    ManualSaveOutcome.DEFERRED, ManualSaveOutcome.BUSY ->
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Text(
+                    text = notice.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = noticeColor,
+                )
+            }
             MenuItems(
                 state = state,
+                saveBusy = saveBusy,
                 onAction = onAction,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -154,19 +182,11 @@ fun NativeMenu(
 @Composable
 private fun MenuItems(
     state: SessionState,
+    saveBusy: Boolean,
     onAction: (MenuAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val actions = listOf(
-        MenuAction.Resume,
-        MenuAction.SnapshotNow,
-        MenuAction.Checkpoint,
-        MenuAction.Vault,
-        MenuAction.Reload,
-        MenuAction.Display,
-        MenuAction.Diagnostics,
-        MenuAction.ReturnToHub,
-    )
+    val actions = sessionMenuActions
 
     Column(
         modifier = modifier,
@@ -175,7 +195,7 @@ private fun MenuItems(
         actions.forEach { action ->
             MenuItemRow(
                 action = action,
-                enabled = isActionEnabled(action, state),
+                enabled = isActionEnabled(action, state, saveBusy),
                 onTrigger = {
                     Log.d(TAG, "NativeMenu: action triggered=${action.label} (state=$state)")
                     onAction(action)
@@ -185,13 +205,16 @@ private fun MenuItems(
     }
 }
 
-internal fun isActionEnabled(action: MenuAction, state: SessionState): Boolean {
+internal fun isActionEnabled(
+    action: MenuAction,
+    state: SessionState,
+    saveBusy: Boolean = false,
+): Boolean {
     return when (action) {
         is MenuAction.Resume -> state is SessionState.Playing ||
             state is SessionState.Background ||
             state is SessionState.Degraded
-        is MenuAction.SnapshotNow -> state is SessionState.Playing
-        is MenuAction.Checkpoint -> state is SessionState.Playing
+        is MenuAction.Save -> state is SessionState.Playing && !saveBusy
         is MenuAction.Vault -> false
         is MenuAction.Reload -> state is SessionState.Playing
         is MenuAction.Display -> state !is SessionState.Closed && state !is SessionState.Closing
@@ -208,8 +231,7 @@ private fun MenuItemRow(
 ) {
     val icon = when (action) {
         is MenuAction.Resume -> Icons.Default.PlayArrow
-        is MenuAction.SnapshotNow -> Icons.Default.Screenshot
-        is MenuAction.Checkpoint -> Icons.Default.Save
+        is MenuAction.Save -> Icons.Default.Save
         is MenuAction.Vault -> Icons.Default.Cloud
         is MenuAction.Reload -> Icons.Default.Refresh
         is MenuAction.Display -> Icons.Default.Settings
@@ -218,7 +240,7 @@ private fun MenuItemRow(
     }
     val label = action.label
     val principal = action is MenuAction.Resume
-    val protective = action is MenuAction.SnapshotNow || action is MenuAction.Checkpoint
+    val protective = action is MenuAction.Save
     val container = when {
         !enabled -> MaterialTheme.colorScheme.surfaceVariant
         principal -> MaterialTheme.colorScheme.primary

@@ -74,4 +74,78 @@ class PresentationTest {
         assertEquals(null, appliedZoomPercent(ack!!))
         assertTrue(pageZoomDetail(100, PageScaleMode.HUB, ack).contains("waiting"))
     }
+
+    @Test
+    fun zoomMatchOnThePreviousViewportIsNotSettled() {
+        val cover = sample(innerWidth = 411, innerHeight = 749)
+        assertEquals(
+            FAULT_NONE,
+            assessPresentation(cover, viewWidthPx = 1080, viewHeightPx = 1966, density = 2.625f, pageScale = 1f, parentWidthPx = 1080),
+        )
+        assertEquals(
+            FAULT_STALE_VIEWPORT,
+            assessPresentation(cover, viewWidthPx = 2208, viewHeightPx = 1700, density = 2.625f, pageScale = 1f, parentWidthPx = 2208),
+        )
+        assertTrue(presentationSettled(FAULT_NONE))
+        assertFalse(presentationSettled(FAULT_STALE_VIEWPORT))
+    }
+
+    @Test
+    fun nativeSizeAndStuckFrameAreDistinctFromOverflow() {
+        val cover = sample(innerWidth = 411, innerHeight = 749)
+        assertEquals(
+            FAULT_NATIVE,
+            assessPresentation(cover, viewWidthPx = 0, viewHeightPx = 0, density = 2.625f, pageScale = 1f, parentWidthPx = 1080),
+        )
+        assertEquals(
+            FAULT_NATIVE,
+            assessPresentation(cover, viewWidthPx = 400, viewHeightPx = 800, density = 2.625f, pageScale = 1f, parentWidthPx = 1080),
+        )
+        val magnified = sample(innerWidth = 411, innerHeight = 749, scale = 1.8)
+        assertEquals(
+            FAULT_STALE_FRAME,
+            assessPresentation(magnified, viewWidthPx = 1080, viewHeightPx = 1966, density = 2.625f, pageScale = 1f, parentWidthPx = 1080),
+        )
+        val densityAsScale = sample(innerWidth = 411, innerHeight = 749)
+        assertEquals(
+            FAULT_NONE,
+            assessPresentation(densityAsScale, viewWidthPx = 1080, viewHeightPx = 1966, density = 2.625f, pageScale = 2.625f, parentWidthPx = 1080),
+        )
+        val wide = sample(innerWidth = 411, innerHeight = 749, scrollWidth = 900)
+        assertEquals(
+            FAULT_OVERFLOW,
+            assessPresentation(wide, viewWidthPx = 1080, viewHeightPx = 1966, density = 2.625f, pageScale = 1f, parentWidthPx = 1080),
+        )
+        assertTrue(presentationSettled(FAULT_OVERFLOW))
+        val fitted = sample(innerWidth = 980, innerHeight = 1700, scale = 0.42, visualWidth = 980, visualHeight = 1700)
+        assertEquals(
+            FAULT_NONE,
+            assessPresentation(fitted, viewWidthPx = 1080, viewHeightPx = 1866, density = 2.625f, pageScale = 1f, parentWidthPx = 1080),
+        )
+    }
+
+    @Test
+    fun scriptNamesViewportFaultsWithoutNavigation() {
+        val script = presentationScript(PageScaleMode.HUB, 100, flush = true, expectWidthCss = 842, expectHeightCss = 645)
+        assertTrue(script.contains("842"))
+        assertTrue(script.contains("645"))
+        assertTrue(script.contains("stale-viewport"))
+        assertTrue(script.contains("stale-frame"))
+        assertTrue(script.contains("css-overflow"))
+        assertFalse(script.contains("loadUrl"))
+        assertFalse(script.contains("reload"))
+        assertFalse(script.contains("localStorage"))
+    }
+
+    private fun sample(
+        innerWidth: Int,
+        innerHeight: Int,
+        scale: Double = 1.0,
+        scrollWidth: Int = innerWidth,
+        visualWidth: Int = innerWidth,
+        visualHeight: Int = innerHeight,
+    ): PresentationAck {
+        val payload = """{"ok":true,"mode":"hub","fault":"none","after":{"root":"1","body":"","rootCss":"1","bodyCss":"1","vs":$scale,"iw":$innerWidth,"ih":$innerHeight,"dpr":2.625,"vw":$visualWidth,"vh":$visualHeight,"sw":$scrollWidth,"cw":$innerWidth,"sx":0,"sy":0}}"""
+        return parsePresentationAck(payload, requestedPageZoom = 100, textZoom = 100)!!
+    }
 }

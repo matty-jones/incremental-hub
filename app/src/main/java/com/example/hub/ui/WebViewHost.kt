@@ -26,6 +26,7 @@ import com.example.hub.session.SessionState
 import com.example.hub.session.StorageBootstrap
 import com.example.hub.session.classifyResourceFailure
 import java.nio.charset.StandardCharsets
+import kotlin.math.abs
 
 private const val TAG = "WebViewHost"
 
@@ -246,6 +247,8 @@ fun WebViewHost(
             if (presentationEpoch != slot.presentationEpoch) {
                 slot.presentationEpoch = presentationEpoch
                 slot.forceReconcile = true
+                slot.retries = 0
+                slot.confirming = false
             }
             reconcilePresentation(webView, slot)
             val profileName = profile?.name
@@ -301,14 +304,49 @@ private fun ensureLayoutListener(webView: WebView) {
         val width = right - left
         val height = bottom - top
         if (width == current.viewWidth && height == current.viewHeight) return@OnLayoutChangeListener
+        val jumped = current.viewWidth < 0 ||
+            abs(width - current.viewWidth) > 24 ||
+            abs(height - current.viewHeight) > 24
         current.viewWidth = width
         current.viewHeight = height
         current.forceReconcile = true
+        current.confirming = false
+        if (jumped) current.retries = 0
         Log.d(TAG, "WebViewHost: size ${width}x$height; reconciling presentation without reload")
         view.post { reconcilePresentation(view as WebView, current) }
     }
     slot.listener = listener
     webView.addOnLayoutChangeListener(listener)
+}
+
+/**
+ * Asks Chromium to read the current view size again. Does not navigate or
+ * recreate the WebView. Wide-viewport settings are restored on the next frame.
+ */
+internal fun nudgeStaleViewport(webView: WebView) {
+    if (!webView.isAttachedToWindow) return
+    val settings = webView.settings
+    val wide = settings.useWideViewPort
+    val overview = settings.loadWithOverviewMode
+    runCatching { webView.dispatchConfigurationChanged(webView.resources.configuration) }
+    settings.useWideViewPort = !wide
+    webView.post {
+        settings.useWideViewPort = wide
+        settings.loadWithOverviewMode = overview
+        webView.requestLayout()
+        val scale = webView.scale
+        val density = webView.resources.displayMetrics.density
+        if (scale > 0.05f && abs(scale - 1f) > 0.08f && abs(scale - density) > 0.2f) {
+            runCatching { webView.zoomBy(1f / scale) }
+        }
+        runCatching {
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new Event('resize'));" +
+                    "if(window.visualViewport)window.visualViewport.dispatchEvent(new Event('resize'));",
+                null,
+            )
+        }
+    }
 }
 
 private fun reconcilePresentation(webView: WebView, slot: Slot) {
@@ -323,12 +361,15 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
         if (textChanged) publishTextOnly(slot)
         return
     }
+    val densityNow = webView.resources.displayMetrics.density
     val settled = !slot.forceReconcile &&
         slot.appliedPageZoom == slot.pageZoomPercent &&
         slot.appliedMode == slot.mode &&
         slot.lastAck?.ok == true &&
+        presentationSettled(slot.lastFault) &&
         slot.viewWidth == slot.ackedWidth &&
-        slot.viewHeight == slot.ackedHeight
+        slot.viewHeight == slot.ackedHeight &&
+        abs(densityNow - slot.ackedDensity) <= 0.02f
     if (settled) {
         if (textChanged) publishTextOnly(slot)
         return
@@ -339,6 +380,12 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
     val mode = slot.mode
     val percent = slot.pageZoomPercent
     val textZoom = slot.textZoomPercent
+    val sampledWidth = webView.width
+    val sampledHeight = webView.height
+    if (sampledWidth > 0) slot.viewWidth = sampledWidth
+    if (sampledHeight > 0) slot.viewHeight = sampledHeight
+    val density = webView.resources.displayMetrics.density
+    val parentWidth = (webView.parent as? View)?.width ?: 0
     if (url.contains("shark-incremental") && (flush || slot.layoutAppliedForUrl != url)) {
         webView.evaluateJavascript(SharkLayout.injectionScript(), null)
         slot.layoutAppliedForUrl = url
@@ -347,37 +394,98 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
         webView.evaluateJavascript(TrimpsLayout.injectionScript(), null)
         slot.layoutAppliedForUrl = url
     }
-    Log.d(
+    val expectW = cssPixelSize(sampledWidth, density)
+    val expectH = cssPixelSize(sampledHeight, density)
+    Log.i(
         TAG,
-        "reconcile before view=${webView.width}x${webView.height} mode=${mode.stored()} " +
+        "reconcile before view=${sampledWidth}x$sampledHeight parent=$parentWidth " +
+            "expect=${expectW}x$expectH density=$density mode=${mode.stored()} " +
             "page=$percent text=$textZoom flush=$flush",
     )
-    val script = presentationScript(mode, percent, flush)
+    val script = presentationScript(mode, percent, flush, expectW, expectH)
     val started = runCatching {
         webView.evaluateJavascript(script) { raw ->
             if (generation != slot.generation) return@evaluateJavascript
-            val ack = parsePresentationAck(raw, percent, textZoom)
-            Log.d(TAG, "reconcile after raw=${raw?.take(500)} ok=${ack?.ok} vs=${ack?.viewportScale}")
-            if (ack == null) {
-                retryReconcile(webView, slot, generation)
+            val widthNow = webView.width
+            val heightNow = webView.height
+            val parsed = parsePresentationAck(raw, percent, textZoom)
+            if (parsed == null) {
+                Log.i(TAG, "reconcile fault=$FAULT_TIMEOUT view=${widthNow}x$heightNow raw=${raw?.take(240)}")
+                retryReconcile(webView, slot, generation, FAULT_TIMEOUT)
                 return@evaluateJavascript
             }
+            if (widthNow != sampledWidth || heightNow != sampledHeight) {
+                Log.i(
+                    TAG,
+                    "reconcile fault=$FAULT_NATIVE view moved $sampledWidth x $sampledHeight -> $widthNow x $heightNow",
+                )
+                slot.forceReconcile = true
+                retryReconcile(webView, slot, generation, FAULT_NATIVE)
+                return@evaluateJavascript
+            }
+            val densityNow = webView.resources.displayMetrics.density
+            val parentNow = (webView.parent as? View)?.width ?: parentWidth
+            val fault = assessPresentation(
+                parsed,
+                widthNow,
+                heightNow,
+                densityNow,
+                webView.scale,
+                parentNow,
+            )
+            val accepted = presentationSettled(fault)
+            val ack = parsed.copy(ok = accepted, fault = fault)
+            Log.i(
+                TAG,
+                "reconcile fault=$fault accepted=$accepted view=${widthNow}x$heightNow " +
+                    "inner=${ack.innerWidth}x${ack.innerHeight} vv=${ack.visualWidth}x${ack.visualHeight} " +
+                    "vs=${ack.viewportScale} pageScale=${webView.scale} zoom=${ack.rootZoom}/${ack.bodyZoom} " +
+                    "scroll=${ack.scrollWidth} client=${ack.clientWidth}",
+            )
             slot.lastAck = ack
+            slot.lastFault = fault
             slot.onAck?.invoke(ack)
-            if (ack.ok) {
+            if (accepted) {
                 slot.appliedPageZoom = percent
                 slot.appliedMode = mode
-                slot.ackedWidth = slot.viewWidth
-                slot.ackedHeight = slot.viewHeight
+                slot.ackedWidth = widthNow
+                slot.ackedHeight = heightNow
+                slot.ackedDensity = densityNow
                 slot.retries = 0
+                if (!slot.confirming) scheduleConfirmation(webView, slot, generation)
+                slot.confirming = false
             } else {
-                retryReconcile(webView, slot, generation)
+                if (fault == FAULT_STALE_VIEWPORT || fault == FAULT_STALE_FRAME) {
+                    nudgeStaleViewport(webView)
+                } else {
+                    webView.requestLayout()
+                }
+                retryReconcile(webView, slot, generation, fault)
             }
         }
     }
     if (started.isFailure) {
-        Log.d(TAG, "reconcile skipped ${started.exceptionOrNull()?.javaClass?.simpleName}")
+        Log.i(TAG, "reconcile skipped ${started.exceptionOrNull()?.javaClass?.simpleName}")
     }
+}
+
+private fun scheduleConfirmation(webView: WebView, slot: Slot, generation: Int) {
+    webView.postDelayed({
+        if (!webView.isAttachedToWindow || generation != slot.generation) return@postDelayed
+        val width = webView.width
+        val height = webView.height
+        val density = webView.resources.displayMetrics.density
+        val drifted = width != slot.ackedWidth ||
+            height != slot.ackedHeight ||
+            abs(density - slot.ackedDensity) > 0.02f
+        slot.confirming = true
+        slot.forceReconcile = true
+        if (drifted) {
+            Log.i(TAG, "reconcile confirm drifted view=${width}x$height density=$density")
+            slot.confirming = false
+        }
+        reconcilePresentation(webView, slot)
+    }, CONFIRM_DELAY_MS)
 }
 
 private fun publishTextOnly(slot: Slot) {
@@ -387,12 +495,27 @@ private fun publishTextOnly(slot: Slot) {
     slot.onAck?.invoke(next)
 }
 
-private fun retryReconcile(webView: WebView, slot: Slot, generation: Int) {
-    if (slot.retries >= MAX_PRESENTATION_RETRIES) return
+private fun retryReconcile(webView: WebView, slot: Slot, generation: Int, fault: String) {
+    if (slot.retries >= MAX_PRESENTATION_RETRIES) {
+        Log.i(
+            TAG,
+            "reconcile fault=$FAULT_TIMEOUT last=$fault view=${webView.width}x${webView.height} " +
+                "inner=${slot.lastAck?.innerWidth}x${slot.lastAck?.innerHeight} " +
+                "vs=${slot.lastAck?.viewportScale}",
+        )
+        val timedOut = slot.lastAck?.copy(ok = false, fault = FAULT_TIMEOUT)
+        if (timedOut != null) {
+            slot.lastAck = timedOut
+            slot.lastFault = FAULT_TIMEOUT
+            slot.onAck?.invoke(timedOut)
+        }
+        return
+    }
     slot.retries += 1
-    val delay = 80L * slot.retries
+    val delay = 40L * slot.retries + 20L * slot.retries * slot.retries
     webView.postDelayed({
         if (generation != slot.generation) return@postDelayed
+        if (!webView.isAttachedToWindow) return@postDelayed
         slot.forceReconcile = true
         reconcilePresentation(webView, slot)
     }, delay)
@@ -415,12 +538,16 @@ private class Slot(
     var viewHeight: Int = -1,
     var ackedWidth: Int = -1,
     var ackedHeight: Int = -1,
+    var ackedDensity: Float = 0f,
     var forceReconcile: Boolean = true,
+    var confirming: Boolean = false,
     var generation: Int = 0,
     var retries: Int = 0,
+    var lastFault: String = "",
     var lastAck: PresentationAck? = null,
     var onAck: ((PresentationAck) -> Unit)? = null,
     var listener: View.OnLayoutChangeListener? = null,
 )
 
-private const val MAX_PRESENTATION_RETRIES = 4
+private const val MAX_PRESENTATION_RETRIES = 6
+private const val CONFIRM_DELAY_MS = 200L

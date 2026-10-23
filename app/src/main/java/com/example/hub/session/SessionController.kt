@@ -1,6 +1,7 @@
 package com.example.hub.session
 
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
@@ -41,6 +42,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -136,6 +138,13 @@ class SessionController(
 
     private val _sessionError = MutableStateFlow<String?>(null)
     val sessionError: StateFlow<String?> = _sessionError.asStateFlow()
+
+    private val manualSaveGate = AtomicBoolean(false)
+    private var manualSaveNoticeId = 0L
+    private val _manualSaveInFlight = MutableStateFlow(false)
+    val manualSaveInFlight: StateFlow<Boolean> = _manualSaveInFlight.asStateFlow()
+    private val _manualSaveNotice = MutableStateFlow<ManualSaveNotice?>(null)
+    val manualSaveNotice: StateFlow<ManualSaveNotice?> = _manualSaveNotice.asStateFlow()
 
     private val _subresourceDiagnostic = MutableStateFlow<String?>(null)
     val subresourceDiagnostic: StateFlow<String?> = _subresourceDiagnostic.asStateFlow()
@@ -417,15 +426,47 @@ class SessionController(
     }
 
     fun requestCheckpoint() {
+        if (!manualSaveGate.compareAndSet(false, true)) {
+            publishManualSave(ManualSaveOutcome.BUSY, "Save already in progress.")
+            return
+        }
+        _manualSaveInFlight.value = true
+        _manualSaveNotice.value = null
         scope.launch {
-            mutex.withLock {
-                if (_state.value !is SessionState.Playing) {
-                    Log.w(TAG, "requestCheckpoint() rejected: ${_state.value}")
-                    return@withLock
+            try {
+                val attempt = mutex.withLock {
+                    if (_state.value !is SessionState.Playing) {
+                        Log.w(TAG, "requestCheckpoint() rejected: ${_state.value}")
+                        CaptureAttempt.Failed(
+                            "Save is unavailable right now. Last good snapshot was kept.",
+                        )
+                    } else {
+                        performCaptureLocked(SnapshotReasons.CHECKPOINT)
+                    }
                 }
-                performCaptureLocked(SnapshotReasons.CHECKPOINT)
+                when (attempt) {
+                    CaptureAttempt.Saved -> publishManualSave(ManualSaveOutcome.SAVED, null)
+                    CaptureAttempt.Busy -> publishManualSave(
+                        ManualSaveOutcome.BUSY,
+                        "Save already in progress.",
+                    )
+                    is CaptureAttempt.Deferred -> publishManualSave(ManualSaveOutcome.DEFERRED, attempt.detail)
+                    is CaptureAttempt.Failed -> publishManualSave(ManualSaveOutcome.FAILED, attempt.detail)
+                }
+            } finally {
+                manualSaveGate.set(false)
+                _manualSaveInFlight.value = false
             }
         }
+    }
+
+    private fun publishManualSave(outcome: ManualSaveOutcome, detail: String?) {
+        manualSaveNoticeId += 1
+        _manualSaveNotice.value = ManualSaveNotice(
+            id = manualSaveNoticeId,
+            outcome = outcome,
+            message = manualSaveMessage(outcome, detail),
+        )
     }
 
     fun requestForegroundCapture() {
@@ -623,7 +664,7 @@ class SessionController(
         return view
     }
 
-    fun noteConfigurationChange() {
+    fun noteConfigurationChange(newConfig: Configuration? = null) {
         recordDiagnostic(
             DiagnosticSeverity.INFO,
             "display",
@@ -631,12 +672,11 @@ class SessionController(
         )
         _presentationEpoch.value = _presentationEpoch.value + 1
         val view = webView ?: return
+        val config = newConfig ?: view.resources.configuration
         view.post {
+            runCatching { view.dispatchConfigurationChanged(config) }
             view.requestLayout()
             view.invalidate()
-            runCatching {
-                view.evaluateJavascript("window.dispatchEvent(new Event('resize'));", null)
-            }
         }
     }
 
@@ -1786,41 +1826,46 @@ class SessionController(
         }
     }
 
-    private suspend fun performCaptureLocked(reason: String): Boolean {
+    private suspend fun performCaptureLocked(reason: String): CaptureAttempt {
         if (suppressCapture) {
             Log.d(TAG, "capture suppressed ($reason)")
-            return false
+            return CaptureAttempt.Failed("Save was not taken. Last good snapshot was kept.")
         }
         if (captureRunning) {
             Log.w(TAG, "capture overlap rejected ($reason)")
-            return false
+            return CaptureAttempt.Busy
         }
-        val gameId = _activeGameId.value ?: return false
+        val gameId = _activeGameId.value
+            ?: return CaptureAttempt.Failed("Save failed. Last good snapshot was kept.")
         if (_state.value !is SessionState.Playing) {
+            val error = "Safe capture is impossible in ${_state.value} ($reason). Last good snapshot was kept."
             writeCaptureResult(
                 gameId,
                 successPayload = null,
-                error = "Safe capture is impossible in ${_state.value} ($reason). Last good snapshot was kept.",
+                error = error,
             )
-            return false
+            return CaptureAttempt.Failed(error)
         }
         val adapter = activeAdapter
         val view = webView
         if (adapter == null || (view == null && captureClient == null)) {
+            val error = "Safe capture is impossible: no live WebView ($reason). Last good snapshot was kept."
             writeCaptureResult(
                 gameId,
                 successPayload = null,
-                error = "Safe capture is impossible: no live WebView ($reason). Last good snapshot was kept.",
+                error = error,
             )
-            _sessionError.value = "Capture failed ($reason): no live WebView. Last good snapshot was kept."
-            return false
+            _sessionError.value = error
+            return CaptureAttempt.Failed(error)
         }
         captureRunning = true
         try {
             transitionTo(SessionState.Capturing, gameId)
             val payload = try {
-                captureClient?.invoke(view, adapter)
-                    ?: captureThroughAdapter(view!!, adapter, gameId)
+                // Null is a capture result. Falling through would read the WebView again.
+                val client = captureClient
+                if (client != null) client.invoke(view, adapter)
+                else captureThroughAdapter(view!!, adapter, gameId)
             } catch (e: Exception) {
                 Log.e(TAG, "capture threw ($reason)", e)
                 null
@@ -1831,7 +1876,7 @@ class SessionController(
                 false
             }
             if (payload == null || !valid) {
-                val decline = adapter?.captureDecline()
+                val decline = adapter.captureDecline()
                 val error = decline ?: "Capture failed validation ($reason). Last good snapshot was kept."
                 writeCaptureResult(
                     gameId,
@@ -1842,20 +1887,33 @@ class SessionController(
                 if (_state.value is SessionState.Capturing) {
                     transitionTo(SessionState.Playing, gameId)
                 }
-                return false
+                return if (!decline.isNullOrBlank()) {
+                    CaptureAttempt.Deferred(decline)
+                } else {
+                    CaptureAttempt.Failed(error)
+                }
             }
             writeCaptureResult(gameId, payload, null, reason)
-            if (_sessionError.value?.startsWith("Capture ") == true) {
+            if (_sessionError.value?.startsWith("Capture ") == true ||
+                _sessionError.value?.startsWith("Capture deferred") == true
+            ) {
                 _sessionError.value = null
             }
             if (_state.value is SessionState.Capturing) {
                 transitionTo(SessionState.Playing, gameId)
             }
             Log.d(TAG, "capture succeeded ($reason) bytes=${payload.length}")
-            return true
+            return CaptureAttempt.Saved
         } finally {
             captureRunning = false
         }
+    }
+
+    private sealed interface CaptureAttempt {
+        data object Saved : CaptureAttempt
+        data object Busy : CaptureAttempt
+        data class Deferred(val detail: String) : CaptureAttempt
+        data class Failed(val detail: String) : CaptureAttempt
     }
 
     private fun startCaptureCadence() {

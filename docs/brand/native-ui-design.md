@@ -51,7 +51,7 @@ Manrope, SIL Open Font License 1.1. Source pin and checksum: `third_party/fonts/
 - `HubCard` is a Surface fill with a 1dp outline. Game cards pass `identityAccent` for a 2dp leading edge. Settings cards pass none.
 - Play / Resume, Check for update, and the forward recovery action are filled gold (`HubPrimaryButton`), including the disabled state from the colour scheme. Secondary actions are outlined or `HubTextButton` in on-surface, not gold.
 - Chips: Resume/ready uses success, Play/no save uses a neutral surface, Debug uses warning. The workstation line stays sentence text in TextSecondary.
-- Menu: Resume is the gold row. Snapshot now and Checkpoint keep a gold icon on a neutral row. Other rows are SurfaceRaised. Disabled rows stay faded and keep the "(disabled)" description. Labels are unchanged.
+- Menu: Resume is the gold row. Save keeps a gold icon on a neutral row and creates a pinned checkpoint. Other rows are SurfaceRaised. Disabled rows stay faded and keep the "(disabled)" description.
 - Recovery title "Session Recovery Required" uses the error colour. Close is outlined, not an error button. One gold action per state: Retry, Restore this snapshot, or Recover from snapshot.
 - Update dialogue: Update is primary, Later is muted, and a failed download sentence uses the error colour. A workstation commit message, when present, sits under the version sentence in TextSecondary and is cut at 280 characters.
 - The in-game bar stays slim. Its Menu control is tonal and at least 48dp. No gold rule sits over the WebView.

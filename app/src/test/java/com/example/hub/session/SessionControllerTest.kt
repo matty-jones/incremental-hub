@@ -11,6 +11,8 @@ import com.example.hub.database.SnapshotOrigins
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.EnvelopeProbeAdapter
+import com.example.hub.games.GameAdapter
+import com.example.hub.games.SharkIncrementalAdapter
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.LzString
 import com.example.hub.games.PeekOutcome
@@ -1631,6 +1633,97 @@ class SessionControllerTest {
         assertEquals(1, snapshots.history("shark-incremental").size)
     }
 
+    @Test
+    fun manualSaveReportsSuccessOnlyAfterTheCaptureCommits() = runTest {
+        val good = progressedSharkPayload()
+        val gate = kotlinx.coroutines.CompletableDeferred<String?>()
+        val snapshots = StubSnapshotDao()
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> gate.await() },
+            snapshots = snapshots,
+        )
+        session.open("shark-incremental")
+        session.webView = WebView(ApplicationProvider.getApplicationContext())
+        session.requestCheckpoint()
+        assertTrue(session.manualSaveInFlight.value)
+        assertNull(session.manualSaveNotice.value)
+        assertNull(dao.get("shark-incremental")!!.snapshotPayload)
+        session.requestCheckpoint()
+        assertEquals(ManualSaveOutcome.BUSY, session.manualSaveNotice.value?.outcome)
+        assertFalse(session.manualSaveNotice.value?.message == "Game saved")
+        assertEquals(0, snapshots.history("shark-incremental").size)
+        gate.complete(good)
+        assertEquals(ManualSaveOutcome.SAVED, session.manualSaveNotice.value?.outcome)
+        assertEquals("Game saved", session.manualSaveNotice.value?.message)
+        assertFalse(session.manualSaveInFlight.value)
+        assertEquals(good, dao.get("shark-incremental")!!.snapshotPayload)
+        val checkpoint = snapshots.history("shark-incremental").single()
+        assertTrue(checkpoint.pinned)
+        assertEquals(SnapshotReasons.CHECKPOINT, checkpoint.reason)
+        assertEquals(SnapshotOrigins.MANUAL_CHECKPOINT, checkpoint.origin)
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun failedAndDeferredSavesKeepThePreviousPayload() = runTest {
+        val good = progressedSharkPayload()
+        val declining = DecliningAdapter(null)
+        var payload: String? = good
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> payload },
+            adapterForTest = { adapterId ->
+                if (adapterId == "shark-incremental-adapter") declining else null
+            },
+        )
+        session.open("shark-incremental")
+        session.webView = WebView(ApplicationProvider.getApplicationContext())
+        session.requestCheckpoint()
+        assertEquals("Game saved", session.manualSaveNotice.value?.message)
+        assertEquals(good, dao.get("shark-incremental")!!.snapshotPayload)
+
+        payload = null
+        declining.decline = "Capture deferred: offline warp is running. Last good snapshot was kept."
+        session.requestCheckpoint()
+        assertEquals(ManualSaveOutcome.DEFERRED, session.manualSaveNotice.value?.outcome)
+        assertEquals(declining.decline, session.manualSaveNotice.value?.message)
+        assertEquals(good, dao.get("shark-incremental")!!.snapshotPayload)
+
+        payload = "not-a-save"
+        declining.decline = null
+        session.requestCheckpoint()
+        assertEquals(ManualSaveOutcome.FAILED, session.manualSaveNotice.value?.outcome)
+        assertTrue(session.manualSaveNotice.value!!.message.contains("Last good snapshot was kept"))
+        assertFalse(session.manualSaveNotice.value!!.message == "Game saved")
+        assertEquals(good, dao.get("shark-incremental")!!.snapshotPayload)
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun automaticCapturesStayUnpinnedWhileSaveIsPinned() = runTest {
+        val snapshots = StubSnapshotDao()
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> progressedSharkPayload() },
+            snapshots = snapshots,
+        )
+        session.open("shark-incremental")
+        session.webView = WebView(ApplicationProvider.getApplicationContext())
+        session.requestCheckpoint()
+        repeat(12) { session.requestCapture() }
+        val rows = snapshots.history("shark-incremental")
+        val pinned = rows.filter { it.reason == SnapshotReasons.CHECKPOINT }
+        assertEquals(1, pinned.size)
+        assertTrue(pinned.single().pinned)
+        assertEquals(SnapshotOrigins.MANUAL_CHECKPOINT, pinned.single().origin)
+        val automatic = rows.filter { it.reason == "request" }
+        assertTrue(automatic.isNotEmpty())
+        assertTrue(automatic.all { !it.pinned })
+        assertTrue(automatic.size <= 10)
+        session.forceCloseForTest()
+    }
+
     private fun sharkPayload(gold: Int): String = freshSharkPayload(gold)
 
     private fun freshSharkPayload(gold: Int = 0): String {
@@ -1857,6 +1950,10 @@ class SessionControllerTest {
             instances.clear()
             insertOrder.clear()
         }
+    }
+
+    private class DecliningAdapter(var decline: String?) : GameAdapter by SharkIncrementalAdapter() {
+        override fun captureDecline(): String? = decline
     }
 
     class StubSnapshotDao : SnapshotDao {

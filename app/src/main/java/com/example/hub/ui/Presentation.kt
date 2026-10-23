@@ -28,9 +28,32 @@ data class PresentationAck(
     val fitRatio: Double?,
     val maxRight: Int,
     val textZoom: Int,
+    val scrollWidth: Int = 0,
+    val clientWidth: Int = 0,
+    val fault: String = FAULT_NONE,
 )
 
 const val FE_PRESENTATION_STYLE_ID = "hub-fe-presentation"
+
+const val FAULT_NONE = "none"
+const val FAULT_NATIVE = "native-view"
+const val FAULT_STALE_VIEWPORT = "stale-viewport"
+const val FAULT_OVERFLOW = "css-overflow"
+const val FAULT_STALE_FRAME = "stale-frame"
+const val FAULT_ZOOM = "zoom"
+const val FAULT_TIMEOUT = "timed-out"
+
+/** A fold can settle while a page still has its own wide content. */
+fun presentationSettled(fault: String): Boolean =
+    fault == FAULT_NONE || fault == FAULT_OVERFLOW
+
+fun cssPixelSize(px: Int, density: Float): Int {
+    if (px <= 0 || density <= 0.01f) return 0
+    return (px / density).roundToInt()
+}
+
+fun viewportTolerance(cssPx: Int): Int =
+    kotlin.math.max(12, (cssPx * 0.04f).roundToInt())
 
 /**
  * Applies one presentation strategy and returns before/after metrics.
@@ -39,7 +62,13 @@ const val FE_PRESENTATION_STYLE_ID = "hub-fe-presentation"
  * [flush] reassigns zoom so a fold can repaint a stale magnified frame.
  * FE000000 keeps the hub percent on body zoom. Root zoom on that page changes the layout viewport.
  */
-fun presentationScript(mode: PageScaleMode, pageZoomPercent: Int, flush: Boolean): String {
+fun presentationScript(
+    mode: PageScaleMode,
+    pageZoomPercent: Int,
+    flush: Boolean,
+    expectWidthCss: Int = 0,
+    expectHeightCss: Int = 0,
+): String {
     val literal = zoomLiteral(pageZoomPercent)
     val css = JSONObject.quote(if (mode == PageScaleMode.READABLE) readableCss() else "")
     val modeName = mode.stored()
@@ -66,9 +95,11 @@ fun presentationScript(mode: PageScaleMode, pageZoomPercent: Int, flush: Boolean
         " body: body && body.style ? (body.style.zoom || '') : ''," +
         " rootCss: root ? String(getComputedStyle(root).zoom || '') : ''," +
         " bodyCss: body ? String(getComputedStyle(body).zoom || '') : ''," +
+        " sw: root ? (root.scrollWidth || 0) : 0, cw: root ? (root.clientWidth || 0) : 0," +
         " fit: fit, would: would, maxRight: Math.round(maxRight)}; }" +
         " var before = snap();" +
         " var mode = '$modeName'; var literal = '$literal'; var flush = $flushFlag; var css = $css;" +
+        " var expectW = ${expectWidthCss.coerceAtLeast(0)}; var expectH = ${expectHeightCss.coerceAtLeast(0)};" +
         " var root = document.documentElement; var body = document.body;" +
         " if (!root) return JSON.stringify({ok:false, reason:'no-root', before:before, after:before, mode:mode, want:literal});" +
         " var node = document.getElementById('$FE_PRESENTATION_STYLE_ID');" +
@@ -99,18 +130,37 @@ fun presentationScript(mode: PageScaleMode, pageZoomPercent: Int, flush: Boolean
         " }" +
         " var after = snap();" +
         " var want = parseFloat(literal);" +
-        " var ok = false;" +
+        " var zoomOk = false;" +
         " if (mode === 'game-fit') {" +
         " var ratio = parseFloat(after.body);" +
         " var expect = Math.min((after.iw || 0) / 1376, 1);" +
-        " ok = after.root === '' && isFinite(ratio) && Math.abs(ratio - expect) < 0.03;" +
+        " zoomOk = after.root === '' && isFinite(ratio) && Math.abs(ratio - expect) < 0.03;" +
         " } else if (mode === 'readable') {" +
         " var appliedReadable = parseFloat(after.body);" +
-        " ok = after.root === '' && isFinite(appliedReadable) && Math.abs(appliedReadable - want) < 0.02 && (!after.vs || Math.abs(after.vs - 1) < 0.05);" +
+        " zoomOk = after.root === '' && isFinite(appliedReadable) && Math.abs(appliedReadable - want) < 0.02 && (!after.vs || Math.abs(after.vs - 1) < 0.05);" +
         " } else {" +
         " var appliedHub = parseFloat(after.root);" +
-        " ok = isFinite(appliedHub) && Math.abs(appliedHub - want) < 0.02 && (!after.vs || Math.abs(after.vs - 1) < 0.05); }" +
-        " return JSON.stringify({ok:ok, mode:mode, want:literal, before:before, after:after});" +
+        " zoomOk = isFinite(appliedHub) && Math.abs(appliedHub - want) < 0.02 && (!after.vs || Math.abs(after.vs - 1) < 0.05); }" +
+        " function near(actual, expected) {" +
+        " if (!(expected > 0)) return true;" +
+        " var tol = Math.max(12, Math.round(expected * 0.04));" +
+        " return Math.abs((actual || 0) - expected) <= tol; }" +
+        " var scale = after.vs == null ? 1 : after.vs;" +
+        " var innerOk = near(after.iw, expectW) && near(after.ih, expectH);" +
+        " var productOk = near(Math.round((after.iw || 0) * scale), expectW) && near(Math.round((after.ih || 0) * scale), expectH);" +
+        " var fault = 'none';" +
+        " var ok = zoomOk;" +
+        " if (expectW > 0 && expectH > 0) {" +
+        " if (!(innerOk && Math.abs(scale - 1) <= 0.08)) {" +
+        " if (innerOk) fault = 'stale-frame';" +
+        " else if (productOk && scale < 0.92) fault = 'none';" +
+        " else if (productOk && scale > 1.08) fault = 'stale-frame';" +
+        " else fault = 'stale-viewport'; }" +
+        " if (fault === 'none' && !zoomOk) fault = 'zoom';" +
+        " if (fault === 'none' && after.sw > after.iw * 1.2 && after.iw > 0) fault = 'css-overflow';" +
+        " ok = fault === 'none' || fault === 'css-overflow';" +
+        " } else if (!zoomOk) { fault = 'zoom'; }" +
+        " return JSON.stringify({ok:ok, mode:mode, want:literal, fault:fault, before:before, after:after});" +
         " } catch (e) { return JSON.stringify({ok:false, reason:String(e).slice(0, 160)}); } })()"
 }
 
@@ -201,7 +251,82 @@ fun parsePresentationAck(raw: String?, requestedPageZoom: Int, textZoom: Int): P
         fitRatio = after?.optDoubleOrNull("would"),
         maxRight = after?.optInt("maxRight") ?: 0,
         textZoom = textZoom,
+        scrollWidth = after?.optInt("sw") ?: 0,
+        clientWidth = after?.optInt("cw") ?: 0,
+        fault = json.optString("fault", FAULT_NONE).ifBlank { FAULT_NONE },
     )
+}
+
+/**
+ * Decides whether the live document actually occupies the WebView.
+ * A matching CSS zoom is not enough: the layout viewport has to cover the view.
+ */
+fun assessPresentation(
+    ack: PresentationAck,
+    viewWidthPx: Int,
+    viewHeightPx: Int,
+    density: Float,
+    pageScale: Float,
+    parentWidthPx: Int,
+): String {
+    if (viewWidthPx < 2 || viewHeightPx < 2 || density <= 0.01f) return FAULT_NATIVE
+    if (parentWidthPx > 2 && viewWidthPx + 8 < parentWidthPx) return FAULT_NATIVE
+    val expectW = cssPixelSize(viewWidthPx, density)
+    val expectH = cssPixelSize(viewHeightPx, density)
+    if (expectW < 2 || expectH < 2) return FAULT_NATIVE
+    val tolW = viewportTolerance(expectW)
+    val tolH = viewportTolerance(expectH)
+    val scale = ack.viewportScale ?: 1.0
+    val innerOk = nearCss(ack.innerWidth, expectW, tolW) && nearCss(ack.innerHeight, expectH, tolH)
+    val productOk = nearCss((ack.innerWidth * scale).roundToInt(), expectW, tolW) &&
+        nearCss((ack.innerHeight * scale).roundToInt(), expectH, tolH)
+    val geometry = when {
+        innerOk && abs(scale - 1.0) <= 0.08 -> FAULT_NONE
+        innerOk -> FAULT_STALE_FRAME
+        productOk && scale < 0.92 -> FAULT_NONE
+        productOk && scale > 1.08 -> FAULT_STALE_FRAME
+        else -> FAULT_STALE_VIEWPORT
+    }
+    if (geometry != FAULT_NONE) return geometry
+    if (pageScaleIsStuck(pageScale, ack.devicePixelRatio)) return FAULT_STALE_FRAME
+    val visualWidth = ack.visualWidth
+    val visualHeight = ack.visualHeight
+    if (visualWidth != null && visualHeight != null) {
+        val visualOk = nearCss(visualWidth.roundToInt(), expectW, tolW) &&
+            nearCss(visualHeight.roundToInt(), expectH, tolH)
+        val visualProduct = nearCss((visualWidth * scale).roundToInt(), expectW, tolW) &&
+            nearCss((visualHeight * scale).roundToInt(), expectH, tolH)
+        if (!visualOk && !visualProduct) return FAULT_STALE_FRAME
+    }
+    if (!zoomMatches(ack)) return FAULT_ZOOM
+    if (ack.scrollWidth > 0 && ack.innerWidth > 0 && ack.scrollWidth > ack.innerWidth * 1.2 && abs(scale - 1.0) < 0.08) {
+        return FAULT_OVERFLOW
+    }
+    return FAULT_NONE
+}
+
+private fun nearCss(actual: Int, expected: Int, tolerance: Int): Boolean =
+    abs(actual - expected) <= tolerance
+
+private fun pageScaleIsStuck(pageScale: Float, devicePixelRatio: Double): Boolean {
+    if (pageScale <= 0.05f) return false
+    if (abs(pageScale - 1f) <= 0.08f) return false
+    if (devicePixelRatio > 0.0 && abs(pageScale - devicePixelRatio.toFloat()) < 0.2f) return false
+    return true
+}
+
+private fun zoomMatches(ack: PresentationAck): Boolean {
+    return when (ack.mode) {
+        PageScaleMode.GAME_FIT -> {
+            val ratio = ack.bodyZoom.toFloatOrNull() ?: return false
+            val expect = kotlin.math.min(ack.innerWidth / 1376f, 1f)
+            ack.rootZoom.isEmpty() && abs(ratio - expect) < 0.03f
+        }
+        PageScaleMode.READABLE -> {
+            ack.rootZoom.isEmpty() && zoomAcknowledged(ack.requestedPageZoom, ack.bodyZoom.ifBlank { ack.bodyComputed })
+        }
+        PageScaleMode.HUB -> zoomAcknowledged(ack.requestedPageZoom, ack.rootZoom.ifBlank { ack.rootComputed })
+    }
 }
 
 private fun JSONObject.optDoubleOrNull(name: String): Double? {
