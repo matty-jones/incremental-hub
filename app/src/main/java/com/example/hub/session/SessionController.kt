@@ -32,6 +32,7 @@ import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
 import com.example.hub.games.StorageSlot
 import com.example.hub.BuildConfig
+import com.example.hub.ui.armSharkViewportUnlock
 import com.example.hub.games.unwrapJsResult
 import com.example.hub.games.shouldResumeLive
 import org.json.JSONObject
@@ -674,6 +675,7 @@ class SessionController(
         val view = webView ?: return
         val config = newConfig ?: view.resources.configuration
         view.post {
+            armSharkViewportUnlock(view)
             runCatching { view.dispatchConfigurationChanged(config) }
             view.requestLayout()
             view.invalidate()

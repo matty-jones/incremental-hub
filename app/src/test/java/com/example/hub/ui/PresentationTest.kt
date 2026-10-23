@@ -125,6 +125,29 @@ class PresentationTest {
     }
 
     @Test
+    fun sharkUnlockClearsZoomAndRewritesTheViewport() {
+        val unlock = viewportUnlockScript()
+        assertTrue(unlock.contains("width=device-width, initial-scale=1"))
+        assertTrue(unlock.contains("root.style.zoom = ''"))
+        assertTrue(unlock.contains("requestAnimationFrame"))
+        assertFalse(unlock.contains("loadUrl"))
+        assertFalse(unlock.contains("localStorage"))
+        assertFalse(unlock.contains("save("))
+        val held = presentationScript(
+            PageScaleMode.HUB,
+            100,
+            flush = true,
+            expectWidthCss = 842,
+            expectHeightCss = 645,
+            applyZoom = false,
+        )
+        assertTrue(held.contains("var applyZoom = false"))
+        assertTrue(viewportReadyForZoom(FAULT_ZOOM))
+        assertTrue(viewportReadyForZoom(FAULT_NONE))
+        assertFalse(viewportReadyForZoom(FAULT_STALE_VIEWPORT))
+    }
+
+    @Test
     fun scriptNamesViewportFaultsWithoutNavigation() {
         val script = presentationScript(PageScaleMode.HUB, 100, flush = true, expectWidthCss = 842, expectHeightCss = 645)
         assertTrue(script.contains("842"))

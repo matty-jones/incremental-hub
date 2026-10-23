@@ -311,7 +311,13 @@ private fun ensureLayoutListener(webView: WebView) {
         current.viewHeight = height
         current.forceReconcile = true
         current.confirming = false
-        if (jumped) current.retries = 0
+        if (jumped) {
+            current.retries = 0
+            current.viewportPolls = 0
+            current.viewportStable = 0
+            current.holdZoom = isSharkUrl((view as? WebView)?.url)
+            current.unlockPosted = false
+        }
         Log.d(TAG, "WebViewHost: size ${width}x$height; reconciling presentation without reload")
         view.post { reconcilePresentation(view as WebView, current) }
     }
@@ -319,12 +325,32 @@ private fun ensureLayoutListener(webView: WebView) {
     webView.addOnLayoutChangeListener(listener)
 }
 
+internal fun isSharkUrl(url: String?): Boolean = url?.contains("shark-incremental") == true
+
+/** The next Shark reconcile must rebuild the layout viewport before it applies zoom. */
+internal fun armSharkViewportUnlock(webView: WebView) {
+    val slot = webView.tag as? Slot ?: return
+    if (!isSharkUrl(webView.url)) return
+    slot.holdZoom = true
+    slot.unlockPosted = false
+    slot.viewportPolls = 0
+    slot.viewportStable = 0
+    slot.retries = 0
+    slot.forceReconcile = true
+    slot.confirming = false
+}
+
 /**
  * Asks Chromium to read the current view size again. Does not navigate or
- * recreate the WebView. Wide-viewport settings are restored on the next frame.
+ * recreate the WebView. Shark keeps wide-viewport mode so a later fold can
+ * resolve device-width. Other games restore the previous viewport settings.
  */
 internal fun nudgeStaleViewport(webView: WebView) {
     if (!webView.isAttachedToWindow) return
+    if (isSharkUrl(webView.url)) {
+        unlockSharkViewport(webView)
+        return
+    }
     val settings = webView.settings
     val wide = settings.useWideViewPort
     val overview = settings.loadWithOverviewMode
@@ -349,6 +375,24 @@ internal fun nudgeStaleViewport(webView: WebView) {
     }
 }
 
+/**
+ * Clears a cover-sized layout that WebView is stretching across the inner screen.
+ * Page zoom stays off until the layout viewport matches the view.
+ */
+@Suppress("DEPRECATION")
+internal fun unlockSharkViewport(webView: WebView) {
+    if (!webView.isAttachedToWindow) return
+    val settings = webView.settings
+    settings.useWideViewPort = true
+    settings.loadWithOverviewMode = false
+    runCatching { webView.dispatchConfigurationChanged(webView.resources.configuration) }
+    runCatching { webView.evaluateJavascript(viewportUnlockScript(), null) }
+    webView.post {
+        runCatching { webView.setInitialScale(0) }
+        webView.requestLayout()
+    }
+}
+
 private fun reconcilePresentation(webView: WebView, slot: Slot) {
     if (!webView.isAttachedToWindow) return
     val textChanged = slot.appliedTextZoom != slot.textZoomPercent
@@ -359,6 +403,20 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
     val url = webView.url
     if (url.isNullOrBlank() || url == "about:blank") {
         if (textChanged) publishTextOnly(slot)
+        return
+    }
+    val shark = isSharkUrl(url)
+    if (!shark) slot.holdZoom = false
+    if (shark && slot.holdZoom && !slot.unlockPosted) {
+        slot.unlockPosted = true
+        slot.viewportStable = 0
+        Log.i(TAG, "reconcile unlock shark view=${webView.width}x${webView.height}")
+        unlockSharkViewport(webView)
+        webView.postDelayed({
+            if (!webView.isAttachedToWindow) return@postDelayed
+            slot.forceReconcile = true
+            reconcilePresentation(webView, slot)
+        }, UNLOCK_DELAY_MS)
         return
     }
     val densityNow = webView.resources.displayMetrics.density
@@ -400,9 +458,9 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
         TAG,
         "reconcile before view=${sampledWidth}x$sampledHeight parent=$parentWidth " +
             "expect=${expectW}x$expectH density=$density mode=${mode.stored()} " +
-            "page=$percent text=$textZoom flush=$flush",
+            "page=$percent text=$textZoom flush=$flush hold=${slot.holdZoom}",
     )
-    val script = presentationScript(mode, percent, flush, expectW, expectH)
+    val script = presentationScript(mode, percent, flush, expectW, expectH, applyZoom = !slot.holdZoom)
     val started = runCatching {
         webView.evaluateJavascript(script) { raw ->
             if (generation != slot.generation) return@evaluateJavascript
@@ -444,6 +502,39 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
             )
             slot.lastAck = ack
             slot.lastFault = fault
+            if (slot.holdZoom && shark) {
+                val ready = viewportReadyForZoom(fault)
+                if (ready) slot.viewportStable += 1 else slot.viewportStable = 0
+                slot.viewportPolls += 1
+                Log.i(
+                    TAG,
+                    "reconcile viewport stable=${slot.viewportStable} poll=${slot.viewportPolls} fault=$fault " +
+                        "inner=${ack.innerWidth}x${ack.innerHeight}",
+                )
+                if (slot.viewportStable >= 2) {
+                    slot.holdZoom = false
+                    slot.unlockPosted = false
+                    slot.viewportPolls = 0
+                    slot.unlockedWidth = widthNow
+                    slot.unlockedHeight = heightNow
+                    slot.forceReconcile = true
+                    webView.post { reconcilePresentation(webView, slot) }
+                    return@evaluateJavascript
+                }
+                if (slot.viewportPolls >= MAX_VIEWPORT_POLLS) {
+                    slot.holdZoom = false
+                    slot.unlockPosted = false
+                    retryReconcile(webView, slot, generation, fault)
+                    return@evaluateJavascript
+                }
+                if (!ready && slot.viewportPolls == 4) unlockSharkViewport(webView)
+                webView.postDelayed({
+                    if (generation != slot.generation || !webView.isAttachedToWindow) return@postDelayed
+                    slot.forceReconcile = true
+                    reconcilePresentation(webView, slot)
+                }, UNLOCK_DELAY_MS)
+                return@evaluateJavascript
+            }
             slot.onAck?.invoke(ack)
             if (accepted) {
                 slot.appliedPageZoom = percent
@@ -455,7 +546,18 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
                 if (!slot.confirming) scheduleConfirmation(webView, slot, generation)
                 slot.confirming = false
             } else {
-                if (fault == FAULT_STALE_VIEWPORT || fault == FAULT_STALE_FRAME) {
+                val sameUnlock = widthNow == slot.unlockedWidth && heightNow == slot.unlockedHeight
+                if (shark && !sameUnlock && slot.viewportPolls < MAX_VIEWPORT_POLLS &&
+                    (fault == FAULT_STALE_VIEWPORT || fault == FAULT_STALE_FRAME)
+                ) {
+                    slot.holdZoom = true
+                    slot.unlockPosted = false
+                    slot.viewportStable = 0
+                    slot.forceReconcile = true
+                    webView.post { reconcilePresentation(webView, slot) }
+                    return@evaluateJavascript
+                }
+                if (!shark && (fault == FAULT_STALE_VIEWPORT || fault == FAULT_STALE_FRAME)) {
                     nudgeStaleViewport(webView)
                 } else {
                     webView.requestLayout()
@@ -543,6 +645,12 @@ private class Slot(
     var confirming: Boolean = false,
     var generation: Int = 0,
     var retries: Int = 0,
+    var holdZoom: Boolean = false,
+    var unlockPosted: Boolean = false,
+    var viewportStable: Int = 0,
+    var viewportPolls: Int = 0,
+    var unlockedWidth: Int = -1,
+    var unlockedHeight: Int = -1,
     var lastFault: String = "",
     var lastAck: PresentationAck? = null,
     var onAck: ((PresentationAck) -> Unit)? = null,
@@ -550,4 +658,6 @@ private class Slot(
 )
 
 private const val MAX_PRESENTATION_RETRIES = 6
+private const val MAX_VIEWPORT_POLLS = 10
 private const val CONFIRM_DELAY_MS = 200L
+private const val UNLOCK_DELAY_MS = 80L

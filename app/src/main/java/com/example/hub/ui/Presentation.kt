@@ -47,6 +47,10 @@ const val FAULT_TIMEOUT = "timed-out"
 fun presentationSettled(fault: String): Boolean =
     fault == FAULT_NONE || fault == FAULT_OVERFLOW
 
+/** Geometry matches. Zoom may still be the cleared value from a viewport unlock. */
+fun viewportReadyForZoom(fault: String): Boolean =
+    fault == FAULT_NONE || fault == FAULT_ZOOM || fault == FAULT_OVERFLOW
+
 fun cssPixelSize(px: Int, density: Float): Int {
     if (px <= 0 || density <= 0.01f) return 0
     return (px / density).roundToInt()
@@ -68,11 +72,13 @@ fun presentationScript(
     flush: Boolean,
     expectWidthCss: Int = 0,
     expectHeightCss: Int = 0,
+    applyZoom: Boolean = true,
 ): String {
     val literal = zoomLiteral(pageZoomPercent)
     val css = JSONObject.quote(if (mode == PageScaleMode.READABLE) readableCss() else "")
     val modeName = mode.stored()
     val flushFlag = if (flush) "true" else "false"
+    val applyFlag = if (applyZoom) "true" else "false"
     return "(function(){ try {" +
         " function snap(){" +
         " var vv = window.visualViewport;" +
@@ -100,8 +106,10 @@ fun presentationScript(
         " var before = snap();" +
         " var mode = '$modeName'; var literal = '$literal'; var flush = $flushFlag; var css = $css;" +
         " var expectW = ${expectWidthCss.coerceAtLeast(0)}; var expectH = ${expectHeightCss.coerceAtLeast(0)};" +
+        " var applyZoom = $applyFlag;" +
         " var root = document.documentElement; var body = document.body;" +
         " if (!root) return JSON.stringify({ok:false, reason:'no-root', before:before, after:before, mode:mode, want:literal});" +
+        " if (applyZoom) {" +
         " var node = document.getElementById('$FE_PRESENTATION_STYLE_ID');" +
         " if (typeof maybeFitToWidth === 'function' && !window.__hubOriginalFit) window.__hubOriginalFit = maybeFitToWidth;" +
         " if (mode === 'readable') {" +
@@ -127,6 +135,7 @@ fun presentationScript(
         " if (node && node.parentNode) node.parentNode.removeChild(node);" +
         " root.style.zoom = literal; void root.offsetWidth;" +
         " if (flush) { void root.getBoundingClientRect(); }" +
+        " }" +
         " }" +
         " var after = snap();" +
         " var want = parseFloat(literal);" +
@@ -163,6 +172,32 @@ fun presentationScript(
         " return JSON.stringify({ok:ok, mode:mode, want:literal, fault:fault, before:before, after:after});" +
         " } catch (e) { return JSON.stringify({ok:false, reason:String(e).slice(0, 160)}); } })()"
 }
+
+/**
+ * Drops a frozen layout width on a page that has no viewport tag.
+ * The content is written twice so Chromium resolves device-width again.
+ * It does not navigate and it does not read or write the save.
+ */
+fun viewportUnlockScript(): String =
+    "(function(){ try {" +
+        " var root = document.documentElement; var body = document.body;" +
+        " if (root) root.style.zoom = '';" +
+        " if (body) body.style.zoom = '';" +
+        " var head = document.head || root;" +
+        " if (!head) return 'no-head';" +
+        " var meta = document.querySelector('meta[name=\"viewport\"]');" +
+        " if (!meta) { meta = document.createElement('meta'); meta.setAttribute('name', 'viewport'); head.appendChild(meta); }" +
+        " var next = 'width=device-width, initial-scale=1';" +
+        " meta.setAttribute('content', 'width=980');" +
+        " meta.setAttribute('content', next);" +
+        " requestAnimationFrame(function(){" +
+        " meta.setAttribute('content', 'width=device-width');" +
+        " meta.setAttribute('content', next);" +
+        " window.dispatchEvent(new Event('resize'));" +
+        " if (window.visualViewport) window.visualViewport.dispatchEvent(new Event('resize'));" +
+        " });" +
+        " return next;" +
+        " } catch (e) { return String(e).slice(0, 160); } })()"
 
 fun readableCss(): String = """
     .autobuyerdiv, .tallautobuyerdiv, .autobuyerunlockbutton,
