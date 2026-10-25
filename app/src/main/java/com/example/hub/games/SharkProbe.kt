@@ -57,7 +57,7 @@ object SharkProbe {
             " loop: typeof loop === 'function'," +
             " played: played," +
             " playedDelta: playedDelta," +
-            " layout: !!document.getElementById('hub-shark-layout-v2') || !!document.getElementById('hub-shark-layout-v3') || !!document.getElementById('hub-shark-layout-v4')," +
+            " layout: !!document.getElementById('${SharkLayout.STYLE_ID}')," +
             " zoom: document.documentElement ? (document.documentElement.style.zoom || '') : ''" +
             " });" +
             " } catch (e) { return JSON.stringify({error: String(e).slice(0, 180)}); } })()"

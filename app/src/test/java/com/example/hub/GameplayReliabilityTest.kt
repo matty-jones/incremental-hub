@@ -1,6 +1,7 @@
 package com.example.hub
 
 import android.content.Context
+import com.example.hub.games.DocumentLayout
 import com.example.hub.games.SharkLayout
 import com.example.hub.session.Continuity
 import com.example.hub.session.DiagnosticSeverity
@@ -126,17 +127,31 @@ class GameplayReliabilityTest {
         val script = SharkLayout.injectionScript()
         assertTrue(script.contains(SharkLayout.STYLE_ID))
         assertTrue(script.contains("shark-upgrade-div"))
-        assertEquals(4, SharkLayout.VERSION)
+        assertEquals(5, SharkLayout.VERSION)
         assertTrue(script.contains(".explore-desc"))
-        assertTrue(script.contains("flex-flow: column nowrap"))
+        assertTrue(script.contains("flex-wrap: wrap"))
         assertTrue(script.contains(".explore-cost"))
         assertTrue(script.contains("min-width: 0"))
         assertTrue(script.contains("position: fixed"))
         assertTrue(script.contains("offline-done"))
         assertTrue(script.contains("#offline"))
+        assertTrue(script.contains("hub-shark-layout-v4"))
+        assertFalse(script.contains("@media"))
         assertFalse(script.contains("save("))
         assertFalse(script.contains("localStorage"))
         assertFalse(script.contains("location.reload"))
+        val fit = DocumentLayout.injectionScript()
+        assertTrue(fit.contains(DocumentLayout.MARKER))
+        assertTrue(fit.contains("#evolution-tree"))
+        assertTrue(fit.contains("#decay-chain"))
+        assertTrue(fit.contains("#core-assembler-grid"))
+        assertTrue(fit.contains("auto-fit"))
+        assertTrue(fit.contains(".style.zoom"))
+        assertTrue(fit.contains("overflowX"))
+        assertTrue(fit.contains("flexWrap"))
+        assertFalse(fit.contains("save("))
+        assertFalse(fit.contains("localStorage"))
+        assertFalse(fit.contains("location.reload"))
     }
 
     @Test

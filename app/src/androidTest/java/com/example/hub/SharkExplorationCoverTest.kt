@@ -55,14 +55,13 @@ class SharkExplorationCoverTest {
             eval(web, SharkLayout.injectionScript())
             eval(web, MARKER)
             eval(web, FIXTURE)
-            val cover = waitForButton(web, stacked = true)
+            val cover = waitForButton(web, naturalWidth = false)
             assertInside(cover, "cover")
             assertTrue("cover button is covered by ${cover.hit}", cover.receivesClick)
-            assertTrue(cover.width > cover.innerWidth * 0.7)
             val doc = eval(web, "window.__hubExploreDoc")
             unfold()
             waitForViewport(web)
-            val inner = waitForButton(web, stacked = false)
+            val inner = waitForButton(web, naturalWidth = true)
             assertInside(inner, "inner")
             assertTrue("unfolded button width ${inner.width}", inner.width in 150f..280f)
             assertEquals(doc, eval(web, "window.__hubExploreDoc"))
@@ -83,7 +82,7 @@ class SharkExplorationCoverTest {
         assertTrue("$label bottom ${box.bottom} viewport ${box.innerHeight}", box.bottom <= box.innerHeight + 1f)
     }
 
-    private fun waitForButton(web: WebView, stacked: Boolean): ButtonBox {
+    private fun waitForButton(web: WebView, naturalWidth: Boolean): ButtonBox {
         val deadline = System.currentTimeMillis() + 8_000
         var last = ""
         var stable = 0
@@ -91,7 +90,7 @@ class SharkExplorationCoverTest {
         while (System.currentTimeMillis() < deadline) {
             eval(web, SharkLayout.injectionScript())
             latest = readButton(web)
-            val shaped = if (stacked) latest.width > latest.innerWidth * 0.7 else latest.width in 150f..280f
+            val shaped = if (naturalWidth) latest.width in 150f..280f else latest.width <= latest.innerWidth + 1f
             val ok = latest.left >= -1f && latest.right <= latest.innerWidth + 1f &&
                 latest.top >= -1f && latest.bottom <= latest.innerHeight + 1f &&
                 latest.width > 40f && latest.height > 30f && latest.receivesClick && shaped
@@ -107,7 +106,7 @@ class SharkExplorationCoverTest {
             }
             Thread.sleep(150)
         }
-        throw AssertionError("exploration button did not settle stacked=$stacked: $latest")
+        throw AssertionError("exploration button did not settle naturalWidth=$naturalWidth: $latest")
     }
 
     private fun waitForViewport(web: WebView) {

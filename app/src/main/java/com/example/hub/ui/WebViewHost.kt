@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.Profile
 import androidx.webkit.WebViewCompat
+import com.example.hub.games.DocumentLayout
 import com.example.hub.games.SharkLayout
 import com.example.hub.games.TrimpsLayout
 import com.example.hub.session.DiagnosticSeverity
@@ -327,6 +328,12 @@ private fun ensureLayoutListener(webView: WebView) {
 
 internal fun isSharkUrl(url: String?): Boolean = url?.contains("shark-incremental") == true
 
+/** Shark, Trimps, and FE000000 share the viewport fitter. Other documents do not. */
+internal fun wantsDocumentLayout(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    return isSharkUrl(url) || url.contains("trimps.github.io") || url.contains("fe000000")
+}
+
 /** The next Shark reconcile must rebuild the layout viewport before it applies zoom. */
 internal fun armSharkViewportUnlock(webView: WebView) {
     val slot = webView.tag as? Slot ?: return
@@ -444,16 +451,16 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
     if (sampledHeight > 0) slot.viewHeight = sampledHeight
     val density = webView.resources.displayMetrics.density
     val parentWidth = (webView.parent as? View)?.width ?: 0
-    if (url.contains("shark-incremental") && (flush || slot.layoutAppliedForUrl != url)) {
-        webView.evaluateJavascript(SharkLayout.injectionScript(), null)
-        slot.layoutAppliedForUrl = url
-    }
-    if (url.contains("trimps.github.io") && (flush || slot.layoutAppliedForUrl != url)) {
-        webView.evaluateJavascript(TrimpsLayout.injectionScript(), null)
-        slot.layoutAppliedForUrl = url
-    }
     val expectW = cssPixelSize(sampledWidth, density)
     val expectH = cssPixelSize(sampledHeight, density)
+    if (flush || slot.layoutAppliedForUrl != url) {
+        if (isSharkUrl(url)) webView.evaluateJavascript(SharkLayout.injectionScript(), null)
+        if (url.contains("trimps.github.io")) webView.evaluateJavascript(TrimpsLayout.injectionScript(), null)
+        if (wantsDocumentLayout(url)) {
+            webView.evaluateJavascript(DocumentLayout.injectionScript(expectW), null)
+            slot.layoutAppliedForUrl = url
+        }
+    }
     Log.i(
         TAG,
         "reconcile before view=${sampledWidth}x$sampledHeight parent=$parentWidth " +

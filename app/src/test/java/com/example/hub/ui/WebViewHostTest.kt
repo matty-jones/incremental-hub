@@ -76,6 +76,16 @@ class WebViewHostTest {
     }
 
     @Test
+    fun documentLayoutCoversTheThreeGamesOnly() {
+        assertTrue(wantsDocumentLayout(SHARK_URL))
+        assertTrue(wantsDocumentLayout("https://trimps.github.io/"))
+        assertTrue(wantsDocumentLayout(FE_URL))
+        assertFalse(wantsDocumentLayout("https://example.com/"))
+        assertFalse(wantsDocumentLayout("about:blank"))
+        assertFalse(wantsDocumentLayout(null))
+    }
+
+    @Test
     fun mainFrameFlagIsTheSessionFailureGate() {
         assertTrue(isMainFrame(true))
         assertFalse(isMainFrame(false))
