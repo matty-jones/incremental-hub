@@ -18,7 +18,7 @@ None of these games store the player save in IndexedDB. Searches for `indexedDB`
 | `trimps` | Trimps | `https://trimps.github.io/` | `https://trimps.github.io` | `Trimps/Trimps.github.io` `master` `b9edb1df` (2025-03-12) | Repo is the site. Live `index.html`, `config.js`, and `main.js` SHA-256 match that commit. |
 | `antimatter-dimensions` | Modern vanilla Antimatter Dimensions | `https://ivark.github.io/AntimatterDimensions/` | `https://ivark.github.io` | Source `IvarK/AntimatterDimensionsSourceCode` `master` `5409e320` (2026-07-17). Release merge `0b70035a` (2026-07-17). | `release` is built and pushed to `IvarK/AntimatterDimensions` `master`. Live deploy commit message names `0b70035a` (2026-08-28, deploy commit `6872931a`). |
 | `antimatter-dimensions-ng3` | NG+3 / Aarex's Modifications | `https://aarextiaokhiao.github.io/NG-plus-3/` | `https://aarextiaokhiao.github.io` | `aarextiaokhiao/NG-plus-3` `master` `9a99e040` (2023-01-11) | Live `index.html` SHA-256 matches that commit. `post-NG-plus-3` is older (2022-02-16, `bb1d18f1`) and is not the live page. |
-| `synergism` | Official Synergism | `https://synergism.cc/` | `https://synergism.cc` | `Pseudo-Corp/SynergismOfficial` `master` `e4dd84e8` (2026-10-21 13:43:47 UTC) | `master` builds `dist/out.js` onto `gh-pages`. Canonical host is `synergism.cc`. |
+| `synergism` | Official Synergism | `https://synergism.cc/` | `https://synergism.cc` | `Pseudo-Corp/SynergismOfficial` `master` `01b246de` (2026-10-26 19:18:29 UTC). The earlier research commit was `e4dd84e8` (4.3.1). | Live `dist/out.js` is 4.4.0, stamped `Date.UTC(2026,9,26,19,19,25)`. Canonical host is `synergism.cc`. |
 
 Vanilla Antimatter Dimensions and NG+3 do not share an origin, a storage key, or a save codec. They still need separate Hub game IDs and profiles (`hub-game-<gameId>` in `SessionController.transitionTo`). NG+3's document title is also "Antimatter Dimensions".
 
@@ -178,9 +178,11 @@ Long-term saves from after 2023-01-11 are **unverified**. This commit is the liv
 
 ### Official Synergism
 
-Repo `Pseudo-Corp/SynergismOfficial` `master` `e4dd84e8c68095a6b23b9090d29773d97e2bebfe`. `src/Config.ts` line 1 is `version = '4.3.1 September 25, 2026: The Purple'`. Line 3 sets `isSynergismCC` from `location.hostname === 'synergism.cc'`.
+Checked again on 2026-10-26. Live `https://synergism.cc/dist/out.js` is **4.4.0 October 26, 2026: The Corrupted Update**, `Date.UTC(2026,9,26,19,19,25)`, etag `W/"60dfa0dff66cced2a1a49d3878b3c7c0"`. Upstream `master` `01b246dead3a2c52e90ffccdb59e09efe4c6d88b` (2026-10-26T19:18:29Z). `src/Config.ts` is that version string. The 4.3.1 research commit `e4dd84e8` is 115 commits behind. The save key is still `Synergysave2`. Launch `https://synergism.cc/`.
 
-Live `https://synergism.cc/dist/out.js` contains that version string, `Synergysave2`, and `Date.UTC(2026,9,21,13,44,36)`. The `gh-pages` bundle at `https://pseudo-corp.github.io/SynergismOfficial/dist/out.js` is the same bytes after replacing `Date.UTC(2026,9,21,13,44,23)`. The 13-second gap is the build timestamp from `scripts/update-last-updated.js` in `.github/workflows/deploy-ghpages.yml`. Save logic matches. The origins do not. Launch `https://synergism.cc/`.
+The production bundle is minified. `saveSynergy`, `player`, and `G` are not page globals. `player` and `G` are assigned to `window` only when `TESTING || !PROD`. `#savegame` calls the save function with `true`. That is the normal save, not `exportSynergism`. `playerUpdateVarSchema` is not reachable for a read-only parse. Offline time is `player.offlinetick`. `calculateOffline` reads it, holds `G.timeWarp` during the simulation, then saves and shows `#offlineContainer` when `offlinetick > 0`.
+
+4.4.0 replaced the corruption loadout object with numeric `corruptions.used`. A 4.3.1 corruption object is not a valid captured save for this build. The update schema drops that legacy object on import. Line numbers in the following paragraphs are from the 4.3.1 pass. The 4.4.0 source was read from `01b246de`: `saveSynergy` is at `Synergism.ts` line 1214, `exportSynergism` still grants quarks before saving, and `reloadShit` still clears `localStorage` only when the string it was given still decompresses as LZ.
 
 `SaveStorage.ts` line 1: `SAVE_STORAGE_KEY = 'Synergysave2'`. `queueSave` (line 88) writes `localStorage` when `PLATFORM !== 'mobile'`. The web Hub is that path. The Capacitor branch is the official mobile app, not Android WebView.
 

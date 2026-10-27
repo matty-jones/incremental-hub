@@ -14,6 +14,7 @@ object HubGameAccent {
         "fe000000" -> HubColors.Cyan
         "shark-incremental" -> HubColors.Azure
         "trimps" -> HubColors.Teal
+        "synergism" -> HubColors.Ice
         else -> HubColors.GameAccents[stableIndex(gameId)]
     }
 

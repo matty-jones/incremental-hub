@@ -49,6 +49,7 @@ data class ProgressView(
 
 sealed class ImportOutcome {
     data object Unsupported : ImportOutcome()
+    data class Dispatched(val detail: String) : ImportOutcome()
 }
 
 /**

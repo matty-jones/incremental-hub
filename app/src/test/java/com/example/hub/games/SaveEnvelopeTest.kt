@@ -297,10 +297,11 @@ class SaveEnvelopeTest {
         assertFalse(PayloadDigest.describe("super-secret-save").contains("super-secret"))
         assertTrue(PayloadDigest.describe("super-secret-save").contains("length="))
         assertNotNull(GameAdapters.create("trimps-adapter"))
+        assertNotNull(GameAdapters.create("synergism-adapter"))
+        assertEquals("Synergysave2", GameAdapters.create("synergism-adapter")!!.storageKey)
         assertNull(GameAdapters.create("ethereal-farm-adapter"))
         assertNull(GameAdapters.create("antimatter-dimensions-adapter"))
         assertNull(GameAdapters.create("antimatter-dimensions-ng3-adapter"))
-        assertNull(GameAdapters.create("synergism-adapter"))
     }
 
     @Test

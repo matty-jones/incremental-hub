@@ -8,6 +8,7 @@ object GameAdapters {
         "shark-incremental-adapter" -> SharkIncrementalAdapter()
         "fe000000-adapter" -> Fe000000Adapter()
         "trimps-adapter" -> TrimpsAdapter()
+        "synergism-adapter" -> SynergismAdapter()
         else -> null
     }
 }

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": 1,
+  "gameId": "synergism",
+  "displayName": "Synergism",
+  "sourceUrl": "https://synergism.cc/",
+  "launchUrl": "https://synergism.cc/",
+  "navigationRules": {
+    "maxDepth": 1,
+    "allowSameOriginNavigation": true,
+    "blockCrossOriginNavigation": false
+  },
+  "storageContext": {
+    "origin": "https://synergism.cc",
+    "type": "top-level",
+    "keys": [
+      {
+        "name": "Synergysave2",
+        "format": "base64-json",
+        "freshness": "persisted-only",
+        "description": "Official Synergism progress. Base64 of the JSON written by saveSynergy. Preference keys are not part of this save."
+      }
+    ]
+  },
+  "adapterId": "synergism-adapter",
+  "adapterVersion": "1.0.0",
+  "saveCoverage": {
+    "mode": "persisted-only",
+    "autosaveIntervalMs": 5000,
+    "keys": ["Synergysave2"],
+    "coverage": "complete"
+  },
+  "displayDefaults": {
+    "showIcon": true,
+    "badgeText": "S",
+    "colorPrimary": "#81D9E8",
+    "colorSecondary": "#1A4A55"
+  },
+  "versionProbe": {
+    "enabled": true,
+    "minVersion": null,
+    "field": "version",
+    "javascript": "var node=document.getElementById('versionnumber'); return node ? (node.textContent || '') : '';"
+  },
+  "compatibility": {
+    "minSdkVersion": 30,
+    "features": ["MULTI_PROFILE", "WEB_MESSAGE_LISTENER"],
+    "notes": "Live reference is Synergism 4.4.0 (Pseudo-Corp/SynergismOfficial 01b246de). Newer semver saves are rejected. Capture uses the settings save control, which calls saveSynergy(true). exportSynergism is not used."
+  },
+  "resourceObservations": [
+    {
+      "type": "save-js",
+      "url": "https://synergism.cc/",
+      "observed": "The settings button #savegame calls the normal save. It writes localStorage Synergysave2 as Base64 JSON and does not grant export quarks. Autosave is 5000 ms and is skipped while offline simulation is active."
+    }
+  ]
+}

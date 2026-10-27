@@ -299,11 +299,11 @@ If an LZ import runs, the game clears every key. The adapter must not depend on 
 
 ### Readiness
 
-`typeof player !== 'undefined' && player && typeof saveSynergy === 'function'`, `#versionnumber` text contains `4.3.1`, and `#preloadRecovery` is not shown. `G.timeWarp === true` is still a loading game: wait until it is false before capture. A warp is not a failed load.
+`#versionnumber` text contains `4.4.0`, `#preloadRecovery` is not shown, and the loading shell is gone. The live 4.4.0 bundle does not publish `player`, `G`, or `saveSynergy`. Offline simulation is the loading shell (`body.loading` with `#transparentBG`, or `#offlineContainer` while `#exitOffline` is hidden). Wait until that shell is gone before capture. A warp is not a failed load.
 
 ### Capture
 
-Call `saveSynergy(false)`, not `exportSynergism()`. Then read `Synergysave2`. The call writes `player.offlinetick` and replaces `player.talismans`. The summary records `offlinetick` so a later comparison does not treat that clock as progress.
+The production page does not expose `saveSynergy`. Click `#savegame`, which calls `saveSynergy(true)`. That is the same writer as `saveSynergy(false)` plus a flush and a status line. It is not `exportSynergism()`. Then read `Synergysave2`. The call writes `player.offlinetick` and replaces `player.talismans`. The summary records `offlinetick` so a later comparison does not treat that clock as progress. A capture that does not observe the storage write fails and does not advance the pointer.
 
 If `queueSave` returns false, capture failed.
 

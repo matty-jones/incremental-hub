@@ -65,7 +65,7 @@ Definition of done:
 
 **Depends on:** Milestone 1. Can follow Trimps in parallel after Milestone 1, not before the regression suite is green. **Complexity:** M.
 
-Launch `https://synergism.cc/` only. Capture calls `saveSynergy(false)`. Round-trip tests must show quark totals do not take the export bonus.
+Launch `https://synergism.cc/` only. The live build is 4.4.0. The production page does not expose `saveSynergy`, so capture clicks `#savegame`, which calls `saveSynergy(true)`. That is the normal save, not `exportSynergism()`. Round-trip tests must show quark totals do not take the export bonus.
 
 Definition of done:
 
