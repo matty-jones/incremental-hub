@@ -80,7 +80,7 @@ class WebViewHostTest {
         assertTrue(wantsDocumentLayout(SHARK_URL))
         assertTrue(wantsDocumentLayout("https://trimps.github.io/"))
         assertTrue(wantsDocumentLayout(FE_URL))
-        assertTrue(wantsDocumentLayout("https://synergism.cc/"))
+        assertFalse(wantsDocumentLayout("https://synergism.cc/"))
         assertFalse(wantsDocumentLayout("https://example.com/"))
         assertFalse(wantsDocumentLayout("about:blank"))
         assertFalse(wantsDocumentLayout(null))

@@ -328,13 +328,12 @@ private fun ensureLayoutListener(webView: WebView) {
 
 internal fun isSharkUrl(url: String?): Boolean = url?.contains("shark-incremental") == true
 
-/** Shark, Trimps, FE000000, and Synergism share the viewport fitter. Other documents do not. */
+/** Shark, Trimps, and FE000000 share the viewport fitter. Synergism does not. */
 internal fun wantsDocumentLayout(url: String?): Boolean {
     if (url.isNullOrBlank()) return false
     return isSharkUrl(url) ||
         url.contains("trimps.github.io") ||
-        url.contains("fe000000") ||
-        url.contains("synergism.cc")
+        url.contains("fe000000")
 }
 
 /** The next Shark reconcile must rebuild the layout viewport before it applies zoom. */
