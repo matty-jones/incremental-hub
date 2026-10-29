@@ -47,6 +47,32 @@ class SharkProgressTest {
         assertEquals(0, zero.sign)
     }
 
+    @Test
+    fun giganticScientificExponentsRemainValidAndWinRecoverySelection() {
+        val saved = progressed()
+            .put("feature", 9)
+            .put("shark_level", "2126")
+            .put("total_fish", "1e3689787472063838")
+            .put("totalTimePlayed", 1159470.6309996273)
+        val regressed = progressed()
+            .put("feature", 0)
+            .put("shark_level", "15")
+            .put("total_fish", "1.9450546477309658e27")
+            .put("totalTimePlayed", 1188149.1980000373)
+            .put("prestige", JSONObject().put("times", 0))
+            .put("core", JSONObject().put("times", 0))
+        val savedPayload = encode(saved)
+        val regressedPayload = encode(regressed)
+        assertEquals(SaveStanding.PROGRESSED, SharkProgress.summarize(savedPayload).standing)
+        assertEquals("3689787472063838", SharkProgress.parsePayload(savedPayload)!!.totalFish.exponent.toString())
+        assertEquals(SaveComparison.LIVE_BEHIND, SharkProgress.compare(regressedPayload, savedPayload))
+        assertEquals(savedPayload, SharkProgress.chooseStored(listOf(regressedPayload, savedPayload)))
+        assertTrue(SharkProgress.acceptsRuntime(
+            SharkProgress.parsePayload(savedPayload)!!,
+            SharkProgress.parsePayload(savedPayload)!!,
+        ))
+    }
+
     private fun fresh(): JSONObject = player(feature = 0, played = 0, sharkExponent = null, fishExponent = null, prestige = 0)
 
     private fun progressed(): JSONObject = player(feature = 4, played = 345_600, sharkExponent = 20, fishExponent = 15, prestige = 2)

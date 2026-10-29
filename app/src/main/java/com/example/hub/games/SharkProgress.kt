@@ -2,13 +2,14 @@ package com.example.hub.games
 
 import org.json.JSONObject
 import java.math.BigDecimal
+import java.math.BigInteger
 import java.util.Base64
 
 /**
  * Sign and scientific exponent of a break_eternity Decimal.
  * Coefficients are not compared. Zero is sign 0, whatever the exponent is.
  */
-data class DecimalRank(val sign: Int, val exponent: Int) : Comparable<DecimalRank> {
+data class DecimalRank(val sign: Int, val exponent: BigInteger) : Comparable<DecimalRank> {
     override fun compareTo(other: DecimalRank): Int {
         if (sign != other.sign) return sign.compareTo(other.sign)
         if (sign == 0) return 0
@@ -213,18 +214,44 @@ data class SharkProgress(
                 if (!value.has("s") || !value.has("e") || value.isNull("s") || value.isNull("e")) null
                 else {
                     val sign = value.optInt("s")
-                    if (sign == 0) DecimalRank(0, 0) else DecimalRank(sign.coerceIn(-1, 1), value.optInt("e"))
+                    val exponent = when (val raw = value.opt("e")) {
+                        is Number -> runCatching { BigDecimal(raw.toString()).toBigInteger() }.getOrNull()
+                        is String -> raw.toBigIntegerOrNull()
+                        else -> null
+                    }
+                    if (sign == 0) DecimalRank(0, BigInteger.ZERO)
+                    else exponent?.let { DecimalRank(sign.coerceIn(-1, 1), it) }
                 }
             }
-            is Number -> rankOf(BigDecimal(value.toString()))
-            is String -> runCatching { rankOf(BigDecimal(value)) }.getOrNull()
+            is Number -> runCatching { rankOf(BigDecimal(value.toString())) }.getOrNull()
+            is String -> rankString(value)
             else -> null
+        }
+
+        private fun rankString(value: String): DecimalRank? {
+            // BigDecimal rejects exponents outside Int range. Shark legitimately
+            // serialises fish as strings such as "1e3689787472063838".
+            runCatching { BigDecimal(value) }.getOrNull()?.let { return rankOf(it) }
+            val match = Regex("""^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$""")
+                .matchEntire(value) ?: return null
+            val integerPart = match.groupValues[2]
+            val digits = integerPart + match.groupValues[3]
+            val firstNonzero = digits.indexOfFirst { it != '0' }
+            if (firstNonzero < 0) return DecimalRank(0, BigInteger.ZERO)
+            val exponent = match.groupValues[4].toBigIntegerOrNull() ?: return null
+            val magnitude = exponent + BigInteger.valueOf(
+                integerPart.length.toLong() - firstNonzero.toLong() - 1L,
+            )
+            val sign = if (match.groupValues[1] == "-") -1 else 1
+            return DecimalRank(sign, magnitude)
         }
 
         private fun rankOf(value: BigDecimal): DecimalRank {
             val stripped = value.stripTrailingZeros()
-            if (stripped.signum() == 0) return DecimalRank(0, 0)
-            val exponent = stripped.precision() - stripped.scale() - 1
+            if (stripped.signum() == 0) return DecimalRank(0, BigInteger.ZERO)
+            val exponent = BigInteger.valueOf(
+                stripped.precision().toLong() - stripped.scale().toLong() - 1L,
+            )
             return DecimalRank(stripped.signum(), exponent)
         }
     }
