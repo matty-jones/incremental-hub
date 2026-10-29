@@ -99,6 +99,7 @@ fun NativeMenu(
     showDisplay: Boolean = false,
     showDiagnostics: Boolean = false,
     saveBusy: Boolean = false,
+    saveBlockedReason: String? = null,
     saveNotice: ManualSaveNotice? = null,
     onPanelBack: () -> Unit = {},
     display: @Composable () -> Unit = {},
@@ -155,6 +156,13 @@ fun NativeMenu(
             }
             if (showDisplay) display() else diagnostics()
         } else {
+            if (!saveBlockedReason.isNullOrBlank()) {
+                Text(
+                    text = saveBlockedReason,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             val notice = saveNotice
             if (notice != null && notice.message.isNotBlank()) {
                 val noticeColor = when (notice.outcome) {
@@ -172,6 +180,7 @@ fun NativeMenu(
             MenuItems(
                 state = state,
                 saveBusy = saveBusy,
+                saveBlockedReason = saveBlockedReason,
                 onAction = onAction,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -183,6 +192,7 @@ fun NativeMenu(
 private fun MenuItems(
     state: SessionState,
     saveBusy: Boolean,
+    saveBlockedReason: String?,
     onAction: (MenuAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -193,9 +203,11 @@ private fun MenuItems(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         actions.forEach { action ->
+            val blocked = action is MenuAction.Save && !saveBlockedReason.isNullOrBlank()
             MenuItemRow(
                 action = action,
-                enabled = isActionEnabled(action, state, saveBusy),
+                enabled = isActionEnabled(action, state, saveBusy, saveBlocked = blocked),
+                disabledReason = if (blocked) saveBlockedReason else null,
                 onTrigger = {
                     Log.d(TAG, "NativeMenu: action triggered=${action.label} (state=$state)")
                     onAction(action)
@@ -209,12 +221,13 @@ internal fun isActionEnabled(
     action: MenuAction,
     state: SessionState,
     saveBusy: Boolean = false,
+    saveBlocked: Boolean = false,
 ): Boolean {
     return when (action) {
         is MenuAction.Resume -> state is SessionState.Playing ||
             state is SessionState.Background ||
             state is SessionState.Degraded
-        is MenuAction.Save -> state is SessionState.Playing && !saveBusy
+        is MenuAction.Save -> state is SessionState.Playing && !saveBusy && !saveBlocked
         is MenuAction.Vault -> false
         is MenuAction.Reload -> state is SessionState.Playing
         is MenuAction.Display -> state !is SessionState.Closed && state !is SessionState.Closing
@@ -227,6 +240,7 @@ internal fun isActionEnabled(
 private fun MenuItemRow(
     action: MenuAction,
     enabled: Boolean,
+    disabledReason: String? = null,
     onTrigger: () -> Unit,
 ) {
     val icon = when (action) {
@@ -263,7 +277,11 @@ private fun MenuItemRow(
             .fillMaxWidth()
             .height(MinTouchTarget)
             .semantics {
-                contentDescription = if (enabled) label else "$label (disabled)"
+                contentDescription = when {
+                    enabled -> label
+                    !disabledReason.isNullOrBlank() -> "$label (disabled: $disabledReason)"
+                    else -> "$label (disabled)"
+                }
             },
         color = container,
         shape = MaterialTheme.shapes.extraSmall,

@@ -9,6 +9,8 @@ import android.webkit.WebView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.room.RoomDatabase
+import androidx.room.withTransaction
 import androidx.webkit.Profile
 import androidx.webkit.ProfileStore
 import com.example.hub.bootstrap.DetectorResult
@@ -36,6 +38,7 @@ import com.example.hub.ui.armSharkViewportUnlock
 import com.example.hub.games.unwrapJsResult
 import com.example.hub.games.shouldResumeLive
 import org.json.JSONObject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -86,6 +89,11 @@ class SessionController(
      */
     private val onSnapshotSaved: ((GameInstance) -> Unit)? = null,
     private val snapshotDao: SnapshotDao? = null,
+    /**
+     * When set, pointer and snapshot writes share one SQLite transaction.
+     * Unit tests that use stub DAOs leave this null.
+     */
+    private val roomDatabase: RoomDatabase? = null,
     internal val peekClient: (suspend (WebView, GameAdapter) -> PeekOutcome)? = null,
     internal val runtimeCheck: (suspend (WebView, GameAdapter, String) -> Boolean)? = null,
     internal val onBootstrapWrite: ((String?) -> Unit)? = null,
@@ -192,6 +200,18 @@ class SessionController(
 
     private var launchMode: LaunchMode = LaunchMode.RESUME
     private var suppressCapture: Boolean = false
+    private val _captureBlockReason = MutableStateFlow<String?>(null)
+    val captureBlockReason: StateFlow<String?> = _captureBlockReason.asStateFlow()
+    private var restoreGeneration: Int = 0
+    private var restoreSessionIdentity: String? = null
+    private var restoreProfileName: String? = null
+    private var restoreVerifyToken: Int = -1
+
+    /** Throws inside the post-restore transaction. Stages: before-write, after-pin. */
+    internal var restoreCommitFault: (suspend (String) -> Unit)? = null
+
+    /** Throws inside a capture write. Stages: before-write, after-pointer. */
+    internal var captureWriteFault: (suspend (String) -> Unit)? = null
     private var openStep: OpenStep = OpenStep.DECIDE
     private var restoreInProgress: Boolean = false
     private var peekOutcome: PeekOutcome? = null
@@ -350,7 +370,9 @@ class SessionController(
                 }
             }
             launchMode = mode
-            suppressCapture = mode == LaunchMode.SAFE || mode == LaunchMode.INSPECT || mode == LaunchMode.RECOVER
+            restoreGeneration += 1
+            restoreVerifyToken = -1
+            setCaptureSuppressed(mode == LaunchMode.SAFE || mode == LaunchMode.INSPECT || mode == LaunchMode.RECOVER)
             openStep = OpenStep.DECIDE
             restoreInProgress = false
             peekOutcome = null
@@ -389,7 +411,7 @@ class SessionController(
                     )
                     return
                 }
-                suppressCapture = true
+                setCaptureSuppressed(true)
                 openStep = OpenStep.LOAD_GAME
                 documentGate.phase = DocumentPhase.GAME
                 gameDocumentLoads = 1
@@ -435,15 +457,27 @@ class SessionController(
         _manualSaveNotice.value = null
         scope.launch {
             try {
-                val attempt = mutex.withLock {
-                    if (_state.value !is SessionState.Playing) {
-                        Log.w(TAG, "requestCheckpoint() rejected: ${_state.value}")
-                        CaptureAttempt.Failed(
-                            "Save is unavailable right now. Last good snapshot was kept.",
-                        )
-                    } else {
-                        performCaptureLocked(SnapshotReasons.CHECKPOINT)
+                val attempt = try {
+                    mutex.withLock {
+                        when {
+                            suppressCapture -> {
+                                Log.w(TAG, "requestCheckpoint() suppressed: $launchMode")
+                                CaptureAttempt.Failed(captureBlockDetail())
+                            }
+                            _state.value !is SessionState.Playing -> {
+                                Log.w(TAG, "requestCheckpoint() rejected: ${_state.value}")
+                                CaptureAttempt.Failed("unready. Last good snapshot was kept.")
+                            }
+                            else -> performCaptureLocked(SnapshotReasons.CHECKPOINT)
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "requestCheckpoint() failed", e)
+                    CaptureAttempt.Failed(
+                        "storage error. ${e.message ?: "Save failed."} Last good snapshot was kept.",
+                    )
                 }
                 when (attempt) {
                     CaptureAttempt.Saved -> publishManualSave(ManualSaveOutcome.SAVED, null)
@@ -876,7 +910,9 @@ class SessionController(
         val work = mutex.withLock {
             if (_state.value !is SessionState.Opening) return
             // Stale peek finishes that arrive after beginGameLoad bumped the token.
-            if (openStep == OpenStep.LOAD_GAME && finishToken < _loadToken.value) {
+            if ((openStep == OpenStep.LOAD_GAME || openStep == OpenStep.RESTORE_VERIFY ||
+                    openStep == OpenStep.ROLLBACK) && finishToken != _loadToken.value
+            ) {
                 recordDiagnostic(
                     DiagnosticSeverity.INFO,
                     "navigation",
@@ -1257,13 +1293,14 @@ class SessionController(
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
             if (expected != null && storageMatches(work.adapter, readback, expected)) {
                 if (work.adapter.usesSaveEnvelope) {
-                    markEnvelopePointerCommitted(work.gameId, expected)
+                    markEnvelopeStorageVerified()
                 }
                 openStep = OpenStep.RESTORE_VERIFY
                 documentGate.phase = DocumentPhase.GAME
                 documentGate.payload = null
                 gameDocumentLoads += 1
                 _loadToken.value = _loadToken.value + 1
+                restoreVerifyToken = _loadToken.value
             } else {
                 beginRollbackLocked()
             }
@@ -1278,6 +1315,13 @@ class SessionController(
                 "Ignored restore-verify finish on the storage bootstrap page. Waiting for the real document.",
             )
             return
+        }
+        val generation = mutex.withLock {
+            if (!restoreVerifyCurrent(work, restoreGeneration)) {
+                noteStaleRestore(work, "before-check")
+                return
+            }
+            restoreGeneration
         }
         val prepared = preparedPayload
         val ready = awaitGameReady(work)
@@ -1300,41 +1344,150 @@ class SessionController(
                 RuntimeVerdict.REJECTED
             }
         }
+        val baseline = if (verdict == RuntimeVerdict.ACCEPTED && prepared != null) {
+            acceptedRestorePayload(work, prepared)
+        } else {
+            null
+        }
         mutex.withLock {
-            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (!restoreVerifyCurrent(work, generation)) {
+                noteStaleRestore(work, "after-check")
+                return
+            }
             when (verdict) {
-                RuntimeVerdict.ACCEPTED -> {
-                    if (work.adapter.usesSaveEnvelope) {
-                        _activeProfileName.value?.let { journalStore.delete(it) }
-                    }
-                    restoreInProgress = false
-                    transitionTo(SessionState.Playing, work.gameId)
-                    Log.d(TAG, "restore verified ${work.gameId}")
-                }
-                RuntimeVerdict.DEFERRED -> {
-                    if (work.adapter.usesSaveEnvelope) {
-                        _activeProfileName.value?.let { journalStore.delete(it) }
-                    }
-                    restoreInProgress = false
-                    val note = "Offline warp is still running. The restored save was kept. No snapshot was captured."
-                    _sessionError.value = note
-                    recordDiagnostic(DiagnosticSeverity.INFO, "restore", note)
-                    transitionTo(SessionState.RecoveryRequired, work.gameId)
-                }
+                RuntimeVerdict.ACCEPTED -> finishVerifiedRestore(work, baseline, generation)
+                RuntimeVerdict.DEFERRED -> finishDeferredRestore(work, prepared)
                 RuntimeVerdict.REJECTED -> beginRollbackLocked()
             }
         }
     }
 
+    /**
+     * Durable hand-off after runtime acceptance. Capture stays suppressed,
+     * and [SessionState.Playing] is not reported, unless this transaction commits.
+     */
+    private suspend fun finishVerifiedRestore(work: ReadyWork, payload: String?, generation: Int) {
+        if (!restoreVerifyCurrent(work, generation)) {
+            noteStaleRestore(work, "commit")
+            return
+        }
+        if (payload.isNullOrBlank()) {
+            beginRollbackLocked()
+            return
+        }
+        val valid = try {
+            work.adapter.validate(payload)
+        } catch (e: Exception) {
+            Log.e(TAG, "restored payload failed validation", e)
+            false
+        }
+        if (!valid) {
+            _sessionError.value =
+                "invalid. The restored save failed validation. Both restore candidates were kept."
+            setCaptureSuppressed(true)
+            transitionTo(SessionState.RecoveryRequired, work.gameId)
+            return
+        }
+        val committed = try {
+            commitRestoredBaseline(
+                work.gameId,
+                payload,
+                summaryJson(work.adapter.summarize(payload)),
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "post-restore commit failed", e)
+            _sessionError.value =
+                "storage error. ${e.message ?: "The restored save was not committed."} Both restore candidates were kept."
+            setCaptureSuppressed(true)
+            if (_state.value is SessionState.Opening) {
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+            }
+            return
+        }
+        if (work.adapter.usesSaveEnvelope) {
+            _activeProfileName.value?.let { journalStore.delete(it) }
+        }
+        launchMode = LaunchMode.RESUME
+        setCaptureSuppressed(false)
+        restoreInProgress = false
+        preparedPayload = null
+        liveBeforeRestore = null
+        openStep = OpenStep.DECIDE
+        documentGate.phase = DocumentPhase.GAME
+        documentGate.payload = null
+        transitionTo(SessionState.Playing, work.gameId)
+        if (_state.value is SessionState.Playing) {
+            onSnapshotSaved?.invoke(committed)
+            Log.d(TAG, "restore verified ${work.gameId}")
+        }
+    }
+
+    private suspend fun finishDeferredRestore(work: ReadyWork, intended: String?) {
+        if (!intended.isNullOrBlank()) {
+            try {
+                appendSnapshot(
+                    gameId = work.gameId,
+                    payload = intended,
+                    reason = SnapshotReasons.POST_RESTORE,
+                    pinned = true,
+                    progressJson = summaryJson(work.adapter.summarize(intended)),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "deferred restore pin failed", e)
+                _sessionError.value =
+                    "storage error. ${e.message ?: "The intended save was not pinned."} Both restore candidates were kept."
+                setCaptureSuppressed(true)
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+                return
+            }
+        }
+        if (work.adapter.usesSaveEnvelope && snapshotDao != null) {
+            _activeProfileName.value?.let { journalStore.delete(it) }
+        }
+        restoreInProgress = false
+        launchMode = LaunchMode.RECOVER
+        setCaptureSuppressed(true)
+        val note =
+            "Offline warp is still running. The intended save was pinned. Capture stays suppressed until the warp finishes."
+        _sessionError.value = note
+        recordDiagnostic(DiagnosticSeverity.INFO, "restore", note)
+        transitionTo(SessionState.RecoveryRequired, work.gameId)
+    }
+
     private suspend fun finishRollback(work: ReadyWork) {
         onBootstrapWrite?.invoke(documentGate.payload)
-        val note = "Restore did not match the running game. The previous storage value was written back. The game was not loaded again."
+        val expected = liveBeforeRestore
+        val readback = when (val outcome = readPeek(work)) {
+            is PeekOutcome.Value -> outcome.payload
+            PeekOutcome.Empty -> ""
+            PeekOutcome.Failed -> null
+        }
+        val rolledBack = when {
+            readback == null -> false
+            expected.isNullOrEmpty() && readback.isEmpty() -> true
+            expected != null && storageMatches(work.adapter, readback, expected) -> true
+            else -> false
+        }
+        val note = if (rolledBack) {
+            "Restore did not match the running game. The previous storage value was written back. The game was not loaded again."
+        } else {
+            "Rollback failed. Both restore candidates were kept. Manual intervention is required."
+        }
         mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
-            restoreInProgress = false
+            restoreInProgress = !rolledBack
             documentGate.phase = DocumentPhase.PEEK
             rememberFailure(work, note)
             _sessionError.value = note
+            if (!rolledBack || launchMode == LaunchMode.RECOVER ||
+                launchMode == LaunchMode.SAFE || launchMode == LaunchMode.INSPECT
+            ) {
+                setCaptureSuppressed(true)
+            }
             transitionTo(SessionState.RecoveryRequired, work.gameId)
         }
     }
@@ -1409,6 +1562,7 @@ class SessionController(
             Log.e(TAG, "restore journal unreadable", e)
             null
         }
+        if (journal?.phase == JournalPhase.VERIFIED) return false
         openStep = OpenStep.JOURNAL_APPLY
         documentGate.storageKey = adapter.storageKey
         if (journal == null) {
@@ -1474,19 +1628,34 @@ class SessionController(
                 transitionTo(SessionState.RecoveryRequired, work.gameId)
                 return
             }
-            commitEnvelopePointer(work.gameId, journal.targetPointer())
-            journalStore.write(journal.copy(phase = JournalPhase.POINTER_COMMITTED))
-            journalStore.delete(profileName)
-            openStep = OpenStep.DECIDE
-            documentGate.phase = DocumentPhase.PEEK
-            documentGate.payload = null
-            _loadToken.value = _loadToken.value + 1
-            _sessionError.value = null
-            recordDiagnostic(
-                DiagnosticSeverity.INFO,
-                "restore",
-                "Restore verified. Game loading can continue.",
-            )
+            if (journal.phase == JournalPhase.POINTER_COMMITTED) {
+                journalStore.delete(profileName)
+                openStep = OpenStep.DECIDE
+                documentGate.phase = DocumentPhase.PEEK
+                documentGate.payload = null
+                _loadToken.value = _loadToken.value + 1
+                _sessionError.value = null
+                recordDiagnostic(
+                    DiagnosticSeverity.INFO,
+                    "restore",
+                    "Restore verified. Game loading can continue.",
+                )
+                return
+            }
+            journalStore.write(journal.copy(phase = JournalPhase.VERIFIED))
+            if (!journal.previousPointer.isNullOrBlank()) {
+                pinCopy(work.gameId, work.adapter, journal.previousPointer, SnapshotReasons.PRE_RESTORE)
+            }
+            if (!journal.intendedPointer.isNullOrBlank()) {
+                pinCopy(work.gameId, work.adapter, journal.intendedPointer, SnapshotReasons.PRE_RESTORE)
+            }
+            launchMode = LaunchMode.RECOVER
+            setCaptureSuppressed(true)
+            val note =
+                "Interrupted restore was not runtime-accepted. The previous pointer was kept. Both restore candidates were kept."
+            _sessionError.value = note
+            recordDiagnostic(DiagnosticSeverity.WARNING, "restore", note)
+            transitionTo(SessionState.RecoveryRequired, work.gameId)
         }
     }
 
@@ -1502,17 +1671,14 @@ class SessionController(
         instanceDao.upsert(instance.copy(snapshotPayload = payload))
     }
 
-    private suspend fun markEnvelopePointerCommitted(gameId: String, payload: String?) {
+    /**
+     * Storage write matched. The Room pointer stays put until [finishVerifiedRestore].
+     */
+    private fun markEnvelopeStorageVerified() {
         val profileName = _activeProfileName.value ?: return
-        val journal = runCatching { journalStore.read(profileName) }.getOrNull()
-        if (journal != null) {
-            journalStore.write(journal.copy(phase = JournalPhase.VERIFIED))
-        }
-        commitEnvelopePointer(gameId, payload)
-        val verified = runCatching { journalStore.read(profileName) }.getOrNull()
-        if (verified != null) {
-            journalStore.write(verified.copy(phase = JournalPhase.POINTER_COMMITTED))
-        }
+        val journal = runCatching { journalStore.read(profileName) }.getOrNull() ?: return
+        if (journal.phase == JournalPhase.POINTER_COMMITTED || journal.phase == JournalPhase.VERIFIED) return
+        journalStore.write(journal.copy(phase = JournalPhase.VERIFIED))
     }
 
     private suspend fun journalPreparedRestore(
@@ -1606,7 +1772,7 @@ class SessionController(
             return
         }
         launchMode = LaunchMode.SAFE
-        suppressCapture = true
+        setCaptureSuppressed(true)
         openStep = OpenStep.LOAD_GAME
         documentGate.phase = DocumentPhase.GAME
         documentGate.payload = null
@@ -1633,6 +1799,10 @@ class SessionController(
             _sessionError.value = "Restore refused because no validated snapshot is available."
             return
         }
+        restoreGeneration += 1
+        restoreSessionIdentity = instanceDao.get(gameId)?.sessionIdentity
+        restoreProfileName = _activeProfileName.value
+        restoreVerifyToken = -1
         val livePayload = (peekOutcome as? PeekOutcome.Value)?.payload
         pinCopy(gameId, adapter, livePayload, SnapshotReasons.PRE_RESTORE)
         val roomPayload = instanceDao.get(gameId)?.snapshotPayload
@@ -1676,7 +1846,7 @@ class SessionController(
         progressJson: String?,
     ) {
         val dao = snapshotDao ?: return
-        if (reason == SnapshotReasons.DIAGNOSTIC_BACKUP &&
+        if ((reason == SnapshotReasons.DIAGNOSTIC_BACKUP || reason == SnapshotReasons.POST_RESTORE) &&
             dao.findPinnedPayload(gameId, reason, payload) != null
         ) {
             return
@@ -1831,7 +2001,7 @@ class SessionController(
     private suspend fun performCaptureLocked(reason: String): CaptureAttempt {
         if (suppressCapture) {
             Log.d(TAG, "capture suppressed ($reason)")
-            return CaptureAttempt.Failed("Save was not taken. Last good snapshot was kept.")
+            return CaptureAttempt.Failed(captureBlockDetail())
         }
         if (captureRunning) {
             Log.w(TAG, "capture overlap rejected ($reason)")
@@ -1840,7 +2010,7 @@ class SessionController(
         val gameId = _activeGameId.value
             ?: return CaptureAttempt.Failed("Save failed. Last good snapshot was kept.")
         if (_state.value !is SessionState.Playing) {
-            val error = "Safe capture is impossible in ${_state.value} ($reason). Last good snapshot was kept."
+            val error = "unready. Safe capture is impossible in ${_state.value} ($reason). Last good snapshot was kept."
             writeCaptureResult(
                 gameId,
                 successPayload = null,
@@ -1851,7 +2021,7 @@ class SessionController(
         val adapter = activeAdapter
         val view = webView
         if (adapter == null || (view == null && captureClient == null)) {
-            val error = "Safe capture is impossible: no live WebView ($reason). Last good snapshot was kept."
+            val error = "unready. Safe capture is impossible: no live WebView ($reason). Last good snapshot was kept."
             writeCaptureResult(
                 gameId,
                 successPayload = null,
@@ -1879,7 +2049,7 @@ class SessionController(
             }
             if (payload == null || !valid) {
                 val decline = adapter.captureDecline()
-                val error = decline ?: "Capture failed validation ($reason). Last good snapshot was kept."
+                val error = decline ?: "invalid. Capture failed validation ($reason). Last good snapshot was kept."
                 writeCaptureResult(
                     gameId,
                     successPayload = null,
@@ -1895,9 +2065,23 @@ class SessionController(
                     CaptureAttempt.Failed(error)
                 }
             }
-            writeCaptureResult(gameId, payload, null, reason)
+            try {
+                writeCaptureResult(gameId, payload, null, reason)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "capture write failed ($reason)", e)
+                val error = "storage error. ${e.message ?: "Save failed."} Last good snapshot was kept."
+                _sessionError.value = error
+                if (_state.value is SessionState.Capturing) {
+                    transitionTo(SessionState.Playing, gameId)
+                }
+                return CaptureAttempt.Failed(error)
+            }
             if (_sessionError.value?.startsWith("Capture ") == true ||
-                _sessionError.value?.startsWith("Capture deferred") == true
+                _sessionError.value?.startsWith("Capture deferred") == true ||
+                _sessionError.value?.startsWith("invalid.") == true ||
+                _sessionError.value?.startsWith("storage error.") == true
             ) {
                 _sessionError.value = null
             }
@@ -1942,33 +2126,42 @@ class SessionController(
 
     private suspend fun transitionTo(target: SessionState, gameId: String?) {
         val current = _state.value
-        if (!canTransition(current, target)) {
-            Log.w(TAG, "illegal transition $current → $target (gameId=$gameId)")
+        var destination = target
+        if (destination is SessionState.Playing &&
+            current is SessionState.Opening &&
+            suppressCapture &&
+            launchMode != LaunchMode.SAFE
+        ) {
+            _sessionError.value = captureBlockDetail()
+            destination = SessionState.RecoveryRequired
+        }
+        if (!canTransition(current, destination)) {
+            Log.w(TAG, "illegal transition $current → $destination (gameId=$gameId)")
             return
         }
-        Log.d(TAG, "transition $current → $target (gameId=$gameId)")
-        recordDiagnostic(DiagnosticSeverity.INFO, "session", "$current -> $target")
-        if (current is SessionState.Playing && target !is SessionState.Capturing) {
+        Log.d(TAG, "transition $current → $destination (gameId=$gameId)")
+        recordDiagnostic(DiagnosticSeverity.INFO, "session", "$current -> $destination")
+        if (current is SessionState.Playing && destination !is SessionState.Capturing) {
             stopCaptureCadence()
         }
-        if (target is SessionState.Playing && current !is SessionState.Capturing && !suppressCapture) {
+        if (destination is SessionState.Playing && current !is SessionState.Capturing && !suppressCapture) {
             startCaptureCadence()
         }
-        _state.value = target
-        if (target is SessionState.Opening || target is SessionState.Playing ||
-            target is SessionState.Capturing || target is SessionState.Background ||
-            target is SessionState.Restoring || target is SessionState.Degraded ||
-            target is SessionState.RecoveryRequired
+        _state.value = destination
+        if (destination is SessionState.Opening || destination is SessionState.Playing ||
+            destination is SessionState.Capturing || destination is SessionState.Background ||
+            destination is SessionState.Restoring || destination is SessionState.Degraded ||
+            destination is SessionState.RecoveryRequired
         ) {
             _activeGameId.value = gameId
         }
-        if (target is SessionState.Playing || target is SessionState.Capturing ||
-            target is SessionState.Restoring || target is SessionState.Degraded
+        if (destination is SessionState.Playing || destination is SessionState.Capturing ||
+            destination is SessionState.Restoring || destination is SessionState.Degraded
         ) {
             _activeProfileName.value = gameId?.let { "hub-game-$it" }
         }
         if (gameId != null) {
-            when (target) {
+            when (destination) {
                 is SessionState.Degraded -> persistRecoveryState(gameId, "Degraded")
                 is SessionState.RecoveryRequired -> persistRecoveryState(gameId, "RecoveryRequired")
                 is SessionState.Playing -> clearRecoveryState(gameId)
@@ -2011,13 +2204,118 @@ class SessionController(
                 lastCaptureError = error ?: "capture failed",
             )
         }
-        instanceDao.upsert(updated)
-        if (successPayload != null) {
-            val adapter = activeAdapter
-            val progress = adapter?.let { summaryJson(it.summarize(successPayload)) }
-            appendSnapshot(gameId, successPayload, reason, pinned = reason == SnapshotReasons.CHECKPOINT, progressJson = progress)
-            onSnapshotSaved?.invoke(updated)
+        val apply = suspend {
+            captureWriteFault?.invoke("before-write")
+            instanceDao.upsert(updated)
+            if (successPayload != null) {
+                captureWriteFault?.invoke("after-pointer")
+                val adapter = activeAdapter
+                val progress = adapter?.let { summaryJson(it.summarize(successPayload)) }
+                appendSnapshot(
+                    gameId,
+                    successPayload,
+                    reason,
+                    pinned = reason == SnapshotReasons.CHECKPOINT,
+                    progressJson = progress,
+                )
+            }
         }
+        val database = roomDatabase
+        if (database != null) database.withTransaction { apply() } else apply()
+        if (successPayload != null) onSnapshotSaved?.invoke(updated)
+    }
+
+    private fun setCaptureSuppressed(suppressed: Boolean) {
+        suppressCapture = suppressed
+        _captureBlockReason.value = if (suppressed) captureBlockDetail() else null
+    }
+
+    private fun captureBlockDetail(): String = when (launchMode) {
+        LaunchMode.SAFE -> "capture suppressed because Safe Launch does not take Hub saves"
+        LaunchMode.INSPECT -> "capture suppressed because Inspect is read-only"
+        LaunchMode.RECOVER, LaunchMode.RESUME ->
+            "capture suppressed because restore is unfinished"
+    }
+
+    private suspend fun restoreVerifyCurrent(work: ReadyWork, generation: Int): Boolean {
+        if (_state.value !is SessionState.Opening) return false
+        if (openStep != OpenStep.RESTORE_VERIFY) return false
+        if (_activeGameId.value != work.gameId) return false
+        if (work.loadToken != _loadToken.value || work.loadToken != restoreVerifyToken) return false
+        if (generation != restoreGeneration) return false
+        if (_activeProfileName.value != restoreProfileName) return false
+        val identity = instanceDao.get(work.gameId)?.sessionIdentity
+        return identity == restoreSessionIdentity
+    }
+
+    private fun noteStaleRestore(work: ReadyWork, stage: String) {
+        recordDiagnostic(
+            DiagnosticSeverity.INFO,
+            "restore",
+            "Ignored stale restore verification at $stage for ${work.gameId} token=${work.loadToken}.",
+        )
+    }
+
+    /**
+     * Prefer the post-load storage when the adapter accepts it as the same
+     * save or a legitimate advance. A regression or an incomparable rewrite
+     * keeps the intended payload.
+     */
+    private suspend fun acceptedRestorePayload(work: ReadyWork, intended: String): String {
+        val readback = when (val outcome = readPeek(work)) {
+            is PeekOutcome.Value -> outcome.payload
+            else -> null
+        }
+        if (readback.isNullOrBlank()) return intended
+        if (storageMatches(work.adapter, readback, intended)) return readback
+        val valid = try {
+            work.adapter.validate(readback)
+        } catch (e: Exception) {
+            false
+        }
+        if (!valid) return intended
+        val comparison = try {
+            work.adapter.compare(readback, intended)
+        } catch (e: Exception) {
+            SaveComparison.INCONCLUSIVE
+        }
+        return if (comparison == SaveComparison.MATCH || comparison == SaveComparison.LIVE_AHEAD) {
+            readback
+        } else {
+            intended
+        }
+    }
+
+    private suspend fun commitRestoredBaseline(
+        gameId: String,
+        payload: String,
+        progressJson: String?,
+    ): GameInstance {
+        val apply = suspend {
+            restoreCommitFault?.invoke("before-write")
+            appendSnapshot(
+                gameId = gameId,
+                payload = payload,
+                reason = SnapshotReasons.POST_RESTORE,
+                pinned = true,
+                progressJson = progressJson,
+            )
+            restoreCommitFault?.invoke("after-pin")
+            val instance = instanceDao.get(gameId) ?: error("storage error. Missing game row.")
+            val now = System.currentTimeMillis()
+            val updated = instance.copy(
+                lastCaptureAttemptAtMillis = now,
+                lastCaptureSuccessAtMillis = now,
+                lastCaptureAtMillis = now,
+                lastCaptureError = null,
+                snapshotPayload = payload,
+                recoveryState = null,
+            )
+            instanceDao.upsert(updated)
+            updated
+        }
+        val database = roomDatabase
+        return if (database != null) database.withTransaction { apply() } else apply()
     }
 
     private suspend fun failOpenLocked(gameId: String, message: String) {

@@ -55,6 +55,7 @@ class HubSessionViewModel(
             viewModelScope.launch { saveSync.push(instance) }
         },
         snapshotDao = database.snapshotDao(),
+        roomDatabase = database,
     )
 
     init {

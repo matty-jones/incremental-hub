@@ -220,6 +220,7 @@ class NativeMenuTest {
     @Test
     fun saveEnabled_whenPlaying() {
         assertTrue(isActionEnabled(MenuAction.Save, SessionState.Playing))
+        assertFalse(isActionEnabled(MenuAction.Save, SessionState.Playing, saveBlocked = true))
     }
 
     @Test

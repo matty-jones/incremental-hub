@@ -154,4 +154,118 @@ class SnapshotMigrationTest {
         assertEquals("before", history.single().payload)
         db.close()
     }
+
+    @Test
+    fun migratedHistoryKeepsPostRestoreAndHistoricalReasons() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "snapshot-post-restore"
+        context.deleteDatabase(name)
+        val path = context.getDatabasePath(name)
+        path.parentFile?.mkdirs()
+        val sqlite = SQLiteDatabase.openOrCreateDatabase(path, null)
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `game_instances` (
+              `gameId` TEXT NOT NULL,
+              `profile_name` TEXT NOT NULL,
+              `session_identity` TEXT NOT NULL,
+              `last_played_at_millis` INTEGER NOT NULL,
+              `resume_token` TEXT,
+              `recovery_state` TEXT,
+              `last_capture_at_millis` INTEGER NOT NULL,
+              `snapshot_payload` TEXT,
+              `last_capture_attempt_at_millis` INTEGER NOT NULL,
+              `last_capture_success_at_millis` INTEGER NOT NULL,
+              `last_capture_failure_at_millis` INTEGER NOT NULL,
+              `last_capture_error` TEXT,
+              PRIMARY KEY(`gameId`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `snapshots` (
+              `id` TEXT NOT NULL,
+              `game_id` TEXT NOT NULL,
+              `sequence` INTEGER NOT NULL,
+              `captured_at_millis` INTEGER NOT NULL,
+              `reason` TEXT NOT NULL,
+              `pinned` INTEGER NOT NULL,
+              `payload` TEXT NOT NULL,
+              `progress_json` TEXT,
+              PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            INSERT INTO snapshots (
+              id, game_id, sequence, captured_at_millis, reason, pinned, payload, progress_json
+            ) VALUES (
+              'pre', 'shark-incremental', 2, 50, 'pre-restore', 1, 'before', NULL
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            INSERT INTO game_instances (
+              gameId, profile_name, session_identity, last_played_at_millis, resume_token,
+              recovery_state, last_capture_at_millis, snapshot_payload,
+              last_capture_attempt_at_millis, last_capture_success_at_millis,
+              last_capture_failure_at_millis, last_capture_error
+            ) VALUES (
+              'shark-incremental', 'hub-game-shark-incremental', 'kept', 50, NULL,
+              NULL, 50, 'before',
+              50, 50, 0, NULL
+            )
+            """.trimIndent(),
+        )
+        sqlite.version = 4
+        sqlite.close()
+
+        val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
+            .addMigrations(HubDatabase.MIGRATION_4_5)
+            .allowMainThreadQueries()
+            .build()
+        val snapshots = db.snapshotDao()
+        snapshots.insert(
+            com.example.hub.database.SnapshotRecord(
+                id = "post",
+                gameId = "shark-incremental",
+                sequence = 3,
+                capturedAtMillis = 60L,
+                reason = SnapshotReasons.POST_RESTORE,
+                pinned = true,
+                payload = "restored",
+                progressJson = null,
+                origin = "recovery",
+            ),
+        )
+        repeat(12) { index ->
+            snapshots.insert(
+                com.example.hub.database.SnapshotRecord(
+                    id = "auto-$index",
+                    gameId = "shark-incremental",
+                    sequence = 10L + index,
+                    capturedAtMillis = 100L + index,
+                    reason = "cadence",
+                    pinned = false,
+                    payload = "auto-$index",
+                    progressJson = null,
+                ),
+            )
+        }
+        snapshots.pruneAutomatic("shark-incremental")
+        val history = snapshots.history("shark-incremental")
+        val pre = history.single { it.reason == "pre-restore" }
+        assertEquals("before", pre.payload)
+        assertEquals("recovery", pre.origin)
+        assertTrue(pre.pinned)
+        val post = history.single { it.reason == SnapshotReasons.POST_RESTORE }
+        assertEquals("restored", post.payload)
+        assertTrue(post.pinned)
+        assertTrue(history.count { it.reason == "cadence" } <= 10)
+        assertEquals("before", db.gameInstanceDao().get("shark-incremental")?.snapshotPayload)
+        db.close()
+    }
 }

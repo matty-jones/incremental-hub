@@ -65,6 +65,7 @@ fun PlaySurface(
     val folded = !isWideWindow()
     val saveNotice by controller.manualSaveNotice.collectAsState()
     val saveBusy by controller.manualSaveInFlight.collectAsState()
+    val captureBlockReason by controller.captureBlockReason.collectAsState()
     val smallestWidth = LocalConfiguration.current.smallestScreenWidthDp
     val trimpsInset = with(LocalDensity.current) {
         TrimpsFrame.bottomInsetPx(gameId, smallestWidth).toDp()
@@ -185,6 +186,7 @@ fun PlaySurface(
                             showDisplay = menuPanel == MenuPanel.Display,
                             showDiagnostics = menuPanel == MenuPanel.Diagnostics,
                             saveBusy = saveBusy,
+                            saveBlockedReason = captureBlockReason,
                             saveNotice = saveNotice,
                             onPanelBack = { menuPanel = MenuPanel.Actions },
                             display = {

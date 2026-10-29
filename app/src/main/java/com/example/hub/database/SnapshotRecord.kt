@@ -25,6 +25,7 @@ object SnapshotReasons {
     const val MIGRATED_BASELINE = "migrated-baseline"
     const val DIAGNOSTIC_BACKUP = "diagnostic-backup"
     const val PRE_RESTORE = "pre-restore"
+    const val POST_RESTORE = "post-restore"
     const val WORKSTATION = "workstation"
     const val CHECKPOINT = "checkpoint"
 }
@@ -38,7 +39,7 @@ object SnapshotOrigins {
 
 fun originForReason(reason: String): String = when (reason) {
     SnapshotReasons.CHECKPOINT -> SnapshotOrigins.MANUAL_CHECKPOINT
-    SnapshotReasons.PRE_RESTORE -> SnapshotOrigins.RECOVERY
+    SnapshotReasons.PRE_RESTORE, SnapshotReasons.POST_RESTORE -> SnapshotOrigins.RECOVERY
     SnapshotReasons.WORKSTATION -> SnapshotOrigins.WORKSTATION
     else -> SnapshotOrigins.LOCAL_CAPTURE
 }
