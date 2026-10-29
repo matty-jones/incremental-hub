@@ -109,6 +109,7 @@ fun decideMerge(
         when (comparison) {
             SaveComparison.LIVE_AHEAD -> return MergeDecision.Push
             SaveComparison.LIVE_BEHIND, SaveComparison.LIVE_MISSING -> return MergeDecision.Pull
+            SaveComparison.INCONCLUSIVE -> return MergeDecision.Skip
             else -> Unit
         }
     }

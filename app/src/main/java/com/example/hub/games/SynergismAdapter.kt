@@ -132,6 +132,14 @@ class SynergismAdapter : GameAdapter {
         return SynergismSave.compare(live, stored)
     }
 
+    override fun classifyProgress(candidate: String?, reference: String?): ProgressionClass {
+        if (candidate.isNullOrBlank()) return ProgressionClass.INVALID
+        val current = primaryMarkers(candidate) ?: return ProgressionClass.INVALID
+        if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
+        val stored = primaryMarkers(reference) ?: return ProgressionClass.INCOMPARABLE
+        return SynergismSave.classify(current, stored)
+    }
+
     override fun chooseStored(candidates: List<String>): String? {
         val pointer = candidates.firstOrNull() ?: return null
         val standing = summarize(pointer).standing

@@ -73,6 +73,28 @@ class SharkProgressTest {
         ))
     }
 
+    @Test
+    fun captureClassIgnoresTimeCurrencyAndHugeExponents() {
+        val advanced = encode(player(feature = 9, played = 10, sharkExponent = 20, fishExponent = 40, prestige = 2639))
+        val huge = JSONObject(String(Base64.getDecoder().decode(advanced)))
+        huge.getJSONObject("total_fish").put("e", "3689787472063838")
+        val feature9 = encode(huge)
+        val regressed = encode(player(feature = 0, played = 999_999_999, sharkExponent = 80, fishExponent = 80, prestige = 9_000))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(regressed, feature9))
+        val sameFeatureLessPrestige = encode(
+            player(feature = 9, played = 999_999_999, sharkExponent = 80, fishExponent = 80, prestige = 10),
+        )
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(sameFeatureLessPrestige, feature9))
+        assertEquals(SaveComparison.LIVE_AHEAD, SharkProgress.compare(sameFeatureLessPrestige, feature9))
+        val prestiged = encode(player(feature = 9, played = 1, sharkExponent = 1, fishExponent = 1, prestige = 2640))
+        assertEquals(ProgressionClass.ADVANCED, SharkProgress.classifyCapture(prestiged, feature9))
+        val sameMilestones = encode(player(feature = 9, played = 11, sharkExponent = 21, fishExponent = 41, prestige = 2639))
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(sameMilestones, feature9))
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(feature9, feature9))
+        assertEquals(ProgressionClass.INVALID, SharkProgress.classifyCapture("not-a-save", feature9))
+        assertEquals(ProgressionClass.ADVANCED, SharkProgress.classifyCapture(feature9, null))
+    }
+
     private fun fresh(): JSONObject = player(feature = 0, played = 0, sharkExponent = null, fishExponent = null, prestige = 0)
 
     private fun progressed(): JSONObject = player(feature = 4, played = 345_600, sharkExponent = 20, fishExponent = 15, prestige = 2)

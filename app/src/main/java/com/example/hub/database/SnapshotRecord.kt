@@ -19,6 +19,10 @@ data class SnapshotRecord(
     @ColumnInfo(name = "progress_json") val progressJson: String?,
     @ColumnInfo(name = "origin", defaultValue = "local-capture")
     val origin: String = SnapshotOrigins.LOCAL_CAPTURE,
+    @ColumnInfo(name = "lineage_id", defaultValue = "legacy")
+    val lineageId: String = "legacy",
+    @ColumnInfo(name = "content_sha256", defaultValue = "")
+    val contentSha256: String = "",
 )
 
 object SnapshotReasons {
@@ -28,6 +32,8 @@ object SnapshotReasons {
     const val POST_RESTORE = "post-restore"
     const val WORKSTATION = "workstation"
     const val CHECKPOINT = "checkpoint"
+    const val QUARANTINE = "quarantine"
+    const val LINEAGE_BASE = "lineage-base"
 }
 
 object SnapshotOrigins {
@@ -39,7 +45,11 @@ object SnapshotOrigins {
 
 fun originForReason(reason: String): String = when (reason) {
     SnapshotReasons.CHECKPOINT -> SnapshotOrigins.MANUAL_CHECKPOINT
-    SnapshotReasons.PRE_RESTORE, SnapshotReasons.POST_RESTORE -> SnapshotOrigins.RECOVERY
+    SnapshotReasons.PRE_RESTORE,
+    SnapshotReasons.POST_RESTORE,
+    SnapshotReasons.QUARANTINE,
+    SnapshotReasons.LINEAGE_BASE,
+    -> SnapshotOrigins.RECOVERY
     SnapshotReasons.WORKSTATION -> SnapshotOrigins.WORKSTATION
     else -> SnapshotOrigins.LOCAL_CAPTURE
 }

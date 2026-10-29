@@ -66,6 +66,20 @@ class SaveMergeTest {
     }
 
     @Test
+    fun incomparableProgressDoesNotFollowTheClock() {
+        assertEquals(
+            MergeDecision.Skip,
+            decideMerge(
+                localCapturedAtMillis = 10,
+                remoteCapturedAtMillis = 50,
+                localStanding = SaveStanding.PROGRESSED,
+                remoteStanding = SaveStanding.PROGRESSED,
+                comparison = SaveComparison.INCONCLUSIVE,
+            ),
+        )
+    }
+
+    @Test
     fun furtherProgressWinsOverANewerClock() {
         assertEquals(
             MergeDecision.Pull,

@@ -227,6 +227,9 @@ class SharkIncrementalAdapter : GameAdapter {
     override fun compare(livePayload: String?, storedPayload: String?): SaveComparison =
         SharkProgress.compare(livePayload, storedPayload)
 
+    override fun classifyProgress(candidate: String?, reference: String?): ProgressionClass =
+        SharkProgress.classifyCapture(candidate, reference)
+
     override fun chooseStored(candidates: List<String>): String? = SharkProgress.chooseStored(candidates)
 
     override suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean {

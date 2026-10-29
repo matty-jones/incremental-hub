@@ -14,7 +14,7 @@ import androidx.room.migration.Migration
  */
 @Database(
     entities = [GameInstance::class, SnapshotRecord::class],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class HubDatabase : RoomDatabase() {
@@ -117,11 +117,34 @@ abstract class HubDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE game_instances ADD COLUMN lineage_id TEXT NOT NULL DEFAULT 'legacy'",
+                )
+                db.execSQL("ALTER TABLE game_instances ADD COLUMN high_water_snapshot_id TEXT")
+                db.execSQL("ALTER TABLE game_instances ADD COLUMN capture_incident TEXT")
+                db.execSQL("ALTER TABLE game_instances ADD COLUMN capture_incident_sha TEXT")
+                db.execSQL(
+                    "ALTER TABLE game_instances ADD COLUMN capture_incident_count INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE game_instances ADD COLUMN last_seen_at_millis INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE snapshots ADD COLUMN lineage_id TEXT NOT NULL DEFAULT 'legacy'",
+                )
+                db.execSQL(
+                    "ALTER TABLE snapshots ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''",
+                )
+            }
+        }
+
         private fun buildDatabase(context: Context) = Room.databaseBuilder(
             context.applicationContext,
             HubDatabase::class.java,
             DATABASE_NAME,
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
 }

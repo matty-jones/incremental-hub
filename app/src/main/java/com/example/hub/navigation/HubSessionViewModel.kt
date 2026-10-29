@@ -46,6 +46,19 @@ class HubSessionViewModel(
             comparison = if (game.adapterId == "shark-incremental-adapter") comparison else null,
         )
     }
+    init {
+        saveSync.protectsLocal = protects@{ gameId, reference, candidate ->
+            val game = gameRegistry.getGame(gameId) ?: return@protects false
+            val adapter = GameAdapters.create(game.adapterId) ?: return@protects false
+            when (adapter.classifyProgress(candidate, reference)) {
+                com.example.hub.games.ProgressionClass.ADVANCED,
+                com.example.hub.games.ProgressionClass.EQUAL,
+                com.example.hub.games.ProgressionClass.RESET_APPROVED,
+                -> true
+                else -> false
+            }
+        }
+    }
     val controller: SessionController = SessionController(
         context = context.applicationContext,
         gameRegistry = gameRegistry,

@@ -200,6 +200,7 @@ class SessionController(
 
     private var launchMode: LaunchMode = LaunchMode.RESUME
     private var suppressCapture: Boolean = false
+    private var incidentDetail: String? = null
     private val _captureBlockReason = MutableStateFlow<String?>(null)
     val captureBlockReason: StateFlow<String?> = _captureBlockReason.asStateFlow()
     private var restoreGeneration: Int = 0
@@ -210,7 +211,7 @@ class SessionController(
     /** Throws inside the post-restore transaction. Stages: before-write, after-pin. */
     internal var restoreCommitFault: (suspend (String) -> Unit)? = null
 
-    /** Throws inside a capture write. Stages: before-write, after-pointer. */
+    /** Throws inside a capture write. Stages: before-write, after-pointer, after-quarantine. */
     internal var captureWriteFault: (suspend (String) -> Unit)? = null
     private var openStep: OpenStep = OpenStep.DECIDE
     private var restoreInProgress: Boolean = false
@@ -329,6 +330,15 @@ class SessionController(
             } else {
                 _sessionError.value = "Recovery row ${activeInstance.gameId} is not in the registry"
             }
+            val incident = activeInstance.captureIncident
+            if (!incident.isNullOrBlank()) {
+                incidentDetail = incident
+                setCaptureSuppressed(true)
+                if (game != null) {
+                    _sessionError.value = incident
+                    showIncidentDiagnostic(activeInstance.gameId, incident)
+                }
+            }
             transitionTo(SessionState.Opening, activeInstance.gameId)
             when (activeInstance.recoveryState) {
                 "Degraded" -> transitionTo(SessionState.Degraded, activeInstance.gameId)
@@ -402,6 +412,7 @@ class SessionController(
                 return
             }
             if (blockForPendingJournal(gameId)) return
+            if (mode == LaunchMode.RESUME && divertForCaptureIncident(gameId)) return
             if (mode == LaunchMode.SAFE) {
                 val backups = snapshotDao?.countPinned(gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0
                 if (backups == 0) {
@@ -508,6 +519,14 @@ class SessionController(
         requestCapture()
     }
 
+    internal suspend fun captureNowForTest(reason: String) {
+        mutex.withLock {
+            if (_state.value is SessionState.Playing) {
+                performCaptureLocked(reason)
+            }
+        }
+    }
+
     fun requestBackground() {
         scope.launch {
             mutex.withLock {
@@ -576,7 +595,7 @@ class SessionController(
         if (_state.value is SessionState.Playing && webView != null) {
             _reloadEpoch.value = _reloadEpoch.value + 1
             Log.d(TAG, "requestReload epoch=${_reloadEpoch.value}")
-        } else {
+        } else if (incidentDetail == null) {
             _sessionError.value = "Reload is unavailable until the page is playing"
         }
     }
@@ -600,6 +619,12 @@ class SessionController(
     fun confirmRecover() {
         scope.launch {
             mutex.withLock { confirmRecoverLocked() }
+        }
+    }
+
+    fun confirmNewLineage(confirmed: Boolean, activate: Boolean) {
+        scope.launch {
+            mutex.withLock { confirmNewLineageLocked(confirmed, activate) }
         }
     }
 
@@ -1409,6 +1434,7 @@ class SessionController(
         if (work.adapter.usesSaveEnvelope) {
             _activeProfileName.value?.let { journalStore.delete(it) }
         }
+        incidentDetail = null
         launchMode = LaunchMode.RESUME
         setCaptureSuppressed(false)
         restoreInProgress = false
@@ -1844,27 +1870,27 @@ class SessionController(
         reason: String,
         pinned: Boolean,
         progressJson: String?,
-    ) {
-        val dao = snapshotDao ?: return
-        if ((reason == SnapshotReasons.DIAGNOSTIC_BACKUP || reason == SnapshotReasons.POST_RESTORE) &&
-            dao.findPinnedPayload(gameId, reason, payload) != null
-        ) {
-            return
+    ): SnapshotRecord? {
+        val dao = snapshotDao ?: return null
+        if (reason == SnapshotReasons.DIAGNOSTIC_BACKUP || reason == SnapshotReasons.POST_RESTORE) {
+            dao.findPinnedPayload(gameId, reason, payload)?.let { return it }
         }
-        dao.insert(
-            SnapshotRecord(
-                id = UUID.randomUUID().toString(),
-                gameId = gameId,
-                sequence = dao.maxSequence(gameId) + 1,
-                capturedAtMillis = System.currentTimeMillis(),
-                reason = reason,
-                pinned = pinned,
-                payload = payload,
-                progressJson = progressJson,
-                origin = originForReason(reason),
-            ),
+        val record = SnapshotRecord(
+            id = UUID.randomUUID().toString(),
+            gameId = gameId,
+            sequence = dao.maxSequence(gameId) + 1,
+            capturedAtMillis = System.currentTimeMillis(),
+            reason = reason,
+            pinned = pinned,
+            payload = payload,
+            progressJson = progressJson,
+            origin = originForReason(reason),
+            lineageId = instanceDao.get(gameId)?.lineageId ?: "legacy",
+            contentSha256 = PayloadDigest.sha256(payload),
         )
+        dao.insert(record)
         if (!pinned) dao.pruneAutomatic(gameId)
+        return record
     }
 
     private fun historyEntries(records: List<SnapshotRecord>): List<HistoryEntry> {
@@ -2065,8 +2091,20 @@ class SessionController(
                     CaptureAttempt.Failed(error)
                 }
             }
-            try {
-                writeCaptureResult(gameId, payload, null, reason)
+            val sessionId = instanceDao.get(gameId)?.sessionIdentity
+            val generation = restoreGeneration
+            val commit = try {
+                captureRepository().commitIfSafe(
+                    gameId = gameId,
+                    candidate = payload,
+                    reason = reason,
+                    adapter = adapter,
+                    sessionId = sessionId,
+                    stillCurrent = {
+                        restoreGeneration == generation && _activeGameId.value == gameId
+                    },
+                    manual = reason == SnapshotReasons.CHECKPOINT,
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2077,6 +2115,31 @@ class SessionController(
                     transitionTo(SessionState.Playing, gameId)
                 }
                 return CaptureAttempt.Failed(error)
+            }
+            when (commit.disposition) {
+                CaptureDisposition.QUARANTINED -> {
+                    enterCaptureIncident(gameId, payload, commit.message.orEmpty())
+                    return CaptureAttempt.Failed(commit.message ?: "regression. The active save was kept.")
+                }
+                CaptureDisposition.REJECTED -> {
+                    val error = commit.message ?: "invalid. Capture failed validation ($reason). Last good snapshot was kept."
+                    _sessionError.value = error
+                    if (_state.value is SessionState.Capturing) {
+                        transitionTo(SessionState.Playing, gameId)
+                    }
+                    return CaptureAttempt.Failed(error)
+                }
+                CaptureDisposition.STORED, CaptureDisposition.UNCHANGED -> {
+                    if (commit.sync) {
+                        commit.instance?.let { saved ->
+                            try {
+                                onSnapshotSaved?.invoke(saved)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "workstation sync failed after a local commit ($reason)", e)
+                            }
+                        }
+                    }
+                }
             }
             if (_sessionError.value?.startsWith("Capture ") == true ||
                 _sessionError.value?.startsWith("Capture deferred") == true ||
@@ -2185,44 +2248,18 @@ class SessionController(
         gameId: String,
         successPayload: String?,
         error: String?,
-        reason: String = "capture",
     ) {
         val instance = instanceDao.get(gameId) ?: return
         val now = System.currentTimeMillis()
-        val updated = if (successPayload != null) {
-            instance.copy(
-                lastCaptureAttemptAtMillis = now,
-                lastCaptureSuccessAtMillis = now,
-                lastCaptureAtMillis = now,
-                lastCaptureError = null,
-                snapshotPayload = successPayload,
-            )
-        } else {
-            instance.copy(
-                lastCaptureAttemptAtMillis = now,
-                lastCaptureFailureAtMillis = now,
-                lastCaptureError = error ?: "capture failed",
-            )
+        if (successPayload != null) {
+            error("capture commits go through CaptureRepository")
         }
-        val apply = suspend {
-            captureWriteFault?.invoke("before-write")
-            instanceDao.upsert(updated)
-            if (successPayload != null) {
-                captureWriteFault?.invoke("after-pointer")
-                val adapter = activeAdapter
-                val progress = adapter?.let { summaryJson(it.summarize(successPayload)) }
-                appendSnapshot(
-                    gameId,
-                    successPayload,
-                    reason,
-                    pinned = reason == SnapshotReasons.CHECKPOINT,
-                    progressJson = progress,
-                )
-            }
-        }
-        val database = roomDatabase
-        if (database != null) database.withTransaction { apply() } else apply()
-        if (successPayload != null) onSnapshotSaved?.invoke(updated)
+        val updated = instance.copy(
+            lastCaptureAttemptAtMillis = now,
+            lastCaptureFailureAtMillis = now,
+            lastCaptureError = error ?: "capture failed",
+        )
+        instanceDao.upsert(updated)
     }
 
     private fun setCaptureSuppressed(suppressed: Boolean) {
@@ -2230,11 +2267,23 @@ class SessionController(
         _captureBlockReason.value = if (suppressed) captureBlockDetail() else null
     }
 
-    private fun captureBlockDetail(): String = when (launchMode) {
-        LaunchMode.SAFE -> "capture suppressed because Safe Launch does not take Hub saves"
-        LaunchMode.INSPECT -> "capture suppressed because Inspect is read-only"
-        LaunchMode.RECOVER, LaunchMode.RESUME ->
-            "capture suppressed because restore is unfinished"
+    private fun captureBlockDetail(): String {
+        incidentDetail?.let { return it }
+        return when (launchMode) {
+            LaunchMode.SAFE -> "capture suppressed because Safe Launch does not take Hub saves"
+            LaunchMode.INSPECT -> "capture suppressed because Inspect is read-only"
+            LaunchMode.RECOVER, LaunchMode.RESUME ->
+                "capture suppressed because restore is unfinished"
+        }
+    }
+
+    private fun captureRepository(): CaptureRepository {
+        return CaptureRepository(
+            instanceDao = instanceDao,
+            snapshotDao = snapshotDao,
+            roomDatabase = roomDatabase,
+            fault = captureWriteFault,
+        )
     }
 
     private suspend fun restoreVerifyCurrent(work: ReadyWork, generation: Int): Boolean {
@@ -2293,7 +2342,7 @@ class SessionController(
     ): GameInstance {
         val apply = suspend {
             restoreCommitFault?.invoke("before-write")
-            appendSnapshot(
+            val pinned = appendSnapshot(
                 gameId = gameId,
                 payload = payload,
                 reason = SnapshotReasons.POST_RESTORE,
@@ -2310,12 +2359,107 @@ class SessionController(
                 lastCaptureError = null,
                 snapshotPayload = payload,
                 recoveryState = null,
+                highWaterSnapshotId = pinned?.id ?: instance.highWaterSnapshotId,
+                captureIncident = null,
+                captureIncidentSha = null,
+                captureIncidentCount = 0,
             )
             instanceDao.upsert(updated)
             updated
         }
         val database = roomDatabase
         return if (database != null) database.withTransaction { apply() } else apply()
+    }
+
+    private suspend fun divertForCaptureIncident(gameId: String): Boolean {
+        val incident = instanceDao.get(gameId)?.captureIncident
+        if (incident.isNullOrBlank()) return false
+        incidentDetail = incident
+        setCaptureSuppressed(true)
+        _sessionError.value = incident
+        showIncidentDiagnostic(gameId, incident)
+        if (_state.value is SessionState.Opening) {
+            transitionTo(SessionState.RecoveryRequired, gameId)
+        }
+        return true
+    }
+
+    private suspend fun enterCaptureIncident(gameId: String, candidate: String, message: String) {
+        incidentDetail = message
+        setCaptureSuppressed(true)
+        _sessionError.value = message
+        showIncidentDiagnostic(gameId, message, candidate)
+        if (_state.value is SessionState.Capturing) {
+            transitionTo(SessionState.Playing, gameId)
+        }
+        if (_state.value is SessionState.Playing) {
+            transitionTo(SessionState.Degraded, gameId)
+        }
+        if (_state.value is SessionState.Degraded) {
+            transitionTo(SessionState.RecoveryRequired, gameId)
+        }
+    }
+
+    private suspend fun showIncidentDiagnostic(
+        gameId: String,
+        message: String,
+        candidate: String? = null,
+    ) {
+        val adapter = activeAdapter ?: return
+        val pointer = instanceDao.get(gameId)?.snapshotPayload
+        val sample = candidate ?: snapshotDao?.latestByReason(gameId, SnapshotReasons.QUARANTINE)?.payload
+        chosenPayload = pointer
+        if (!sample.isNullOrBlank()) {
+            peekOutcome = PeekOutcome.Value(sample)
+        }
+        val stored = adapter.summarize(pointer)
+        val live = adapter.summarize(sample)
+        val history = snapshotDao?.history(gameId)?.let { historyEntries(it) }.orEmpty()
+        val backups = snapshotDao?.countPinned(gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0
+        _diagnostic.value = SaveDiagnostic(
+            comparison = com.example.hub.games.SaveComparison.INCONCLUSIVE,
+            liveDetail = live.detail,
+            liveBytes = sample?.length ?: 0,
+            liveHash = PayloadDigest.sha256OrAbsent(sample),
+            storedDetail = stored.detail,
+            storedBytes = pointer?.length ?: 0,
+            storedHash = PayloadDigest.sha256OrAbsent(pointer),
+            history = history,
+            note = message,
+            backupReady = backups > 0,
+            recoverAllowed = !pointer.isNullOrBlank() && adapter.validate(pointer),
+        )
+    }
+
+    private suspend fun confirmNewLineageLocked(confirmed: Boolean, activate: Boolean) {
+        val gameId = _activeGameId.value ?: return
+        val adapter = activeAdapter ?: return
+        if (_state.value !is SessionState.RecoveryRequired) return
+        val sessionId = instanceDao.get(gameId)?.sessionIdentity
+        val generation = restoreGeneration
+        val commit = try {
+            captureRepository().openLineage(
+                gameId = gameId,
+                confirmed = confirmed,
+                activate = activate,
+                adapter = adapter,
+                sessionId = sessionId,
+                stillCurrent = { restoreGeneration == generation && _activeGameId.value == gameId },
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _sessionError.value = "storage error. ${e.message ?: "The new lineage was not stored."} The active save was kept."
+            return
+        }
+        _sessionError.value = commit.message
+        if (commit.disposition != CaptureDisposition.STORED) return
+        if (activate) {
+            incidentDetail = commit.message
+            chosenPayload = commit.instance?.snapshotPayload
+            setCaptureSuppressed(true)
+        }
+        showIncidentDiagnostic(gameId, commit.message.orEmpty(), chosenPayload)
     }
 
     private suspend fun failOpenLocked(gameId: String, message: String) {

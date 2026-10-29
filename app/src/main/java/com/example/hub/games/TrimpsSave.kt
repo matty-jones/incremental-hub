@@ -114,6 +114,30 @@ internal object TrimpsSave {
         }
     }
 
+    /**
+     * Portal count is the reset. A higher portal count is progress even when
+     * the zone falls. The same portal count does not allow a lost zone,
+     * universe, or challenge.
+     */
+    fun classify(candidate: Markers, reference: Markers): ProgressionClass {
+        val portals = candidate.totalPortals.compareTo(reference.totalPortals)
+        if (portals < 0) return ProgressionClass.REGRESSED
+        if (portals > 0) return ProgressionClass.ADVANCED
+        if (candidate.universe != reference.universe ||
+            candidate.challenge != reference.challenge ||
+            candidate.squared != reference.squared
+        ) {
+            return ProgressionClass.INCOMPARABLE
+        }
+        val zone = candidate.zone.compareTo(reference.zone)
+        if (zone < 0) return ProgressionClass.REGRESSED
+        if (zone > 0) return ProgressionClass.ADVANCED
+        val resource = candidate.resource.compareTo(reference.resource)
+        if (resource < 0) return ProgressionClass.REGRESSED
+        if (resource > 0) return ProgressionClass.ADVANCED
+        return ProgressionClass.EQUAL
+    }
+
     /** True when the running game has not lost the snapshot's progression. */
     fun accepts(snapshot: Markers, runtime: Markers): Boolean {
         if (runtime.stringVersion != REFERENCE) return false

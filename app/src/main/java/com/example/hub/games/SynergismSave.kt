@@ -135,6 +135,25 @@ internal object SynergismSave {
         return if (decided > 0) SaveComparison.LIVE_AHEAD else SaveComparison.LIVE_BEHIND
     }
 
+    /**
+     * Singularity, lifetime quarks, and the reset counters are monotonic.
+     * Worlds and golden quarks may fall when they are spent.
+     */
+    fun classify(candidate: Markers, reference: Markers): ProgressionClass {
+        val milestones = listOf(
+            candidate.singularityCount.compareTo(reference.singularityCount),
+            candidate.highestSingularityCount.compareTo(reference.highestSingularityCount),
+            candidate.totalQuarksEver.compareTo(reference.totalQuarksEver),
+            candidate.prestigeCount.compareTo(reference.prestigeCount),
+            candidate.transcendCount.compareTo(reference.transcendCount),
+            candidate.reincarnationCount.compareTo(reference.reincarnationCount),
+            candidate.ascensionCount.compareTo(reference.ascensionCount),
+        )
+        if (milestones.any { it < 0 }) return ProgressionClass.REGRESSED
+        if (milestones.any { it > 0 }) return ProgressionClass.ADVANCED
+        return ProgressionClass.EQUAL
+    }
+
     fun accepts(snapshot: Markers, runtime: Markers, pageVersion: String): Boolean {
         if (!pageVersion.contains(REFERENCE)) return false
         if (isNewerThanReference(runtime.version)) return false

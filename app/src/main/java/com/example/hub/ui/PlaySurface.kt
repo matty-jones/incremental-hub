@@ -242,6 +242,7 @@ fun PlaySurface(
                             onRetry = { controller.retryRecovery() },
                             onSafeLaunch = { controller.requestSafeLaunch() },
                             onRecover = { controller.confirmRecover() },
+                            onStartOver = { controller.confirmNewLineage(confirmed = true, activate = true) },
                             onClose = { exitSession() },
                             onExport = { shareReport(context, controller.diagnosticReport()) },
                             modifier = Modifier.fillMaxSize(),

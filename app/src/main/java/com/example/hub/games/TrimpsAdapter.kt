@@ -164,6 +164,14 @@ class TrimpsAdapter : GameAdapter {
         return TrimpsSave.compare(live, stored)
     }
 
+    override fun classifyProgress(candidate: String?, reference: String?): ProgressionClass {
+        if (candidate.isNullOrBlank()) return ProgressionClass.INVALID
+        val current = primaryMarkers(candidate) ?: return ProgressionClass.INVALID
+        if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
+        val stored = primaryMarkers(reference) ?: return ProgressionClass.INCOMPARABLE
+        return TrimpsSave.classify(current, stored)
+    }
+
     override suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean {
         val snapshot = primaryMarkers(importedPayload) ?: return false
         val runtime = readRuntime(webView) ?: return false

@@ -26,17 +26,30 @@ interface SnapshotDao {
     )
     suspend fun findPinnedPayload(gameId: String, reason: String, payload: String): SnapshotRecord?
 
+    @Query("SELECT * FROM snapshots WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): SnapshotRecord?
+
+    @Query(
+        "SELECT * FROM snapshots WHERE game_id = :gameId AND content_sha256 = :sha AND content_sha256 != '' LIMIT 1",
+    )
+    suspend fun findBySha(gameId: String, sha: String): SnapshotRecord?
+
+    @Query(
+        "SELECT * FROM snapshots WHERE game_id = :gameId AND reason = :reason ORDER BY sequence DESC LIMIT 1",
+    )
+    suspend fun latestByReason(gameId: String, reason: String): SnapshotRecord?
+
     @Query(
         """
         DELETE FROM snapshots
         WHERE game_id = :gameId
           AND pinned = 0
-          AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'post-restore', 'workstation', 'checkpoint')
+          AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'post-restore', 'workstation', 'checkpoint', 'quarantine', 'lineage-base')
           AND id NOT IN (
             SELECT id FROM snapshots
             WHERE game_id = :gameId
               AND pinned = 0
-              AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'post-restore', 'workstation', 'checkpoint')
+              AND reason NOT IN ('migrated-baseline', 'diagnostic-backup', 'pre-restore', 'post-restore', 'workstation', 'checkpoint', 'quarantine', 'lineage-base')
             ORDER BY sequence DESC
             LIMIT 10
           )

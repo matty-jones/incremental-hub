@@ -37,4 +37,10 @@ data class GameInstance(
     @ColumnInfo(name = "last_capture_success_at_millis") val lastCaptureSuccessAtMillis: Long = 0L,
     @ColumnInfo(name = "last_capture_failure_at_millis") val lastCaptureFailureAtMillis: Long = 0L,
     @ColumnInfo(name = "last_capture_error") val lastCaptureError: String? = null,
+    @ColumnInfo(name = "lineage_id", defaultValue = "legacy") val lineageId: String = "legacy",
+    @ColumnInfo(name = "high_water_snapshot_id") val highWaterSnapshotId: String? = null,
+    @ColumnInfo(name = "capture_incident") val captureIncident: String? = null,
+    @ColumnInfo(name = "capture_incident_sha") val captureIncidentSha: String? = null,
+    @ColumnInfo(name = "capture_incident_count", defaultValue = "0") val captureIncidentCount: Int = 0,
+    @ColumnInfo(name = "last_seen_at_millis", defaultValue = "0") val lastSeenAtMillis: Long = 0L,
 )

@@ -39,12 +39,16 @@ fun RecoveryOverlay(
     onRetry: () -> Unit,
     onSafeLaunch: () -> Unit = {},
     onRecover: () -> Unit = {},
+    onStartOver: (() -> Unit)? = null,
     onClose: () -> Unit,
     onExport: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId url=$launchUrl detail=$detail")
     var confirming by rememberSaveable(gameId) { mutableStateOf(false) }
+    var confirmingStartOver by rememberSaveable(gameId) { mutableStateOf(false) }
+    val incident = detail?.contains("Capture incident") == true ||
+        diagnostic?.note?.contains("Capture incident") == true
     OverlaySheet(
         onDismiss = onClose,
         dismissOnScrim = false,
@@ -187,6 +191,35 @@ fun RecoveryOverlay(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Safe Launch")
+            }
+            if (incident && onStartOver != null && confirmingStartOver) {
+                Text(
+                    text = "Start over keeps the current save in history and makes the quarantined save the active one. It is not uploaded.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HubPrimaryButton(
+                    onClick = {
+                        confirmingStartOver = false
+                        onStartOver()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Confirm new lineage")
+                }
+                HubOutlinedButton(
+                    onClick = { confirmingStartOver = false },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Back")
+                }
+            } else if (incident && onStartOver != null) {
+                HubOutlinedButton(
+                    onClick = { confirmingStartOver = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Start over on a new lineage")
+                }
             }
             HubPrimaryButton(
                 onClick = { confirming = true },

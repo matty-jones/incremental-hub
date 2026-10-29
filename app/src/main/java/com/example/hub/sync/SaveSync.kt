@@ -33,6 +33,13 @@ class SaveSync(
     var activeGameId: () -> String? = { null }
     var onDecision: (String) -> Unit = {}
 
+    /**
+     * True when [candidate] may replace [reference]. A capture incident and a
+     * non-legacy lineage are never uploaded or replaced from the workstation.
+     */
+    var protectsLocal: (gameId: String, reference: String?, candidate: String?) -> Boolean =
+        { _, _, _ -> true }
+
     private val mutex = Mutex()
 
     suspend fun push(instance: GameInstance) {
@@ -47,6 +54,12 @@ class SaveSync(
         val remoteSaves = withContext(Dispatchers.IO) { api.fetchSaves() }
         if (remoteSaves == null) {
             Log.i(TAG, "workstation unreachable; keeping local saves")
+            if (syncBlocked(fallbackPush)) {
+                onDecision(
+                    "Workstation sync skipped. The active save was kept.",
+                )
+                return
+            }
             val remote = fallbackPush?.toRemoteSave() ?: return
             withContext(Dispatchers.IO) { api.putSave(remote) }
             return
@@ -57,6 +70,12 @@ class SaveSync(
         for (gameId in local.keys + remoteById.keys) {
             val localRow = local[gameId]
             val remoteRow = remoteById[gameId]
+            if (syncBlocked(localRow)) {
+                onDecision(
+                    "Workstation sync skipped for $gameId. The active save was kept.",
+                )
+                continue
+            }
             when (decision(localRow, remoteRow)) {
                 MergeDecision.Push -> pushLocked(localRow)
                 MergeDecision.Pull -> remoteRow?.let { applyPull(it) }
@@ -90,6 +109,10 @@ class SaveSync(
 
     private suspend fun applyPull(remote: RemoteSave) {
         val existing = dao.get(remote.gameId)
+        if (existing != null && !remoteMayReplace(existing, remote)) {
+            onDecision("Rejected workstation save for ${remote.gameId}. The stored snapshot was kept.")
+            return
+        }
         val merge = decision(existing, remote)
         if (!replacesStoredPointer(activeGameId() == remote.gameId, merge)) {
             if (merge == MergeDecision.Pull) {
@@ -108,6 +131,13 @@ class SaveSync(
         rememberPulled(remote)
         onDecision("Pulled workstation save for ${remote.gameId}.")
         Log.i(TAG, "pulled ${remote.gameId} captured at ${remote.capturedAtMillis}")
+    }
+
+    private suspend fun remoteMayReplace(existing: GameInstance, remote: RemoteSave): Boolean {
+        if (!protectsLocal(existing.gameId, existing.snapshotPayload, remote.snapshotPayload)) return false
+        val highId = existing.highWaterSnapshotId ?: return true
+        val highWater = snapshotDao?.getById(highId)?.payload ?: return true
+        return protectsLocal(existing.gameId, highWater, remote.snapshotPayload)
     }
 
     private suspend fun rememberPulled(remote: RemoteSave) {
@@ -172,5 +202,17 @@ private fun RemoteSave.toGameInstance(existing: GameInstance?): GameInstance {
         lastCaptureSuccessAtMillis = capturedAtMillis,
         lastCaptureFailureAtMillis = existing?.lastCaptureFailureAtMillis ?: 0L,
         lastCaptureError = null,
+        lineageId = existing?.lineageId ?: "legacy",
+        highWaterSnapshotId = existing?.highWaterSnapshotId,
+        captureIncident = existing?.captureIncident,
+        captureIncidentSha = existing?.captureIncidentSha,
+        captureIncidentCount = existing?.captureIncidentCount ?: 0,
+        lastSeenAtMillis = existing?.lastSeenAtMillis ?: 0L,
     )
+}
+
+private fun syncBlocked(instance: GameInstance?): Boolean {
+    if (instance == null) return false
+    if (instance.captureIncident != null) return true
+    return instance.lineageId != "legacy"
 }

@@ -120,6 +120,32 @@ data class SharkProgress(
             return SaveSummary(standing, progress.version, progress.detail(), payload.length)
         }
 
+        /**
+         * Milestone order for a capture commit. Feature, prestige, core, humanoid,
+         * and singularity are monotonic. A later milestone may spend currencies.
+         * Play time and currency rank never prove an advance or excuse a lost milestone.
+         */
+        fun classifyCapture(candidate: String?, reference: String?): ProgressionClass {
+            val current = parsePayload(candidate)
+            if (current == null || current.version < SharkIncrementalAdapter.MIN_VERSION) {
+                return ProgressionClass.INVALID
+            }
+            if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
+            val stored = parsePayload(reference) ?: return ProgressionClass.INCOMPARABLE
+            if (stored.version < SharkIncrementalAdapter.MIN_VERSION) return ProgressionClass.INCOMPARABLE
+            if (candidate == reference) return ProgressionClass.EQUAL
+            val milestones = listOf(
+                current.feature.compareTo(stored.feature),
+                current.prestigeTimes.compareTo(stored.prestigeTimes),
+                current.coreTimes.compareTo(stored.coreTimes),
+                current.humanoidTimes.compareTo(stored.humanoidTimes),
+                current.singularityFirst.compareTo(stored.singularityFirst),
+            )
+            if (milestones.any { it < 0 }) return ProgressionClass.REGRESSED
+            if (milestones.any { it > 0 }) return ProgressionClass.ADVANCED
+            return ProgressionClass.EQUAL
+        }
+
         fun compare(livePayload: String?, storedPayload: String?): SaveComparison {
             val storedSummary = summarize(storedPayload)
             if (storedSummary.standing == SaveStanding.ABSENT) return SaveComparison.NO_SNAPSHOT

@@ -221,6 +221,17 @@ interface GameAdapter {
     }
 
     /**
+     * Capture-commit order. The default refuses to treat an unequal payload as
+     * progress. A missing reference is a first save and may become the pointer.
+     */
+    fun classifyProgress(candidate: String?, reference: String?): ProgressionClass {
+        if (candidate.isNullOrBlank()) return ProgressionClass.INVALID
+        if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
+        if (candidate == reference) return ProgressionClass.EQUAL
+        return ProgressionClass.INCOMPARABLE
+    }
+
+    /**
      * The first candidate is the profile pointer. Return it when it is a
      * valid fresh or progressed save. Do not scan later candidates.
      */
