@@ -1,6 +1,8 @@
 package com.example.hub.ui
 
 import android.util.Log
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +24,9 @@ import java.util.Date
 
 private const val TAG = "RecoveryOverlay"
 
+private fun formatWhen(millis: Long): String =
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
+
 /**
  * Overlay shown when the session enters [com.example.hub.session.SessionState.RecoveryRequired].
  *
@@ -42,6 +47,12 @@ fun RecoveryOverlay(
     onStartOver: (() -> Unit)? = null,
     onClose: () -> Unit,
     onExport: () -> Unit = {},
+    onKeepWebView: () -> Unit = {},
+    onInspectSnapshot: (Long) -> Unit = {},
+    onExportSnapshot: (Long) -> Unit = {},
+    onRestoreSnapshot: (Long) -> Unit = {},
+    inspectedSequence: Long? = null,
+    exportedPayload: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId url=$launchUrl detail=$detail")
@@ -133,13 +144,22 @@ fun RecoveryOverlay(
                 text = "Comparison: ${diagnostic.comparison.name}",
                 style = MaterialTheme.typography.titleSmall,
             )
+            if (diagnostic.consequence.isNotBlank()) {
+                Text(
+                    text = diagnostic.consequence,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            val liveWhen = diagnostic.livePinnedAtMillis?.let { formatWhen(it) } ?: "capture time unknown"
+            val roomWhen = diagnostic.storedCapturedAtMillis?.let { formatWhen(it) } ?: "capture time unknown"
             Text(
-                text = "WebView key: ${diagnostic.liveBytes} bytes. ${diagnostic.liveDetail}",
+                text = "WebView key: ${diagnostic.liveBytes} bytes, pinned $liveWhen. ${diagnostic.liveDetail}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Room snapshot: ${diagnostic.storedBytes} bytes. ${diagnostic.storedDetail}",
+                text = "Room snapshot: ${diagnostic.storedBytes} bytes, captured $roomWhen. ${diagnostic.storedDetail}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -149,16 +169,45 @@ fun RecoveryOverlay(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 diagnostic.history.take(8).forEach { entry ->
-                    val whenText = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                        .format(Date(entry.capturedAtMillis))
+                    val whenText = formatWhen(entry.capturedAtMillis)
                     val pin = if (entry.pinned) "pinned" else "automatic"
                     val origin = if (entry.origin.isBlank()) "" else ", ${entry.origin}"
-                    Text(
-                        text = "#${entry.sequence} $whenText ${entry.reason} ($pin$origin, ${entry.byteLength} bytes). ${entry.detail}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "#${entry.sequence} $whenText ${entry.reason} ($pin$origin, ${entry.byteLength} bytes). ${entry.detail}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            HubOutlinedButton(
+                                onClick = { onInspectSnapshot(entry.sequence) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Inspect")
+                            }
+                            HubOutlinedButton(
+                                onClick = { onExportSnapshot(entry.sequence) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Export")
+                            }
+                            HubOutlinedButton(
+                                onClick = { onRestoreSnapshot(entry.sequence) },
+                                enabled = inspectedSequence == entry.sequence,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Use")
+                            }
+                        }
+                    }
                 }
+            }
+            if (!exportedPayload.isNullOrEmpty()) {
+                Text(
+                    text = "Exact export, ${exportedPayload.length} bytes. This does not restore or modify the snapshot.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (consoleLines.isNotEmpty()) {
                 Text(
@@ -221,9 +270,17 @@ fun RecoveryOverlay(
                     Text("Start over on a new lineage")
                 }
             }
+            if (diagnostic.ambiguous) {
+                HubOutlinedButton(
+                    onClick = onKeepWebView,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Keep WebView save")
+                }
+            }
             HubPrimaryButton(
                 onClick = { confirming = true },
-                enabled = diagnostic.recoverAllowed,
+                enabled = diagnostic.recoverAllowed && !diagnostic.ambiguous,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Recover from snapshot")

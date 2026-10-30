@@ -30,6 +30,7 @@ import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.PayloadDigest
 import com.example.hub.games.PeekOutcome
+import com.example.hub.games.ProgressionClass
 import com.example.hub.games.QualificationResult
 import com.example.hub.games.RuntimeVerdict
 import com.example.hub.games.SaveComparison
@@ -224,6 +225,13 @@ class SessionController(
     private var chosenPayload: String? = null
     private var liveBeforeRestore: String? = null
     private var preparedPayload: String? = null
+    private var ambiguousLive: Boolean = false
+    private var explicitRestore: Boolean = false
+    internal var inspectionProfileName: String? = null
+    private val _exportedSnapshot = MutableStateFlow<String?>(null)
+    val exportedSnapshot: StateFlow<String?> = _exportedSnapshot.asStateFlow()
+    private val _inspectedSequence = MutableStateFlow<Long?>(null)
+    val inspectedSequence: StateFlow<Long?> = _inspectedSequence.asStateFlow()
     private val consoleBuffer = ArrayDeque<String>()
     private var handlingDocument = false
     private var pendingFinish: PendingFinish? = null
@@ -502,6 +510,11 @@ class SessionController(
                         "Save already in progress.",
                     )
                     is CaptureAttempt.Deferred -> publishManualSave(ManualSaveOutcome.DEFERRED, attempt.detail)
+                    is CaptureAttempt.Quarantined -> publishManualSave(
+                        ManualSaveOutcome.QUARANTINED,
+                        attempt.detail,
+                    )
+                    is CaptureAttempt.Rejected -> publishManualSave(ManualSaveOutcome.REJECTED, attempt.detail)
                     is CaptureAttempt.Failed -> publishManualSave(ManualSaveOutcome.FAILED, attempt.detail)
                 }
             } finally {
@@ -621,10 +634,37 @@ class SessionController(
         }
     }
 
-    fun confirmRecover() {
+    fun confirmRecover(sequence: Long? = null) {
         scope.launch {
-            mutex.withLock { confirmRecoverLocked() }
+            mutex.withLock { confirmRecoverLocked(sequence) }
         }
+    }
+
+    fun keepWebViewSave() {
+        scope.launch {
+            mutex.withLock {
+                if (_state.value !is SessionState.RecoveryRequired) return@withLock
+                _sessionError.value =
+                    "The WebView save was kept. Room, the live profile, and the workstation pointer were not changed."
+            }
+        }
+    }
+
+    fun inspectSnapshot(sequence: Long) {
+        scope.launch {
+            mutex.withLock { inspectSnapshotLocked(sequence) }
+        }
+    }
+
+    fun requestSnapshotExport(sequence: Long) {
+        scope.launch {
+            _exportedSnapshot.value = exportSnapshotPayload(sequence)
+        }
+    }
+
+    suspend fun exportSnapshotPayload(sequence: Long): String? {
+        val gameId = _activeGameId.value ?: return null
+        return snapshotDao?.history(gameId)?.firstOrNull { it.sequence == sequence }?.payload
     }
 
     fun confirmNewLineage(confirmed: Boolean, activate: Boolean) {
@@ -1057,7 +1097,8 @@ class SessionController(
                 if (record.payload.isNotBlank()) add(record.payload)
             }
         }
-        val stored = work.adapter.chooseStored(candidates)
+        val pointerValid = !pointer.isNullOrBlank() && validates(work.adapter, pointer)
+        val stored = if (pointerValid) pointer else work.adapter.chooseStored(candidates)
         val livePayload = (outcome as? PeekOutcome.Value)?.payload
         val liveSummary = work.adapter.summarize(livePayload)
         val comparison = when {
@@ -1066,9 +1107,18 @@ class SessionController(
             stored == null && liveSummary.standing != SaveStanding.PROGRESSED -> SaveComparison.INCONCLUSIVE
             else -> work.adapter.compare(livePayload, stored)
         }
+        val milestone = if (!livePayload.isNullOrBlank() && !stored.isNullOrBlank()) {
+            classifyQuiet(work.adapter, livePayload, stored)
+        } else {
+            null
+        }
         val shouldPlay = launchMode == LaunchMode.RESUME &&
             outcome !is PeekOutcome.Failed &&
-            shouldResumeLive(comparison)
+            (
+                shouldResumeLive(comparison) ||
+                    milestone == ProgressionClass.EQUAL ||
+                    milestone == ProgressionClass.ADVANCED
+                )
         if (!shouldPlay) {
             pinCopy(work.gameId, work.adapter, livePayload, SnapshotReasons.DIAGNOSTIC_BACKUP)
             if (!pointer.isNullOrBlank() && pointer != livePayload) {
@@ -1077,10 +1127,31 @@ class SessionController(
         }
         val storedSummary = work.adapter.summarize(stored)
         val backupReady = (snapshotDao?.countPinned(work.gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0) > 0
-        val recoverAllowed = outcome !is PeekOutcome.Failed &&
+        val liveNonEmpty = !livePayload.isNullOrBlank()
+        val ambiguous = liveNonEmpty &&
+            (
+                comparison == SaveComparison.INCONCLUSIVE ||
+                    milestone == ProgressionClass.INCOMPARABLE ||
+                    milestone == ProgressionClass.INVALID
+                )
+        val recoverAllowed = !ambiguous &&
+            outcome !is PeekOutcome.Failed &&
             stored != null &&
-            work.adapter.validate(stored)
-        val note = diagnosticNote(outcome, comparison)
+            validates(work.adapter, stored)
+        val instance = instanceDao.get(work.gameId)
+        val pinnedLiveAt = snapshotDao?.history(work.gameId)
+            ?.lastOrNull { it.reason == SnapshotReasons.DIAGNOSTIC_BACKUP && it.payload == livePayload }
+            ?.capturedAtMillis
+        val note = if (ambiguous) {
+            "The WebView save could not be ordered against Room. The game was not loaded. Both saves were kept."
+        } else {
+            diagnosticNote(outcome, comparison)
+        }
+        val consequence = if (ambiguous) {
+            "Recovering the Room snapshot would replace the live profile with the older pointer and drop this WebView save from the game. Both payloads stay pinned. Inspect a snapshot in a disposable profile before choosing it."
+        } else {
+            ""
+        }
         val diagnostic = SaveDiagnostic(
             comparison = comparison,
             liveDetail = liveSummary.detail,
@@ -1089,15 +1160,21 @@ class SessionController(
             storedDetail = storedSummary.detail,
             storedBytes = storedSummary.byteLength,
             storedHash = PayloadDigest.sha256OrAbsent(stored),
-            history = historyEntries(snapshotDao?.history(work.gameId).orEmpty()),
+            history = historyEntries(snapshotDao?.history(work.gameId).orEmpty(), work.adapter),
             note = note,
             backupReady = backupReady,
             recoverAllowed = recoverAllowed,
+            ambiguous = ambiguous,
+            consequence = consequence,
+            storedCapturedAtMillis = instance?.lastCaptureAtMillis,
+            livePinnedAtMillis = pinnedLiveAt,
         )
         mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
             peekOutcome = outcome
             chosenPayload = stored
+            ambiguousLive = ambiguous
+            explicitRestore = false
             _diagnostic.value = diagnostic
             if (shouldPlay) {
                 beginGameLoadLocked()
@@ -1418,11 +1495,38 @@ class SessionController(
             transitionTo(SessionState.RecoveryRequired, work.gameId)
             return
         }
+        val previous = instanceDao.get(work.gameId)?.snapshotPayload
+        val relation = if (previous.isNullOrBlank()) {
+            ProgressionClass.ADVANCED
+        } else {
+            classifyQuiet(work.adapter, payload, previous)
+        }
+        val liveRelation = liveBeforeRestore?.takeIf { it.isNotBlank() }?.let {
+            classifyQuiet(work.adapter, payload, it)
+        }
+        val behindProtected = relation == ProgressionClass.REGRESSED ||
+            relation == ProgressionClass.INCOMPARABLE ||
+            relation == ProgressionClass.INVALID ||
+            liveRelation == ProgressionClass.REGRESSED
+        if (!explicitRestore && behindProtected) {
+            _sessionError.value =
+                "Restore refused because the loaded save is behind the protected pointer. Both saves were kept."
+            setCaptureSuppressed(true)
+            transitionTo(SessionState.RecoveryRequired, work.gameId)
+            return
+        }
+        val propose = !ambiguousLive &&
+            relation != ProgressionClass.REGRESSED &&
+            relation != ProgressionClass.INCOMPARABLE &&
+            relation != ProgressionClass.INVALID &&
+            liveRelation != ProgressionClass.REGRESSED
         val committed = try {
             commitRestoredBaseline(
                 work.gameId,
                 payload,
                 summaryJson(work.adapter.summarize(payload)),
+                proposePointer = propose,
+                moveHighWater = propose && payload != previous,
             )
         } catch (e: CancellationException) {
             throw e
@@ -1449,7 +1553,9 @@ class SessionController(
         documentGate.phase = DocumentPhase.GAME
         documentGate.payload = null
         transitionTo(SessionState.Playing, work.gameId)
-        if (_state.value is SessionState.Playing) {
+        explicitRestore = false
+        ambiguousLive = false
+        if (_state.value is SessionState.Playing && propose) {
             onSnapshotSaved?.invoke(committed)
             Log.d(TAG, "restore verified ${work.gameId}")
         }
@@ -1817,7 +1923,31 @@ class SessionController(
         transitionTo(SessionState.Opening, gameId)
     }
 
-    private suspend fun confirmRecoverLocked() {
+    private suspend fun inspectSnapshotLocked(sequence: Long) {
+        val gameId = _activeGameId.value ?: return
+        if (_state.value !is SessionState.RecoveryRequired) return
+        val record = snapshotDao?.history(gameId)?.firstOrNull { it.sequence == sequence } ?: run {
+            _sessionError.value = "Snapshot #$sequence was not found. Nothing was written."
+            return
+        }
+        val profileName = "hub-inspect-$gameId-$sequence"
+        val profile = obtainProfile(profileName)
+        inspectionProfileName = profileName
+        _inspectedSequence.value = sequence
+        _activeProfile.value = profile
+        _activeProfileName.value = profileName
+        documentGate.phase = DocumentPhase.WRITE
+        documentGate.payload = record.payload
+        val dead = webView
+        webView = null
+        dead?.let { runCatching { it.destroy() } }
+        _webViewGeneration.value = _webViewGeneration.value + 1
+        _sessionError.value =
+            "Inspection loaded snapshot #$sequence into disposable profile $profileName. " +
+            "The live profile and the Room pointer were not written."
+    }
+
+    private suspend fun confirmRecoverLocked(sequence: Long? = null) {
         val gameId = _activeGameId.value ?: return
         val adapter = activeAdapter ?: return
         if (_state.value !is SessionState.RecoveryRequired) return
@@ -1825,11 +1955,44 @@ class SessionController(
             _sessionError.value = "Restore refused because storage could not be inspected."
             return
         }
-        val stored = chosenPayload
-        if (stored.isNullOrBlank() || !adapter.validate(stored)) {
+        if (ambiguousLive && sequence == null) {
+            _sessionError.value =
+                "Restore refused. The WebView save could not be ordered against Room. Both saves were kept."
+            return
+        }
+        if (sequence != null && _inspectedSequence.value != sequence) {
+            _sessionError.value =
+                "Restore refused. Inspect snapshot #$sequence in a disposable profile before replacing the live save."
+            return
+        }
+        val stored = if (sequence == null) {
+            chosenPayload
+        } else {
+            snapshotDao?.history(gameId)?.firstOrNull { it.sequence == sequence }?.payload
+        }
+        if (stored.isNullOrBlank() || !validates(adapter, stored)) {
             _sessionError.value = "Restore refused because no validated snapshot is available."
             return
         }
+        val previous = instanceDao.get(gameId)?.snapshotPayload
+        val chosenRelation = if (previous.isNullOrBlank()) {
+            ProgressionClass.ADVANCED
+        } else {
+            classifyQuiet(adapter, stored, previous)
+        }
+        if (chosenRelation == ProgressionClass.REGRESSED ||
+            chosenRelation == ProgressionClass.INCOMPARABLE ||
+            chosenRelation == ProgressionClass.INVALID
+        ) {
+            _sessionError.value =
+                "Restore refused. The chosen snapshot is not ahead of the protected pointer. Both saves were kept."
+            return
+        }
+        explicitRestore = sequence != null
+        val inspectName = inspectionProfileName
+        inspectionProfileName = null
+        bindLiveProfile(gameId)
+        if (inspectName != null) runCatching { profileStore.deleteProfile(inspectName) }
         restoreGeneration += 1
         restoreSessionIdentity = instanceDao.get(gameId)?.sessionIdentity
         restoreProfileName = _activeProfileName.value
@@ -1898,19 +2061,24 @@ class SessionController(
         return record
     }
 
-    private fun historyEntries(records: List<SnapshotRecord>): List<HistoryEntry> {
+    private fun historyEntries(
+        records: List<SnapshotRecord>,
+        adapter: GameAdapter? = activeAdapter,
+    ): List<HistoryEntry> {
         return records.asReversed().map { record ->
-            val detail = record.progressJson?.let { raw ->
+            val parsed = adapter?.summarize(record.payload)?.detail?.takeIf { it.isNotBlank() }
+            val stored = record.progressJson?.let { raw ->
                 runCatching { JSONObject(raw).optString("detail") }.getOrNull().orEmpty()
-            }.orEmpty().ifBlank { record.reason }
+            }.orEmpty()
             HistoryEntry(
                 sequence = record.sequence,
                 reason = record.reason,
                 pinned = record.pinned,
                 capturedAtMillis = record.capturedAtMillis,
                 byteLength = record.payload.length,
-                detail = detail,
+                detail = parsed ?: stored.ifBlank { record.reason },
                 origin = record.origin,
+                snapshotId = record.id,
             )
         }
     }
@@ -2092,6 +2260,8 @@ class SessionController(
                 }
                 return if (!decline.isNullOrBlank()) {
                     CaptureAttempt.Deferred(decline)
+                } else if (payload != null) {
+                    CaptureAttempt.Rejected(error)
                 } else {
                     CaptureAttempt.Failed(error)
                 }
@@ -2124,7 +2294,9 @@ class SessionController(
             when (commit.disposition) {
                 CaptureDisposition.QUARANTINED -> {
                     enterCaptureIncident(gameId, payload, commit.message.orEmpty())
-                    return CaptureAttempt.Failed(commit.message ?: "regression. The active save was kept.")
+                    return CaptureAttempt.Quarantined(
+                        commit.message ?: "Save quarantined. The previous verified save was kept.",
+                    )
                 }
                 CaptureDisposition.REJECTED -> {
                     val error = commit.message ?: "invalid. Capture failed validation ($reason). Last good snapshot was kept."
@@ -2132,7 +2304,7 @@ class SessionController(
                     if (_state.value is SessionState.Capturing) {
                         transitionTo(SessionState.Playing, gameId)
                     }
-                    return CaptureAttempt.Failed(error)
+                    return CaptureAttempt.Rejected(error)
                 }
                 CaptureDisposition.STORED, CaptureDisposition.UNCHANGED -> {
                     if (commit.sync) {
@@ -2167,6 +2339,8 @@ class SessionController(
         data object Saved : CaptureAttempt
         data object Busy : CaptureAttempt
         data class Deferred(val detail: String) : CaptureAttempt
+        data class Quarantined(val detail: String) : CaptureAttempt
+        data class Rejected(val detail: String) : CaptureAttempt
         data class Failed(val detail: String) : CaptureAttempt
     }
 
@@ -2198,7 +2372,8 @@ class SessionController(
         if (destination is SessionState.Playing &&
             current is SessionState.Opening &&
             suppressCapture &&
-            launchMode != LaunchMode.SAFE
+            launchMode != LaunchMode.SAFE &&
+            launchMode != LaunchMode.INSPECT
         ) {
             _sessionError.value = captureBlockDetail()
             destination = SessionState.RecoveryRequired
@@ -2223,8 +2398,9 @@ class SessionController(
         ) {
             _activeGameId.value = gameId
         }
-        if (destination is SessionState.Playing || destination is SessionState.Capturing ||
-            destination is SessionState.Restoring || destination is SessionState.Degraded
+        if (inspectionProfileName == null &&
+            (destination is SessionState.Playing || destination is SessionState.Capturing ||
+                destination is SessionState.Restoring || destination is SessionState.Degraded)
         ) {
             _activeProfileName.value = gameId?.let { "hub-game-$it" }
         }
@@ -2329,22 +2505,24 @@ class SessionController(
             false
         }
         if (!valid) return intended
+        val relation = classifyQuiet(work.adapter, readback, intended)
+        if (relation == ProgressionClass.EQUAL || relation == ProgressionClass.ADVANCED) return readback
         val comparison = try {
             work.adapter.compare(readback, intended)
         } catch (e: Exception) {
             SaveComparison.INCONCLUSIVE
         }
-        return if (comparison == SaveComparison.MATCH || comparison == SaveComparison.LIVE_AHEAD) {
-            readback
-        } else {
-            intended
-        }
+        if (comparison == SaveComparison.MATCH) return readback
+        if (comparison == SaveComparison.LIVE_AHEAD && relation == ProgressionClass.UNORDERED) return readback
+        return intended
     }
 
     private suspend fun commitRestoredBaseline(
         gameId: String,
         payload: String,
         progressJson: String?,
+        proposePointer: Boolean = true,
+        moveHighWater: Boolean = true,
     ): GameInstance {
         val apply = suspend {
             restoreCommitFault?.invoke("before-write")
@@ -2365,7 +2543,11 @@ class SessionController(
                 lastCaptureError = null,
                 snapshotPayload = payload,
                 recoveryState = null,
-                highWaterSnapshotId = pinned?.id ?: instance.highWaterSnapshotId,
+                highWaterSnapshotId = if (moveHighWater) {
+                    pinned?.id ?: instance.highWaterSnapshotId
+                } else {
+                    instance.highWaterSnapshotId
+                },
                 captureIncident = null,
                 captureIncidentSha = null,
                 captureIncidentCount = 0,
@@ -2373,7 +2555,7 @@ class SessionController(
             instanceDao.upsert(updated)
             val pinnedId = pinned?.id
             val outbox = syncOutboxDao
-            if (pinnedId != null && outbox != null) {
+            if (proposePointer && pinnedId != null && outbox != null) {
                 enqueueAcceptedSnapshot(
                     dao = outbox,
                     instance = updated,
@@ -2436,8 +2618,21 @@ class SessionController(
         }
         val stored = adapter.summarize(pointer)
         val live = adapter.summarize(sample)
-        val history = snapshotDao?.history(gameId)?.let { historyEntries(it) }.orEmpty()
+        val relation = if (sample.isNullOrBlank() || pointer.isNullOrBlank()) {
+            null
+        } else {
+            classifyQuiet(adapter, sample, pointer)
+        }
+        val ambiguousSample = !sample.isNullOrBlank() &&
+            (
+                relation == ProgressionClass.INCOMPARABLE ||
+                    relation == ProgressionClass.INVALID ||
+                    live.standing == SaveStanding.INVALID
+                )
+        ambiguousLive = ambiguousSample
+        val history = snapshotDao?.history(gameId)?.let { historyEntries(it, adapter) }.orEmpty()
         val backups = snapshotDao?.countPinned(gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0
+        val instance = instanceDao.get(gameId)
         _diagnostic.value = SaveDiagnostic(
             comparison = com.example.hub.games.SaveComparison.INCONCLUSIVE,
             liveDetail = live.detail,
@@ -2449,8 +2644,38 @@ class SessionController(
             history = history,
             note = message,
             backupReady = backups > 0,
-            recoverAllowed = !pointer.isNullOrBlank() && adapter.validate(pointer),
+            recoverAllowed = !ambiguousSample && !pointer.isNullOrBlank() && validates(adapter, pointer),
+            ambiguous = ambiguousSample,
+            consequence = if (ambiguousSample) {
+                "The live save could not be ordered. Restoring the Room pointer would replace it. Both payloads stay pinned."
+            } else {
+                ""
+            },
+            storedCapturedAtMillis = instance?.lastCaptureAtMillis,
         )
+    }
+
+    private suspend fun validates(adapter: GameAdapter, payload: String?): Boolean {
+        if (payload.isNullOrBlank()) return false
+        return try {
+            adapter.validate(payload)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun classifyQuiet(adapter: GameAdapter, candidate: String?, reference: String?): ProgressionClass {
+        return try {
+            adapter.classifyProgress(candidate, reference)
+        } catch (e: Exception) {
+            ProgressionClass.INCOMPARABLE
+        }
+    }
+
+    private suspend fun bindLiveProfile(gameId: String) {
+        val profileName = "hub-game-$gameId"
+        _activeProfileName.value = profileName
+        _activeProfile.value = obtainProfile(profileName)
     }
 
     private suspend fun confirmNewLineageLocked(confirmed: Boolean, activate: Boolean) {

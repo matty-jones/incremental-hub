@@ -56,6 +56,8 @@ fun PlaySurface(
     val loadToken by controller.loadToken.collectAsState()
     val presentationEpoch by controller.presentationEpoch.collectAsState()
     val diagnostic by controller.diagnostic.collectAsState()
+    val inspectedSequence by controller.inspectedSequence.collectAsState()
+    val exportedSnapshot by controller.exportedSnapshot.collectAsState()
     val consoleLines by controller.consoleLines.collectAsState()
     val events by controller.diagnosticEvents.collectAsState()
     val context = LocalContext.current
@@ -245,6 +247,12 @@ fun PlaySurface(
                             onStartOver = { controller.confirmNewLineage(confirmed = true, activate = true) },
                             onClose = { exitSession() },
                             onExport = { shareReport(context, controller.diagnosticReport()) },
+                            onKeepWebView = { controller.keepWebViewSave() },
+                            onInspectSnapshot = { controller.inspectSnapshot(it) },
+                            onExportSnapshot = { controller.requestSnapshotExport(it) },
+                            onRestoreSnapshot = { controller.confirmRecover(it) },
+                            inspectedSequence = inspectedSequence,
+                            exportedPayload = exportedSnapshot,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }

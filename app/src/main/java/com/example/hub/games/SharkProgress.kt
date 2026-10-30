@@ -6,16 +6,40 @@ import java.math.BigInteger
 import java.util.Base64
 
 /**
- * Sign and scientific exponent of a break_eternity Decimal.
+ * Sign, tower height, and top exponent of a break_eternity Decimal.
  * Coefficients are not compared. Zero is sign 0, whatever the exponent is.
+ * Tower 1 is a normal scientific value. `ee10` is tower 2. Infinity uses
+ * [Int.MAX_VALUE] and is not a milestone.
  */
-data class DecimalRank(val sign: Int, val exponent: BigInteger) : Comparable<DecimalRank> {
+data class DecimalRank(
+    val sign: Int,
+    val exponent: BigInteger,
+    val tower: Int = 1,
+) : Comparable<DecimalRank> {
     override fun compareTo(other: DecimalRank): Int {
         if (sign != other.sign) return sign.compareTo(other.sign)
         if (sign == 0) return 0
+        val towerOrder = if (sign < 0) other.tower.compareTo(tower) else tower.compareTo(other.tower)
+        if (towerOrder != 0) return towerOrder
         return if (sign < 0) other.exponent.compareTo(exponent) else exponent.compareTo(other.exponent)
     }
 }
+
+enum class SharkParseKind {
+    OK,
+    BASE64,
+    JSON,
+    MISSING_FIELD,
+    DECIMAL,
+    INVALID_GAME,
+}
+
+data class SharkParseReport(
+    val kind: SharkParseKind,
+    val field: String?,
+    val detail: String,
+    val progress: SharkProgress?,
+)
 
 /**
  * Stable Shark progress markers taken from [getPlayerData] defaults.
@@ -62,19 +86,23 @@ data class SharkProgress(
     }
 
     companion object {
-        fun parsePayload(payload: String?): SharkProgress? {
-            if (payload.isNullOrBlank()) return null
+        fun parsePayload(payload: String?): SharkProgress? = diagnosePayload(payload).progress
+
+        fun diagnosePayload(payload: String?): SharkParseReport {
+            if (payload.isNullOrBlank()) {
+                return SharkParseReport(SharkParseKind.MISSING_FIELD, null, "No save key", null)
+            }
             val decoded = try {
                 String(Base64.getDecoder().decode(payload), Charsets.UTF_8)
             } catch (e: Exception) {
-                return null
+                return SharkParseReport(SharkParseKind.BASE64, null, "Base64 decoding failed", null)
             }
             val json = try {
                 JSONObject(decoded)
             } catch (e: Exception) {
-                return null
+                return SharkParseReport(SharkParseKind.JSON, null, "Save JSON is invalid", null)
             }
-            return parsePlayer(json)
+            return diagnosePlayer(json)
         }
 
         fun parseRuntime(jsonText: String?): SharkProgress? {
@@ -84,7 +112,7 @@ data class SharkProgress(
             } catch (e: Exception) {
                 return null
             }
-            return parsePlayer(json)
+            return diagnosePlayer(json).progress
         }
 
         /**
@@ -107,12 +135,13 @@ data class SharkProgress(
             if (payload.isNullOrBlank()) {
                 return SaveSummary(SaveStanding.ABSENT, null, "No save key", 0)
             }
-            val progress = parsePayload(payload)
+            val report = diagnosePayload(payload)
+            val progress = report.progress
             if (progress == null || progress.version < SharkIncrementalAdapter.MIN_VERSION) {
                 return SaveSummary(
                     SaveStanding.INVALID,
                     progress?.version,
-                    "Save did not parse as Shark progress",
+                    report.detail,
                     payload.length,
                 )
             }
@@ -133,9 +162,14 @@ data class SharkProgress(
          * and the earlier payload remains recoverable.
          */
         fun classifyCapture(candidate: String?, reference: String?): ProgressionClass {
-            val current = parsePayload(candidate)
+            if (candidate.isNullOrBlank()) return ProgressionClass.INVALID
+            val report = diagnosePayload(candidate)
+            val current = report.progress
             if (current == null || current.version < SharkIncrementalAdapter.MIN_VERSION) {
-                return ProgressionClass.INVALID
+                val preserve = report.kind == SharkParseKind.MISSING_FIELD ||
+                    report.kind == SharkParseKind.DECIMAL ||
+                    (report.kind == SharkParseKind.INVALID_GAME && report.field != "VERSION")
+                return if (preserve) ProgressionClass.INCOMPARABLE else ProgressionClass.INVALID
             }
             if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
             val stored = parsePayload(reference) ?: return ProgressionClass.INCOMPARABLE
@@ -182,33 +216,95 @@ data class SharkProgress(
             return parsed.firstOrNull()?.first
         }
 
-        private fun parsePlayer(json: JSONObject): SharkProgress? {
-            if (!json.has("VERSION") || json.isNull("VERSION")) return null
+        private fun diagnosePlayer(json: JSONObject): SharkParseReport {
+            if (!json.has("VERSION") || json.isNull("VERSION")) {
+                return failure(SharkParseKind.MISSING_FIELD, "VERSION", "Missing field VERSION")
+            }
             val version = json.optString("VERSION").toIntOrNull() ?: json.optInt("VERSION", -1)
-            if (version < 0) return null
-            val feature = json.requiredInt("feature") ?: return null
-            val played = json.requiredDecimal("totalTimePlayed") ?: return null
-            val shark = parseDecimal(json.opt("shark_level")) ?: return null
-            if (!json.has("shark_level") || json.isNull("shark_level")) return null
-            val fish = parseDecimal(json.opt("total_fish")) ?: return null
-            if (!json.has("total_fish") || json.isNull("total_fish")) return null
-            val prestige = json.optJSONObject("prestige")?.requiredLong("times") ?: return null
-            val core = json.optJSONObject("core")?.requiredLong("times") ?: return null
-            val humanoid = json.optJSONObject("humanoid")?.requiredLong("times") ?: return null
-            val singularity = json.optJSONObject("singularity") ?: return null
-            if (!singularity.has("first") || singularity.isNull("first")) return null
-            val playedRank = decimalToBig(played) ?: return null
-            return SharkProgress(
-                version = version,
-                feature = feature,
-                totalTimePlayed = playedRank,
-                sharkLevel = shark,
-                totalFish = fish,
-                prestigeTimes = prestige,
-                coreTimes = core,
-                humanoidTimes = humanoid,
-                singularityFirst = singularity.getBoolean("first"),
+            if (version < 0) {
+                return failure(SharkParseKind.INVALID_GAME, "VERSION", "Invalid game data in VERSION")
+            }
+            if (version < SharkIncrementalAdapter.MIN_VERSION) {
+                return failure(SharkParseKind.INVALID_GAME, "VERSION", "Unsupported Shark version $version")
+            }
+            val feature = json.requiredInt("feature")
+                ?: return failure(SharkParseKind.MISSING_FIELD, "feature", "Missing field feature")
+            val played = readPlayTime(json)
+                ?: return decimalFailure(json, "totalTimePlayed")
+            val shark = readDecimal(json, "shark_level")
+            if (shark.report != null) return shark.report
+            val fish = readDecimal(json, "total_fish")
+            if (fish.report != null) return fish.report
+            val prestige = json.optJSONObject("prestige")?.requiredLong("times")
+                ?: return failure(SharkParseKind.MISSING_FIELD, "prestige.times", "Missing field prestige.times")
+            val core = json.optJSONObject("core")?.requiredLong("times")
+                ?: return failure(SharkParseKind.MISSING_FIELD, "core.times", "Missing field core.times")
+            val humanoid = json.optJSONObject("humanoid")?.requiredLong("times")
+                ?: return failure(SharkParseKind.MISSING_FIELD, "humanoid.times", "Missing field humanoid.times")
+            val singularity = json.optJSONObject("singularity")
+                ?: return failure(SharkParseKind.MISSING_FIELD, "singularity.first", "Missing field singularity.first")
+            if (!singularity.has("first") || singularity.isNull("first")) {
+                return failure(SharkParseKind.MISSING_FIELD, "singularity.first", "Missing field singularity.first")
+            }
+            return SharkParseReport(
+                SharkParseKind.OK,
+                null,
+                "Shark progress parsed",
+                SharkProgress(
+                    version = version,
+                    feature = feature,
+                    totalTimePlayed = played,
+                    sharkLevel = shark.rank!!,
+                    totalFish = fish.rank!!,
+                    prestigeTimes = prestige,
+                    coreTimes = core,
+                    humanoidTimes = humanoid,
+                    singularityFirst = singularity.getBoolean("first"),
+                ),
             )
+        }
+
+        private fun failure(kind: SharkParseKind, field: String, detail: String): SharkParseReport {
+            return SharkParseReport(kind, field, detail, null)
+        }
+
+        private data class DecimalRead(val rank: DecimalRank?, val report: SharkParseReport?)
+
+        private fun readDecimal(json: JSONObject, key: String): DecimalRead {
+            if (!json.has(key) || json.isNull(key)) {
+                return DecimalRead(null, failure(SharkParseKind.MISSING_FIELD, key, "Missing field $key"))
+            }
+            val raw = json.opt(key)
+            if (isNan(raw)) {
+                return DecimalRead(null, failure(SharkParseKind.INVALID_GAME, key, "Invalid game data in $key"))
+            }
+            val rank = parseDecimal(raw)
+                ?: return DecimalRead(
+                    null,
+                    failure(SharkParseKind.DECIMAL, key, "Unsupported Decimal representation in $key"),
+                )
+            return DecimalRead(rank, null)
+        }
+
+        private fun readPlayTime(json: JSONObject): BigDecimal? {
+            if (!json.has("totalTimePlayed") || json.isNull("totalTimePlayed")) return null
+            return decimalToBig(json.opt("totalTimePlayed"))
+        }
+
+        private fun decimalFailure(json: JSONObject, key: String): SharkParseReport {
+            val raw = if (json.has(key)) json.opt(key) else null
+            if (raw == null || raw == JSONObject.NULL) {
+                return failure(SharkParseKind.MISSING_FIELD, key, "Missing field $key")
+            }
+            if (isNan(raw)) return failure(SharkParseKind.INVALID_GAME, key, "Invalid game data in $key")
+            return failure(SharkParseKind.DECIMAL, key, "Unsupported Decimal representation in $key")
+        }
+
+        private fun isNan(value: Any?): Boolean = when (value) {
+            is Double -> value.isNaN()
+            is Float -> value.isNaN()
+            is String -> value.equals("NaN", ignoreCase = true)
+            else -> false
         }
 
         private fun JSONObject.requiredInt(key: String): Int? {
@@ -229,16 +325,31 @@ data class SharkProgress(
             }
         }
 
-        private fun JSONObject.requiredDecimal(key: String): Any? {
-            if (!has(key) || isNull(key)) return null
-            return opt(key)
+        private fun decimalToBig(value: Any?): BigDecimal? = when (value) {
+            null, JSONObject.NULL -> null
+            is BigDecimal -> value
+            is Number -> if (isNan(value)) null else runCatching { BigDecimal(value.toString()) }.getOrNull()
+            is String -> when {
+                value.equals("NaN", ignoreCase = true) -> null
+                else -> runCatching { BigDecimal(value) }.getOrNull()
+                    ?: parseDecimal(value)?.let { rankToBig(it) }
+            }
+            is JSONObject -> parseDecimal(value)?.let { rankToBig(it) }
+            else -> null
         }
 
-        private fun decimalToBig(value: Any): BigDecimal? = when (value) {
-            is BigDecimal -> value
-            is Number -> runCatching { BigDecimal(value.toString()) }.getOrNull()
-            is String -> runCatching { BigDecimal(value) }.getOrNull()
-            else -> null
+        private fun rankToBig(rank: DecimalRank): BigDecimal? {
+            if (rank.sign == 0) return BigDecimal.ZERO
+            if (rank.tower != 1) return null
+            val exp = rank.exponent
+            if (exp.bitLength() > 20) return null
+            val digits = exp.toInt()
+            if (digits > 10_000 || digits < -10_000) return null
+            return if (digits >= 0) {
+                BigDecimal.TEN.pow(digits).multiply(BigDecimal(rank.sign))
+            } else {
+                BigDecimal.ONE.scaleByPowerOfTen(digits).multiply(BigDecimal(rank.sign))
+            }
         }
 
         fun parseDecimal(value: Any?): DecimalRank? = when (value) {
@@ -247,36 +358,108 @@ data class SharkProgress(
                 if (!value.has("s") || !value.has("e") || value.isNull("s") || value.isNull("e")) null
                 else {
                     val sign = value.optInt("s")
-                    val exponent = when (val raw = value.opt("e")) {
-                        is Number -> runCatching { BigDecimal(raw.toString()).toBigInteger() }.getOrNull()
-                        is String -> raw.toBigIntegerOrNull()
-                        else -> null
-                    }
                     if (sign == 0) DecimalRank(0, BigInteger.ZERO)
-                    else exponent?.let { DecimalRank(sign.coerceIn(-1, 1), it) }
+                    else {
+                        val exponent = exponentRank(value.opt("e")) ?: return null
+                        DecimalRank(sign.coerceIn(-1, 1), exponent.exponent, exponent.tower)
+                    }
                 }
             }
-            is Number -> runCatching { rankOf(BigDecimal(value.toString())) }.getOrNull()
+            is Number -> if (isNan(value)) null else runCatching { rankOf(BigDecimal(value.toString())) }.getOrNull()
             is String -> rankString(value)
             else -> null
         }
 
+        private fun exponentRank(raw: Any?): DecimalRank? = when (raw) {
+            is Number -> {
+                if (isNan(raw) || (raw is Double && raw.isInfinite()) || (raw is Float && raw.isInfinite())) {
+                    null
+                } else {
+                    runCatching { DecimalRank(1, BigDecimal(raw.toString()).toBigInteger()) }.getOrNull()
+                }
+            }
+            is String -> parseExponent(raw)?.let { DecimalRank(1, it) } ?: rankString(raw)
+            is JSONObject -> parseDecimal(raw)
+            else -> null
+        }
+
         private fun rankString(value: String): DecimalRank? {
-            // BigDecimal rejects exponents outside Int range. Shark legitimately
-            // serialises fish as strings such as "1e3689787472063838".
-            runCatching { BigDecimal(value) }.getOrNull()?.let { return rankOf(it) }
-            val match = Regex("""^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$""")
-                .matchEntire(value) ?: return null
-            val integerPart = match.groupValues[2]
-            val digits = integerPart + match.groupValues[3]
+            val trimmed = value.trim()
+            if (trimmed.equals("NaN", ignoreCase = true)) return null
+            if (trimmed == "Infinity") return DecimalRank(1, BigInteger.ZERO, Int.MAX_VALUE)
+            if (trimmed == "-Infinity") return DecimalRank(-1, BigInteger.ZERO, Int.MAX_VALUE)
+            // BigDecimal rejects exponents outside Int range. Shark serialises fish
+            // as strings such as "1e3689787472063838" and, after reload, as the
+            // break_eternity toString forms "ee10", "(e^3)10", and "1e3.68e+15".
+            runCatching { BigDecimal(trimmed) }.getOrNull()?.let { return rankOf(it) }
+            towerRank(trimmed)?.let { return it }
+            val match = Regex("""^([+-]?)(\d+)(?:\.(\d*))?[eE](.+)$""").matchEntire(trimmed) ?: return null
+            val exponent = parseExponent(match.groupValues[4])
+            if (exponent != null) {
+                return scientificRank(
+                    match.groupValues[1],
+                    match.groupValues[2],
+                    match.groupValues[3],
+                    exponent,
+                )
+            }
+            val nested = rankString(match.groupValues[4]) ?: return null
+            val sign = if (match.groupValues[1] == "-") -1 else 1
+            if (nested.sign == 0) return DecimalRank(0, BigInteger.ZERO)
+            return DecimalRank(sign * nested.sign, nested.exponent, nested.tower + 1)
+        }
+
+        private fun towerRank(value: String): DecimalRank? {
+            val paren = Regex("""^([+-]?)\(e\^(\d+)\)(.+)$""", RegexOption.IGNORE_CASE).matchEntire(value)
+            if (paren != null) {
+                val height = paren.groupValues[2].toIntOrNull() ?: return null
+                if (height < 2) return null
+                return combineTower(paren.groupValues[1], height, paren.groupValues[3])
+            }
+            val layered = Regex("""^([+-]?)(e{2,})(.+)$""", RegexOption.IGNORE_CASE).matchEntire(value) ?: return null
+            return combineTower(layered.groupValues[1], layered.groupValues[2].length, layered.groupValues[3])
+        }
+
+        private fun combineTower(signRaw: String, height: Int, magnitude: String): DecimalRank? {
+            val mag = rankString(magnitude) ?: return null
+            if (mag.sign == 0) return DecimalRank(0, BigInteger.ZERO)
+            val sign = if (signRaw == "-") -mag.sign else mag.sign
+            return DecimalRank(sign.coerceIn(-1, 1), mag.exponent, height + mag.tower - 1)
+        }
+
+        private fun scientificRank(
+            signRaw: String,
+            integerPart: String,
+            fraction: String,
+            exponent: BigInteger,
+        ): DecimalRank? {
+            val digits = integerPart + fraction
             val firstNonzero = digits.indexOfFirst { it != '0' }
             if (firstNonzero < 0) return DecimalRank(0, BigInteger.ZERO)
-            val exponent = match.groupValues[4].toBigIntegerOrNull() ?: return null
             val magnitude = exponent + BigInteger.valueOf(
                 integerPart.length.toLong() - firstNonzero.toLong() - 1L,
             )
-            val sign = if (match.groupValues[1] == "-") -1 else 1
+            val sign = if (signRaw == "-") -1 else 1
             return DecimalRank(sign, magnitude)
+        }
+
+        private fun parseExponent(raw: String): BigInteger? {
+            val trimmed = raw.trim()
+            trimmed.toBigIntegerOrNull()?.let { return it }
+            val match = Regex("""^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$""").matchEntire(trimmed) ?: return null
+            val negative = match.groupValues[1] == "-"
+            val fraction = match.groupValues[3]
+            val exp = match.groupValues[4].toIntOrNull() ?: return null
+            val scale = exp - fraction.length
+            if (scale > 1_000_000 || scale < -1_000_000) return null
+            val digits = (match.groupValues[2] + fraction).trimStart('0').ifEmpty { "0" }
+            if (digits == "0") return BigInteger.ZERO
+            val magnitude = if (scale >= 0) {
+                BigInteger(digits).multiply(BigInteger.TEN.pow(scale))
+            } else {
+                BigInteger(digits).divide(BigInteger.TEN.pow(-scale))
+            }
+            return if (negative) magnitude.negate() else magnitude
         }
 
         private fun rankOf(value: BigDecimal): DecimalRank {

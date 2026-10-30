@@ -12,9 +12,9 @@ import org.json.JSONObject
  * Adapter for Shark Incremental.
  *
  * Save format: base64-encoded JSON with a `VERSION` field (≥3).
- * Large numbers use break_eternity.js Decimal serialization
- * (`{s:…,e:…,c:[…]}`) which is preserved losslessly as opaque JSON —
- * never parsed into Double.
+ * `validate` only checks that encoding. `save()` then stringifies each
+ * break_eternity Decimal with `toString()` (`1e100`, `ee21`, `(e^6)10`),
+ * so progression parsing has to accept those forms or a checked save is rejected.
  *
  * localStorage key: `shark_inc_save`
  * Origin: `https://mrredshark77.github.io`

@@ -102,8 +102,10 @@ class CaptureRepository(
         val now = clock()
         return when (verdict) {
             ProgressionClass.INVALID -> {
-                recordFailure(instance, now, "invalid. The capture could not be classified. Last good snapshot was kept.")
-                rejected(ProgressionClass.INVALID, "invalid. The capture could not be classified. Last good snapshot was kept.")
+                val detail = adapter.summarize(candidate).detail
+                val message = "invalid. The capture could not be classified ($detail). Last good snapshot was kept."
+                recordFailure(instance, now, message)
+                rejected(ProgressionClass.INVALID, message)
             }
             ProgressionClass.REGRESSED, ProgressionClass.INCOMPARABLE ->
                 quarantine(instance, candidate, pointer, highWater, verdict, adapter, now)
@@ -551,8 +553,14 @@ class CaptureRepository(
     ): String {
         val kind = if (verdict == ProgressionClass.REGRESSED) "regression" else "incomparable"
         val referenceSha = if (reference.isNullOrBlank()) "absent" else PayloadDigest.sha256(reference)
+        val preserved = if (verdict == ProgressionClass.INCOMPARABLE) {
+            " The raw payload was preserved and the last verified pointer was kept. " +
+                "Do not continue on an unsynchronised save."
+        } else {
+            ""
+        }
         return "Capture incident $verdict ($kind). Active $referenceSha ${adapter.summarize(reference).detail}. " +
-            "Quarantined $candidateSha ${adapter.summarize(candidate).detail}. The active save was kept."
+            "Quarantined $candidateSha ${adapter.summarize(candidate).detail}. The active save was kept.$preserved"
     }
 
     private fun lineageMessage(adapter: GameAdapter, previous: String?, candidate: String): String {

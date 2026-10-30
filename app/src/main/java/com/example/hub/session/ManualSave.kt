@@ -12,6 +12,8 @@ data class ManualSaveNotice(
 
 enum class ManualSaveOutcome {
     SAVED,
+    QUARANTINED,
+    REJECTED,
     FAILED,
     DEFERRED,
     BUSY,
@@ -23,6 +25,18 @@ fun manualSaveMessage(outcome: ManualSaveOutcome, detail: String? = null): Strin
     val text = detail?.trim().orEmpty()
     return when (outcome) {
         ManualSaveOutcome.SAVED -> MANUAL_SAVE_SUCCESS
+        ManualSaveOutcome.QUARANTINED ->
+            if (text.isEmpty()) {
+                "Save quarantined. The previous verified save was kept."
+            } else {
+                "Save quarantined. $text"
+            }
+        ManualSaveOutcome.REJECTED ->
+            if (text.isEmpty()) {
+                "Save rejected. The previous verified save was kept."
+            } else {
+                "Save rejected. $text"
+            }
         ManualSaveOutcome.DEFERRED ->
             text.ifEmpty { "Save was deferred. Last good snapshot was kept." }
         ManualSaveOutcome.BUSY ->

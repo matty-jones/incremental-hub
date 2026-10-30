@@ -11,6 +11,7 @@ data class HistoryEntry(
     val byteLength: Int,
     val detail: String,
     val origin: String = SnapshotOrigins.LOCAL_CAPTURE,
+    val snapshotId: String = "",
 )
 
 /**
@@ -28,4 +29,8 @@ data class SaveDiagnostic(
     val note: String,
     val backupReady: Boolean,
     val recoverAllowed: Boolean,
+    val ambiguous: Boolean = false,
+    val consequence: String = "",
+    val storedCapturedAtMillis: Long? = null,
+    val livePinnedAtMillis: Long? = null,
 )

@@ -403,6 +403,57 @@ class SyncOutboxTest {
         }
     }
 
+    @Test
+    fun saveAfterRestorePublishesTheLiveSavePayload() = runTest {
+        val preserved = fixture("room.b64")
+        val played = fixture("save-fn.b64")
+        val adapter = SharkIncrementalAdapter()
+        assertTrue(adapter.validate(played))
+        assertEquals(
+            com.example.hub.games.ProgressionClass.ADVANCED,
+            adapter.classifyProgress(played, preserved),
+        )
+        val db = memory()
+        try {
+            val server = MemoryWorkstation()
+            server.pointer = remotePointer(preserved, version = 4, capturedAt = 1_700_000_000_000L)
+            val sync = sync(db, server)
+            db.gameInstanceDao().upsert(row("shark-incremental", preserved))
+            val commit = CaptureRepository(
+                db.gameInstanceDao(),
+                db.snapshotDao(),
+                db,
+                outboxDao = db.syncOutboxDao(),
+            ).commitIfSafe(
+                gameId = "shark-incremental",
+                candidate = played,
+                reason = com.example.hub.database.SnapshotReasons.CHECKPOINT,
+                adapter = adapter,
+                sessionId = "session",
+                stillCurrent = { true },
+                manual = true,
+            )
+            assertEquals(com.example.hub.session.CaptureDisposition.STORED, commit.disposition)
+            assertNull(commit.message)
+            assertEquals(played, db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            val reopened = db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload
+            assertEquals(played, reopened)
+            sync.merge()
+            assertTrue(server.records.values.any { it.snapshotPayload == played })
+            assertEquals(played, server.pointer!!.snapshotPayload)
+            assertTrue(server.fetchHistory("shark-incremental")!!.any { it.snapshotPayload == played })
+            assertTrue(server.fetchHistory("shark-incremental")!!.any { it.snapshotPayload == preserved })
+        } finally {
+            db.close()
+        }
+    }
+
+    private fun fixture(name: String): String {
+        val stream = javaClass.classLoader!!.getResourceAsStream("shark/$name")
+            ?: error("Missing fixture shark/$name")
+        return stream.bufferedReader().readText().trim()
+    }
+
     private fun openV6(name: String): HubDatabase {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val inline = Executor { it.run() }

@@ -40,6 +40,7 @@ import com.example.hub.session.SessionState
 import com.example.hub.ui.chrome.OverlaySheet
 import com.example.hub.ui.chrome.SheetEdge
 import com.example.hub.ui.theme.hubSuccess
+import com.example.hub.ui.theme.hubWarning
 
 private const val TAG = "NativeMenu"
 
@@ -167,7 +168,9 @@ fun NativeMenu(
             if (notice != null && notice.message.isNotBlank()) {
                 val noticeColor = when (notice.outcome) {
                     ManualSaveOutcome.SAVED -> hubSuccess()
-                    ManualSaveOutcome.FAILED -> MaterialTheme.colorScheme.error
+                    ManualSaveOutcome.QUARANTINED -> hubWarning()
+                    ManualSaveOutcome.REJECTED, ManualSaveOutcome.FAILED ->
+                        MaterialTheme.colorScheme.error
                     ManualSaveOutcome.DEFERRED, ManualSaveOutcome.BUSY ->
                         MaterialTheme.colorScheme.onSurfaceVariant
                 }
