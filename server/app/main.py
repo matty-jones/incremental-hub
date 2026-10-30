@@ -10,6 +10,16 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from .db import apk_dir, connect, row_to_dict
+from .history import (
+    append_snapshot,
+    immediate,
+    list_snapshots,
+    propose_pointer,
+    public_pointer,
+    public_snapshot,
+    valid_token,
+    apply_legacy_put,
+)
 
 app = FastAPI(title="Incremental Hub")
 
@@ -29,6 +39,38 @@ class SaveBody(BaseModel):
     last_played_at_millis: int = Field(ge=0)
     resume_token: str | None = None
     recovery_state: str | None = None
+
+
+class SnapshotBody(BaseModel):
+    snapshot_id: str = Field(min_length=1, max_length=200)
+    lineage_id: str = Field(min_length=1, max_length=200)
+    snapshot_payload: str = Field(min_length=1)
+    captured_at_millis: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    source: str = Field(default="phone", min_length=1, max_length=64)
+    integrity: str = Field(default="accepted", min_length=1, max_length=32)
+    progression_json: str | None = None
+    profile_name: str = ""
+    session_identity: str = ""
+    last_played_at_millis: int = Field(default=0, ge=0)
+    resume_token: str | None = None
+    recovery_state: str | None = None
+
+
+class PointerBody(BaseModel):
+    expected_version: int = Field(ge=0)
+    snapshot_id: str = Field(min_length=1, max_length=200)
+    lineage_id: str = Field(min_length=1, max_length=200)
+
+
+def _require_game_id(game_id: str) -> None:
+    if not valid_token(game_id):
+        raise HTTPException(status_code=400, detail="invalid game id")
+
+
+def _require_token(value: str, detail: str) -> None:
+    if not valid_token(value):
+        raise HTTPException(status_code=400, detail=detail)
 
 
 def _save_content(game_id: str, body: SaveBody) -> dict:
@@ -167,35 +209,86 @@ def list_saves() -> list[dict]:
 
 @app.put("/saves/{game_id}")
 def put_save(game_id: str, body: SaveBody) -> JSONResponse:
-    if not game_id or "/" in game_id or game_id in {".", ".."}:
-        raise HTTPException(status_code=400, detail="invalid game id")
-    content = _save_content(game_id, body)
+    _require_game_id(game_id)
     with closing(connect()) as connection:
-        existing = connection.execute(
-            "SELECT * FROM saves WHERE game_id = ?",
-            (game_id,),
-        ).fetchone()
-        if existing is not None and body.captured_at_millis < existing["captured_at_millis"]:
-            return JSONResponse(status_code=409, content=row_to_dict(existing))
-        connection.execute(
-            """
-            INSERT INTO saves (
-                game_id, snapshot_payload, captured_at_millis, profile_name,
-                session_identity, last_played_at_millis, resume_token, recovery_state
-            ) VALUES (
-                :game_id, :snapshot_payload, :captured_at_millis, :profile_name,
-                :session_identity, :last_played_at_millis, :resume_token, :recovery_state
+        with immediate(connection):
+            status, content = apply_legacy_put(connection, game_id, _save_content(game_id, body))
+    return JSONResponse(status_code=status, content=content)
+
+
+@app.post("/saves/{game_id}/snapshots")
+def post_snapshot(game_id: str, body: SnapshotBody) -> JSONResponse:
+    _require_game_id(game_id)
+    _require_token(body.snapshot_id, "invalid snapshot id")
+    _require_token(body.lineage_id, "invalid lineage id")
+    _require_token(body.idempotency_key, "invalid idempotency key")
+    with closing(connect()) as connection:
+        with immediate(connection):
+            try:
+                result = append_snapshot(
+                    connection,
+                    game_id=game_id,
+                    snapshot_id=body.snapshot_id,
+                    lineage_id=body.lineage_id,
+                    payload=body.snapshot_payload,
+                    captured_at=body.captured_at_millis,
+                    source=body.source,
+                    integrity=body.integrity,
+                    idempotency_key=body.idempotency_key,
+                    progression_json=body.progression_json,
+                    profile_name=body.profile_name,
+                    session_identity=body.session_identity,
+                    last_played_at=body.last_played_at_millis,
+                    resume_token=body.resume_token,
+                    recovery_state=body.recovery_state,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="invalid snapshot") from exc
+    status = 409 if result["conflict"] else 200
+    return JSONResponse(
+        status_code=status,
+        content={
+            "created": result["created"],
+            "conflict": result["conflict"],
+            "snapshot": result["snapshot"],
+        },
+    )
+
+
+@app.post("/saves/{game_id}/pointer")
+def post_pointer(game_id: str, body: PointerBody) -> JSONResponse:
+    _require_game_id(game_id)
+    _require_token(body.snapshot_id, "invalid snapshot id")
+    _require_token(body.lineage_id, "invalid lineage id")
+    with closing(connect()) as connection:
+        with immediate(connection):
+            result = propose_pointer(
+                connection,
+                game_id=game_id,
+                expected_version=body.expected_version,
+                snapshot_id=body.snapshot_id,
+                lineage_id=body.lineage_id,
             )
-            ON CONFLICT(game_id) DO UPDATE SET
-                snapshot_payload = excluded.snapshot_payload,
-                captured_at_millis = excluded.captured_at_millis,
-                profile_name = excluded.profile_name,
-                session_identity = excluded.session_identity,
-                last_played_at_millis = excluded.last_played_at_millis,
-                resume_token = excluded.resume_token,
-                recovery_state = excluded.recovery_state
-            """,
-            content,
-        )
-        connection.commit()
-    return JSONResponse(status_code=200, content=content)
+    status = 200 if result["ok"] else 409
+    return JSONResponse(
+        status_code=status,
+        content={"conflict": result["conflict"], "pointer": result["pointer"]},
+    )
+
+
+@app.get("/saves/{game_id}/snapshots")
+def get_snapshots(game_id: str) -> list[dict]:
+    _require_game_id(game_id)
+    with closing(connect()) as connection:
+        rows = list_snapshots(connection, game_id)
+    return [public_snapshot(row) for row in rows]
+
+
+@app.get("/saves/{game_id}/pointer")
+def get_pointer(game_id: str) -> dict:
+    _require_game_id(game_id)
+    with closing(connect()) as connection:
+        pointer = public_pointer(connection, game_id)
+    if pointer is None:
+        raise HTTPException(status_code=404, detail="no pointer")
+    return pointer

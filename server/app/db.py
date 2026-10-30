@@ -18,23 +18,12 @@ def apk_dir() -> Path:
 def connect() -> sqlite3.Connection:
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
+    connection = sqlite3.connect(path, timeout=5)
     connection.row_factory = sqlite3.Row
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS saves (
-            game_id TEXT PRIMARY KEY,
-            snapshot_payload TEXT NOT NULL,
-            captured_at_millis INTEGER NOT NULL,
-            profile_name TEXT NOT NULL,
-            session_identity TEXT NOT NULL,
-            last_played_at_millis INTEGER NOT NULL,
-            resume_token TEXT,
-            recovery_state TEXT
-        )
-        """
-    )
-    connection.commit()
+    connection.isolation_level = None
+    from .history import ensure_schema
+
+    ensure_schema(connection)
     return connection
 
 
