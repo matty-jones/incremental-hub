@@ -13,8 +13,8 @@ import androidx.room.migration.Migration
  * Additional tables are added here as the schema evolves.
  */
 @Database(
-    entities = [GameInstance::class, SnapshotRecord::class],
-    version = 6,
+    entities = [GameInstance::class, SnapshotRecord::class, SyncOutboxEntry::class],
+    version = 7,
     exportSchema = true,
 )
 abstract class HubDatabase : RoomDatabase() {
@@ -22,6 +22,8 @@ abstract class HubDatabase : RoomDatabase() {
     abstract fun gameInstanceDao(): GameInstanceDao
 
     abstract fun snapshotDao(): SnapshotDao
+
+    abstract fun syncOutboxDao(): SyncOutboxDao
 
     companion object {
         private const val DATABASE_NAME = "hub_database"
@@ -140,11 +142,48 @@ abstract class HubDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `sync_outbox` (
+                      `idempotency_key` TEXT NOT NULL,
+                      `game_id` TEXT NOT NULL,
+                      `lineage_id` TEXT NOT NULL,
+                      `snapshot_id` TEXT NOT NULL,
+                      `payload` TEXT NOT NULL,
+                      `content_sha256` TEXT NOT NULL,
+                      `captured_at_millis` INTEGER NOT NULL,
+                      `reason` TEXT NOT NULL,
+                      `integrity` TEXT NOT NULL,
+                      `profile_name` TEXT NOT NULL,
+                      `session_identity` TEXT NOT NULL,
+                      `last_played_at_millis` INTEGER NOT NULL,
+                      `resume_token` TEXT,
+                      `propose_pointer` INTEGER NOT NULL,
+                      `enqueued_at_millis` INTEGER NOT NULL,
+                      `attempt_count` INTEGER NOT NULL,
+                      `state` TEXT NOT NULL,
+                      `remote_snapshot_id` TEXT,
+                      PRIMARY KEY(`idempotency_key`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         private fun buildDatabase(context: Context) = Room.databaseBuilder(
             context.applicationContext,
             HubDatabase::class.java,
             DATABASE_NAME,
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        ).addMigrations(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+        )
             .build()
     }
 }

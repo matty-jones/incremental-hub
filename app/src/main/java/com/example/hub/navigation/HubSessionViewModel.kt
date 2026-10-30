@@ -10,11 +10,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.hub.database.HubDatabase
 import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
+import com.example.hub.games.ProgressionClass
 import com.example.hub.session.DiagnosticSeverity
 import com.example.hub.session.SessionController
 import com.example.hub.session.SessionRuntime
 import com.example.hub.session.SessionState
-import com.example.hub.sync.SaveAssessment
 import com.example.hub.sync.SaveSync
 import com.example.hub.sync.WorkstationApi
 import com.example.hub.sync.WorkstationClient
@@ -36,31 +36,13 @@ class HubSessionViewModel(
         dao = database.gameInstanceDao(),
         api = workstation,
         snapshotDao = database.snapshotDao(),
-    ) { gameId, localPayload, remotePayload ->
-        val game = gameRegistry.getGame(gameId) ?: return@SaveSync SaveAssessment()
-        val adapter = GameAdapters.create(game.adapterId) ?: return@SaveSync SaveAssessment()
-        val comparison = adapter.compare(localPayload, remotePayload)
-        SaveAssessment(
-            localStanding = adapter.summarize(localPayload).standing,
-            remoteStanding = adapter.summarize(remotePayload).standing,
-            comparison = if (game.adapterId == "shark-incremental-adapter") comparison else null,
-        )
-    }
+        outboxDao = database.syncOutboxDao(),
+    )
     init {
-        saveSync.protectsLocal = protects@{ gameId, reference, candidate ->
-            val game = gameRegistry.getGame(gameId) ?: return@protects false
-            val adapter = GameAdapters.create(game.adapterId) ?: return@protects false
-            when (adapter.classifyProgress(candidate, reference)) {
-                com.example.hub.games.ProgressionClass.ADVANCED,
-                com.example.hub.games.ProgressionClass.EQUAL,
-                com.example.hub.games.ProgressionClass.RESET_APPROVED,
-                -> true
-                com.example.hub.games.ProgressionClass.UNORDERED,
-                com.example.hub.games.ProgressionClass.REGRESSED,
-                com.example.hub.games.ProgressionClass.INCOMPARABLE,
-                com.example.hub.games.ProgressionClass.INVALID,
-                -> false
-            }
+        saveSync.classify = classify@{ gameId, candidate, reference ->
+            val game = gameRegistry.getGame(gameId) ?: return@classify ProgressionClass.INCOMPARABLE
+            val adapter = GameAdapters.create(game.adapterId) ?: return@classify ProgressionClass.INCOMPARABLE
+            adapter.classifyProgress(candidate, reference)
         }
     }
     val controller: SessionController = SessionController(
@@ -73,6 +55,7 @@ class HubSessionViewModel(
         },
         snapshotDao = database.snapshotDao(),
         roomDatabase = database,
+        syncOutboxDao = database.syncOutboxDao(),
     )
 
     init {

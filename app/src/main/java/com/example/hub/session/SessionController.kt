@@ -20,6 +20,9 @@ import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.database.SnapshotRetention
+import com.example.hub.database.SyncOutboxDao
+import com.example.hub.database.SyncOutboxEntry
+import com.example.hub.database.enqueueAcceptedSnapshot
 import com.example.hub.database.originForReason
 import com.example.hub.games.EnvelopeDecode
 import com.example.hub.games.GameAdapter
@@ -108,6 +111,7 @@ class SessionController(
      * Production leaves this null.
      */
     internal val adapterForTest: ((String) -> GameAdapter?)? = null,
+    private val syncOutboxDao: SyncOutboxDao? = null,
 ) : LifecycleEventObserver {
 
     companion object {
@@ -2283,6 +2287,7 @@ class SessionController(
             instanceDao = instanceDao,
             snapshotDao = snapshotDao,
             roomDatabase = roomDatabase,
+            outboxDao = syncOutboxDao,
             fault = captureWriteFault,
         )
     }
@@ -2366,6 +2371,22 @@ class SessionController(
                 captureIncidentCount = 0,
             )
             instanceDao.upsert(updated)
+            val pinnedId = pinned?.id
+            val outbox = syncOutboxDao
+            if (pinnedId != null && outbox != null) {
+                enqueueAcceptedSnapshot(
+                    dao = outbox,
+                    instance = updated,
+                    snapshotId = pinnedId,
+                    payload = payload,
+                    sha = PayloadDigest.sha256(payload),
+                    capturedAtMillis = now,
+                    reason = SnapshotReasons.POST_RESTORE,
+                    integrity = SyncOutboxEntry.INTEGRITY_ACCEPTED,
+                    proposePointer = true,
+                    enqueuedAtMillis = now,
+                )
+            }
             updated
         }
         val database = roomDatabase

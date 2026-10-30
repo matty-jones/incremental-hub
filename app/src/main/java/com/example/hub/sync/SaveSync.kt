@@ -7,8 +7,10 @@ import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotOrigins
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
-import com.example.hub.games.SaveComparison
-import com.example.hub.games.SaveStanding
+import com.example.hub.database.SyncOutboxDao
+import com.example.hub.database.SyncOutboxEntry
+import com.example.hub.games.PayloadDigest
+import com.example.hub.games.ProgressionClass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -16,146 +18,299 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
- * Mirrors Room snapshots to the workstation. The phone keeps playing from Room
- * when the workstation does not answer. A progressed save beats a fresh one.
- * Otherwise the newer capture wins.
- *
- * [assess] reads the local payload as the live save. It may return null standings
- * when the game has no progress comparator.
+ * Uploads the local outbox after a commit and archives remote history without
+ * moving a stored pointer. The phone keeps playing from Room when the
+ * workstation does not answer. A wall-clock timestamp is not a reason to
+ * replace either side.
  */
 class SaveSync(
     private val dao: GameInstanceDao,
     private val api: WorkstationApi,
     private val snapshotDao: SnapshotDao? = null,
-    private val assess: (gameId: String, localPayload: String?, remotePayload: String?) -> SaveAssessment =
-        { _, _, _ -> SaveAssessment() },
+    private val outboxDao: SyncOutboxDao? = null,
 ) {
     var activeGameId: () -> String? = { null }
     var onDecision: (String) -> Unit = {}
 
     /**
-     * True when [candidate] may replace [reference]. A capture incident and a
-     * non-legacy lineage are never uploaded or replaced from the workstation.
+     * Compares [candidate] with [reference] using the game adapter.
+     * [ProgressionClass.UNORDERED] is the safe default when the caller has
+     * not supplied an adapter.
      */
-    var protectsLocal: (gameId: String, reference: String?, candidate: String?) -> Boolean =
-        { _, _, _ -> true }
+    var classify: (gameId: String, candidate: String?, reference: String?) -> ProgressionClass =
+        { _, _, _ -> ProgressionClass.UNORDERED }
 
     private val mutex = Mutex()
 
     suspend fun push(instance: GameInstance) {
-        mutex.withLock { syncLocked(fallbackPush = instance) }
+        mutex.withLock {
+            Log.i(TAG, "sync after local commit ${instance.gameId}")
+            syncLocked()
+        }
     }
 
     suspend fun merge() {
-        mutex.withLock { syncLocked(fallbackPush = null) }
+        mutex.withLock { syncLocked() }
     }
 
-    private suspend fun syncLocked(fallbackPush: GameInstance?) {
+    private suspend fun syncLocked() {
         val remoteSaves = withContext(Dispatchers.IO) { api.fetchSaves() }
         if (remoteSaves == null) {
             Log.i(TAG, "workstation unreachable; keeping local saves")
-            if (syncBlocked(fallbackPush)) {
-                onDecision(
-                    "Workstation sync skipped. The active save was kept.",
-                )
-                return
-            }
-            val remote = fallbackPush?.toRemoteSave() ?: return
-            withContext(Dispatchers.IO) { api.putSave(remote) }
+            onDecision("Saved locally; workstation sync pending.")
             return
         }
-        val local = dao.getAll().associateBy { it.gameId }.toMutableMap()
-        if (fallbackPush != null) local[fallbackPush.gameId] = fallbackPush
-        val remoteById = remoteSaves.associateBy { it.gameId }
-        for (gameId in local.keys + remoteById.keys) {
-            val localRow = local[gameId]
-            val remoteRow = remoteById[gameId]
-            if (syncBlocked(localRow)) {
-                onDecision(
-                    "Workstation sync skipped for $gameId. The active save was kept.",
-                )
+        if (!uploadPending()) return
+        reconcile(remoteSaves)
+    }
+
+    private suspend fun uploadPending(): Boolean {
+        val outbox = outboxDao ?: return true
+        val pending = outbox.pending()
+        val proposeKeys = pending
+            .filter { it.proposePointer && it.integrity == SyncOutboxEntry.INTEGRITY_ACCEPTED }
+            .groupBy { it.gameId }
+            .mapValues { (_, rows) -> rows.last().idempotencyKey }
+        for (entry in pending) {
+            if (entry.reason == SnapshotReasons.QUARANTINE || entry.integrity == "quarantine") {
+                outbox.markBlocked(entry.idempotencyKey)
                 continue
             }
-            when (decision(localRow, remoteRow)) {
-                MergeDecision.Push -> pushLocked(localRow)
-                MergeDecision.Pull -> remoteRow?.let { applyPull(it) }
-                MergeDecision.Skip -> Unit
+            val uploaded = withContext(Dispatchers.IO) { api.appendSnapshot(entry.toUpload()) }
+            when (uploaded) {
+                null -> {
+                    outbox.noteAttempt(entry.idempotencyKey)
+                    onDecision("Saved locally; workstation sync pending.")
+                    return false
+                }
+                SnapshotUploadResult.Rejected -> {
+                    outbox.markBlocked(entry.idempotencyKey)
+                    onDecision("Workstation sync kept the local save for ${entry.gameId}.")
+                    continue
+                }
+                is SnapshotUploadResult.Stored -> {
+                    if (uploaded.sha256 != entry.contentSha256) {
+                        outbox.noteAttempt(entry.idempotencyKey)
+                        onDecision("Saved locally; workstation sync pending.")
+                        return false
+                    }
+                    val propose = proposeKeys[entry.gameId] == entry.idempotencyKey
+                    if (propose && !proposePointer(entry, uploaded.snapshotId)) return false
+                    outbox.markAcked(entry.idempotencyKey, uploaded.snapshotId)
+                }
+            }
+        }
+        return true
+    }
+
+    private suspend fun proposePointer(entry: SyncOutboxEntry, remoteSnapshotId: String): Boolean {
+        val local = dao.get(entry.gameId)
+        if (local == null || local.lineageId != entry.lineageId) {
+            onDecision("Workstation sync kept ${entry.gameId} on its current lineage.")
+            return true
+        }
+        if (local.snapshotPayload != entry.payload) return true
+        if (!clearsHighWater(local, entry.payload)) {
+            onDecision("Rejected workstation pointer move for ${entry.gameId}. The stored snapshot was kept.")
+            return true
+        }
+        val fetched = withContext(Dispatchers.IO) { api.fetchPointer(entry.gameId) }
+        val expected = when (fetched) {
+            PointerFetch.Unreachable -> {
+                onDecision("Saved locally; workstation sync pending.")
+                return false
+            }
+            PointerFetch.Absent -> 0
+            is PointerFetch.Found -> {
+                if (fetched.pointer.lineageId != entry.lineageId) {
+                    onDecision("Workstation sync kept ${entry.gameId} on its current lineage.")
+                    return true
+                }
+                if (fetched.pointer.snapshotPayload == entry.payload) return true
+                val relation = classify(entry.gameId, entry.payload, fetched.pointer.snapshotPayload)
+                if (!mayPublish(relation)) {
+                    onDecision(
+                        "Rejected workstation pointer move for ${entry.gameId}. The stored snapshot was kept.",
+                    )
+                    return true
+                }
+                fetched.pointer.version
+            }
+        }
+        val proposed = withContext(Dispatchers.IO) {
+            api.proposePointer(
+                PointerProposal(
+                    gameId = entry.gameId,
+                    expectedVersion = expected,
+                    snapshotId = remoteSnapshotId,
+                    lineageId = entry.lineageId,
+                ),
+            )
+        }
+        return when (proposed) {
+            null -> {
+                onDecision("Saved locally; workstation sync pending.")
+                false
+            }
+            is PointerProposalResult.Stored -> true
+            is PointerProposalResult.Conflict -> {
+                if (proposed.conflict == "version" && proposed.pointer != null) {
+                    retryPropose(entry, remoteSnapshotId, proposed.pointer)
+                } else {
+                    onDecision(
+                        "Workstation pointer for ${entry.gameId} was not moved. The stored snapshot was kept.",
+                    )
+                    true
+                }
             }
         }
     }
 
-    private suspend fun pushLocked(instance: GameInstance?) {
-        val remote = instance?.toRemoteSave() ?: return
-        val result = withContext(Dispatchers.IO) { api.putSave(remote) }
-        if (result is PutResult.Stale && decision(instance, result.remote) == MergeDecision.Pull) {
-            applyPull(result.remote)
+    private suspend fun retryPropose(
+        entry: SyncOutboxEntry,
+        remoteSnapshotId: String,
+        current: RemotePointer,
+    ): Boolean {
+        if (current.lineageId != entry.lineageId) {
+            onDecision("Workstation sync kept ${entry.gameId} on its current lineage.")
+            return true
+        }
+        val relation = classify(entry.gameId, entry.payload, current.snapshotPayload)
+        if (current.snapshotPayload == entry.payload || !mayPublish(relation)) {
+            onDecision("Rejected workstation pointer move for ${entry.gameId}. The stored snapshot was kept.")
+            return true
+        }
+        val proposed = withContext(Dispatchers.IO) {
+            api.proposePointer(
+                PointerProposal(
+                    gameId = entry.gameId,
+                    expectedVersion = current.version,
+                    snapshotId = remoteSnapshotId,
+                    lineageId = entry.lineageId,
+                ),
+            )
+        }
+        return when (proposed) {
+            is PointerProposalResult.Stored -> true
+            null -> {
+                onDecision("Saved locally; workstation sync pending.")
+                false
+            }
+            is PointerProposalResult.Conflict -> {
+                onDecision("Workstation pointer for ${entry.gameId} was not moved. The stored snapshot was kept.")
+                true
+            }
         }
     }
 
-    private fun decision(local: GameInstance?, remote: RemoteSave?): MergeDecision {
-        val assessment = if (local?.gameId != null || remote != null) {
-            assess(local?.gameId ?: remote!!.gameId, local?.snapshotPayload, remote?.snapshotPayload)
-        } else {
-            SaveAssessment()
+    private suspend fun reconcile(remoteSaves: List<RemoteSave>) {
+        val local = dao.getAll().associateBy { it.gameId }
+        val gameIds = local.keys + remoteSaves.map { it.gameId }
+        for (gameId in gameIds) {
+            val history = withContext(Dispatchers.IO) { api.fetchHistory(gameId) }
+            if (history == null) {
+                onDecision("Saved locally; workstation sync pending.")
+                return
+            }
+            history.forEach { archiveRemote(it) }
+            when (val pointer = withContext(Dispatchers.IO) { api.fetchPointer(gameId) }) {
+                PointerFetch.Unreachable -> {
+                    onDecision("Saved locally; workstation sync pending.")
+                    return
+                }
+                PointerFetch.Absent -> archiveLegacy(remoteSaves.firstOrNull { it.gameId == gameId })
+                is PointerFetch.Found -> considerRemote(pointer.pointer)
+            }
         }
-        return decideMerge(
-            localCapturedAtMillis = local.capturedAtOrNull(),
-            remoteCapturedAtMillis = remote?.capturedAtMillis,
-            localStanding = assessment.localStanding,
-            remoteStanding = assessment.remoteStanding,
-            comparison = assessment.comparison,
+    }
+
+    private suspend fun considerRemote(pointer: RemotePointer) {
+        archivePayload(
+            gameId = pointer.gameId,
+            lineageId = pointer.lineageId,
+            payload = pointer.snapshotPayload,
+            capturedAtMillis = pointer.capturedAtMillis,
+        )
+        val existing = dao.get(pointer.gameId)
+        val localPayload = existing?.snapshotPayload?.takeIf { it.isNotBlank() }
+        if (localPayload != null) {
+            if (localPayload != pointer.snapshotPayload) {
+                onDecision(
+                    "Rejected workstation save for ${pointer.gameId}. The stored snapshot was kept.",
+                )
+            }
+            return
+        }
+        if (activeGameId() == pointer.gameId) {
+            onDecision("Archived workstation save for ${pointer.gameId} without replacing the open session.")
+            return
+        }
+        if (existing != null && existing.lineageId != pointer.lineageId) {
+            onDecision("Workstation sync kept ${pointer.gameId} on its current lineage.")
+            return
+        }
+        val relation = classify(pointer.gameId, pointer.snapshotPayload, null)
+        if (relation == ProgressionClass.INVALID || relation == ProgressionClass.INCOMPARABLE) {
+            onDecision("Rejected workstation save for ${pointer.gameId}. The stored snapshot was kept.")
+            return
+        }
+        dao.upsert(pointer.toGameInstance(existing))
+        onDecision("Pulled workstation save for ${pointer.gameId}.")
+    }
+
+    private suspend fun archiveLegacy(remote: RemoteSave?) {
+        if (remote == null) return
+        archivePayload(
+            gameId = remote.gameId,
+            lineageId = "legacy",
+            payload = remote.snapshotPayload,
+            capturedAtMillis = remote.capturedAtMillis,
+        )
+        val existing = dao.get(remote.gameId)
+        if (!existing?.snapshotPayload.isNullOrBlank() && existing?.snapshotPayload != remote.snapshotPayload) {
+            onDecision("Rejected workstation save for ${remote.gameId}. The stored snapshot was kept.")
+        }
+    }
+
+    private suspend fun archiveRemote(remote: RemoteSnapshot) {
+        archivePayload(
+            gameId = remote.gameId,
+            lineageId = remote.lineageId,
+            payload = remote.snapshotPayload,
+            capturedAtMillis = remote.capturedAtMillis,
         )
     }
 
-    private suspend fun applyPull(remote: RemoteSave) {
-        val existing = dao.get(remote.gameId)
-        if (existing != null && !remoteMayReplace(existing, remote)) {
-            onDecision("Rejected workstation save for ${remote.gameId}. The stored snapshot was kept.")
-            return
-        }
-        val merge = decision(existing, remote)
-        if (!replacesStoredPointer(activeGameId() == remote.gameId, merge)) {
-            if (merge == MergeDecision.Pull) {
-                rememberPulled(remote)
-                onDecision(
-                    "Archived workstation save for ${remote.gameId} without replacing the open session.",
-                )
-            } else {
-                onDecision(
-                    "Rejected workstation save for ${remote.gameId}. The stored snapshot was kept.",
-                )
-            }
-            return
-        }
-        dao.upsert(remote.toGameInstance(existing))
-        rememberPulled(remote)
-        onDecision("Pulled workstation save for ${remote.gameId}.")
-        Log.i(TAG, "pulled ${remote.gameId} captured at ${remote.capturedAtMillis}")
-    }
-
-    private suspend fun remoteMayReplace(existing: GameInstance, remote: RemoteSave): Boolean {
-        if (!protectsLocal(existing.gameId, existing.snapshotPayload, remote.snapshotPayload)) return false
-        val highId = existing.highWaterSnapshotId ?: return true
-        val highWater = snapshotDao?.getById(highId)?.payload ?: return true
-        return protectsLocal(existing.gameId, highWater, remote.snapshotPayload)
-    }
-
-    private suspend fun rememberPulled(remote: RemoteSave) {
+    private suspend fun archivePayload(
+        gameId: String,
+        lineageId: String,
+        payload: String,
+        capturedAtMillis: Long,
+    ) {
         val snapshots = snapshotDao ?: return
-        if (snapshots.history(remote.gameId).any { it.payload == remote.snapshotPayload }) return
+        if (payload.isBlank()) return
+        if (snapshots.history(gameId).any { it.payload == payload }) return
         snapshots.insert(
             SnapshotRecord(
                 id = UUID.randomUUID().toString(),
-                gameId = remote.gameId,
-                sequence = snapshots.maxSequence(remote.gameId) + 1,
-                capturedAtMillis = remote.capturedAtMillis,
+                gameId = gameId,
+                sequence = snapshots.maxSequence(gameId) + 1,
+                capturedAtMillis = capturedAtMillis,
                 reason = SnapshotReasons.WORKSTATION,
                 pinned = true,
-                payload = remote.snapshotPayload,
+                payload = payload,
                 progressJson = null,
                 origin = SnapshotOrigins.WORKSTATION,
+                lineageId = lineageId,
+                contentSha256 = PayloadDigest.sha256(payload),
             ),
         )
+    }
+
+    private suspend fun clearsHighWater(existing: GameInstance, payload: String): Boolean {
+        val highId = existing.highWaterSnapshotId ?: return true
+        val highWater = snapshotDao?.getById(highId)?.payload?.takeIf { it.isNotBlank() } ?: return true
+        return mayPublish(classify(existing.gameId, payload, highWater))
     }
 
     private companion object {
@@ -163,32 +318,33 @@ class SaveSync(
     }
 }
 
-data class SaveAssessment(
-    val localStanding: SaveStanding? = null,
-    val remoteStanding: SaveStanding? = null,
-    val comparison: SaveComparison? = null,
-)
-
-private fun GameInstance?.capturedAtOrNull(): Long? {
-    if (this == null || snapshotPayload.isNullOrBlank()) return null
-    return lastCaptureAtMillis
+private fun mayPublish(relation: ProgressionClass): Boolean = when (relation) {
+    ProgressionClass.ADVANCED, ProgressionClass.EQUAL, ProgressionClass.RESET_APPROVED -> true
+    ProgressionClass.UNORDERED,
+    ProgressionClass.REGRESSED,
+    ProgressionClass.INCOMPARABLE,
+    ProgressionClass.INVALID,
+    -> false
 }
 
-private fun GameInstance.toRemoteSave(): RemoteSave? {
-    val payload = snapshotPayload?.takeIf { it.isNotBlank() } ?: return null
-    return RemoteSave(
+private fun SyncOutboxEntry.toUpload(): SnapshotUpload {
+    return SnapshotUpload(
         gameId = gameId,
+        snapshotId = snapshotId,
+        lineageId = lineageId,
         snapshotPayload = payload,
-        capturedAtMillis = lastCaptureAtMillis,
+        capturedAtMillis = capturedAtMillis,
+        idempotencyKey = idempotencyKey,
+        integrity = integrity,
+        reason = reason,
         profileName = profileName,
         sessionIdentity = sessionIdentity,
         lastPlayedAtMillis = lastPlayedAtMillis,
         resumeToken = resumeToken,
-        recoveryState = recoveryState,
     )
 }
 
-private fun RemoteSave.toGameInstance(existing: GameInstance?): GameInstance {
+private fun RemotePointer.toGameInstance(existing: GameInstance?): GameInstance {
     return GameInstance(
         gameId = gameId,
         profileName = profileName.ifBlank { existing?.profileName ?: "hub-game-$gameId" },
@@ -202,17 +358,11 @@ private fun RemoteSave.toGameInstance(existing: GameInstance?): GameInstance {
         lastCaptureSuccessAtMillis = capturedAtMillis,
         lastCaptureFailureAtMillis = existing?.lastCaptureFailureAtMillis ?: 0L,
         lastCaptureError = null,
-        lineageId = existing?.lineageId ?: "legacy",
+        lineageId = existing?.lineageId ?: lineageId,
         highWaterSnapshotId = existing?.highWaterSnapshotId,
         captureIncident = existing?.captureIncident,
         captureIncidentSha = existing?.captureIncidentSha,
         captureIncidentCount = existing?.captureIncidentCount ?: 0,
         lastSeenAtMillis = existing?.lastSeenAtMillis ?: 0L,
     )
-}
-
-private fun syncBlocked(instance: GameInstance?): Boolean {
-    if (instance == null) return false
-    if (instance.captureIncident != null) return true
-    return instance.lineageId != "legacy"
 }

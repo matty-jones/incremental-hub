@@ -8,6 +8,9 @@ import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.database.SnapshotRetention
+import com.example.hub.database.SyncOutboxDao
+import com.example.hub.database.SyncOutboxEntry
+import com.example.hub.database.enqueueAcceptedSnapshot
 import com.example.hub.database.originForReason
 import com.example.hub.games.GameAdapter
 import com.example.hub.games.PayloadDigest
@@ -39,6 +42,7 @@ class CaptureRepository(
     private val instanceDao: GameInstanceDao,
     private val snapshotDao: SnapshotDao?,
     private val roomDatabase: RoomDatabase?,
+    private val outboxDao: SyncOutboxDao? = null,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val fault: (suspend (String) -> Unit)? = null,
 ) {
@@ -181,6 +185,16 @@ class CaptureRepository(
         }
         fault?.invoke("after-pointer")
         instanceDao.upsert(updated)
+        if (!sameBytes) {
+            enqueueCommitted(
+                instance = updated,
+                payload = candidate,
+                sha = sha,
+                now = now,
+                reason = if (manual) SnapshotReasons.CHECKPOINT else reason,
+                verdict = verdict,
+            )
+        }
         val disposition = if (sameBytes && !inserted) CaptureDisposition.UNCHANGED else CaptureDisposition.STORED
         return CaptureCommit(disposition, verdict, updated, null, sync = !sameBytes)
     }
@@ -231,6 +245,17 @@ class CaptureRepository(
             }
         }
         if (snapshotId != null) pruneAccepted(instance.gameId, now)
+        if (snapshotId != null) {
+            enqueueCommitted(
+                instance = updated,
+                payload = candidate,
+                sha = sha,
+                now = now,
+                reason = snapshotReason,
+                verdict = verdict,
+                snapshotId = snapshotId,
+            )
+        }
         return CaptureCommit(CaptureDisposition.STORED, verdict, updated, null, sync = true)
     }
 
@@ -539,6 +564,37 @@ class CaptureRepository(
 
     private fun rejected(classification: ProgressionClass, message: String): CaptureCommit {
         return CaptureCommit(CaptureDisposition.REJECTED, classification, null, message, sync = false)
+    }
+
+    private suspend fun enqueueCommitted(
+        instance: GameInstance,
+        payload: String,
+        sha: String,
+        now: Long,
+        reason: String,
+        verdict: ProgressionClass,
+        snapshotId: String? = null,
+    ) {
+        val dao = outboxDao ?: return
+        if (reason == SnapshotReasons.QUARANTINE || verdict == ProgressionClass.REGRESSED || verdict == ProgressionClass.INCOMPARABLE) {
+            return
+        }
+        val id = snapshotId ?: snapshotDao?.history(instance.gameId)?.lastOrNull { row ->
+            row.reason != SnapshotReasons.QUARANTINE && (row.contentSha256 == sha || row.payload == payload)
+        }?.id ?: return
+        val ordered = verdict != ProgressionClass.UNORDERED
+        enqueueAcceptedSnapshot(
+            dao = dao,
+            instance = instance,
+            snapshotId = id,
+            payload = payload,
+            sha = sha,
+            capturedAtMillis = now,
+            reason = reason,
+            integrity = if (ordered) SyncOutboxEntry.INTEGRITY_ACCEPTED else SyncOutboxEntry.INTEGRITY_ARCHIVED,
+            proposePointer = ordered,
+            enqueuedAtMillis = now,
+        )
     }
 
     private suspend fun pruneAccepted(gameId: String, now: Long) {

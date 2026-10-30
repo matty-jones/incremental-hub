@@ -87,9 +87,10 @@ enum class MergeDecision {
 
 /**
  * A missing timestamp means that side has no snapshot.
- * A progressed save beats a fresh one even when the fresh save is newer.
+ * A progressed save beats a fresh one.
  * When both saves have progressed, [comparison] treats the local payload as live.
- * Otherwise the newer capture wins, and equal timestamps stay put.
+ * A wall clock is not a progression order. Two present snapshots with no
+ * accepted comparison stay where they are.
  */
 fun decideMerge(
     localCapturedAtMillis: Long?,
@@ -106,18 +107,82 @@ fun decideMerge(
     if (localProgressed && remoteStanding == SaveStanding.FRESH) return MergeDecision.Push
     if (localStanding == SaveStanding.FRESH && remoteProgressed) return MergeDecision.Pull
     if (localProgressed && remoteProgressed) {
-        when (comparison) {
-            SaveComparison.LIVE_AHEAD -> return MergeDecision.Push
-            SaveComparison.LIVE_BEHIND, SaveComparison.LIVE_MISSING -> return MergeDecision.Pull
-            SaveComparison.INCONCLUSIVE -> return MergeDecision.Skip
-            else -> Unit
+        return when (comparison) {
+            SaveComparison.LIVE_AHEAD -> MergeDecision.Push
+            SaveComparison.LIVE_BEHIND, SaveComparison.LIVE_MISSING -> MergeDecision.Pull
+            else -> MergeDecision.Skip
         }
     }
-    return when {
-        localCapturedAtMillis > remoteCapturedAtMillis -> MergeDecision.Push
-        remoteCapturedAtMillis > localCapturedAtMillis -> MergeDecision.Pull
-        else -> MergeDecision.Skip
-    }
+    return MergeDecision.Skip
+}
+
+data class SnapshotUpload(
+    val gameId: String,
+    val snapshotId: String,
+    val lineageId: String,
+    val snapshotPayload: String,
+    val capturedAtMillis: Long,
+    val idempotencyKey: String,
+    val integrity: String,
+    val reason: String,
+    val profileName: String,
+    val sessionIdentity: String,
+    val lastPlayedAtMillis: Long,
+    val resumeToken: String?,
+)
+
+sealed class SnapshotUploadResult {
+    data class Stored(
+        val created: Boolean,
+        val snapshotId: String,
+        val sha256: String,
+    ) : SnapshotUploadResult()
+
+    data object Rejected : SnapshotUploadResult()
+}
+
+data class RemotePointer(
+    val gameId: String,
+    val lineageId: String,
+    val snapshotId: String,
+    val version: Int,
+    val snapshotPayload: String,
+    val capturedAtMillis: Long,
+    val sha256: String,
+    val profileName: String,
+    val sessionIdentity: String,
+    val lastPlayedAtMillis: Long,
+    val resumeToken: String?,
+    val recoveryState: String?,
+)
+
+data class RemoteSnapshot(
+    val snapshotId: String,
+    val gameId: String,
+    val lineageId: String,
+    val sha256: String,
+    val snapshotPayload: String,
+    val capturedAtMillis: Long,
+    val integrity: String,
+    val source: String,
+)
+
+sealed class PointerFetch {
+    data class Found(val pointer: RemotePointer) : PointerFetch()
+    data object Absent : PointerFetch()
+    data object Unreachable : PointerFetch()
+}
+
+data class PointerProposal(
+    val gameId: String,
+    val expectedVersion: Int,
+    val snapshotId: String,
+    val lineageId: String,
+)
+
+sealed class PointerProposalResult {
+    data class Stored(val pointer: RemotePointer) : PointerProposalResult()
+    data class Conflict(val conflict: String, val pointer: RemotePointer?) : PointerProposalResult()
 }
 
 /**

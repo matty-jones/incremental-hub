@@ -10,13 +10,19 @@ import org.junit.Test
 class SaveMergeTest {
 
     @Test
-    fun localNewerPushes() {
-        assertEquals(MergeDecision.Push, decideMerge(localCapturedAtMillis = 20, remoteCapturedAtMillis = 10))
-    }
-
-    @Test
-    fun remoteNewerPulls() {
-        assertEquals(MergeDecision.Pull, decideMerge(localCapturedAtMillis = 10, remoteCapturedAtMillis = 20))
+    fun newerClockDoesNotMoveEitherSave() {
+        assertEquals(MergeDecision.Skip, decideMerge(localCapturedAtMillis = 20, remoteCapturedAtMillis = 10))
+        assertEquals(MergeDecision.Skip, decideMerge(localCapturedAtMillis = 10, remoteCapturedAtMillis = 20))
+        assertEquals(
+            MergeDecision.Skip,
+            decideMerge(
+                localCapturedAtMillis = 10,
+                remoteCapturedAtMillis = 50,
+                localStanding = SaveStanding.PROGRESSED,
+                remoteStanding = SaveStanding.PROGRESSED,
+                comparison = SaveComparison.MATCH,
+            ),
+        )
     }
 
     @Test
