@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from .backup import read_status
 from .db import apk_dir, connect, row_to_dict
 from .history import (
     append_snapshot,
@@ -196,6 +197,19 @@ def download_apk(filename: str) -> FileResponse:
         media_type="application/vnd.android.package-archive",
         filename=filename,
     )
+
+
+@app.get("/health")
+def health() -> dict:
+    with closing(connect()) as connection:
+        snapshots = connection.execute("SELECT COUNT(*) AS n FROM save_snapshots").fetchone()["n"]
+        pointers = connection.execute("SELECT COUNT(*) AS n FROM current_pointers").fetchone()["n"]
+    return {
+        "status": "ok",
+        "snapshot_count": snapshots,
+        "pointer_count": pointers,
+        "backup": read_status(),
+    }
 
 
 @app.get("/saves")

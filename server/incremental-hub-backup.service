@@ -1,0 +1,12 @@
+[Unit]
+Description=Incremental Hub workstation database backup
+After=incremental-hub.service
+
+[Service]
+Type=oneshot
+User=blasky
+WorkingDirectory=@ROOT@/server
+Environment="PATH=@ROOT@/server/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HUB_DB_PATH=@ROOT@/server/db/saves.db"
+Environment="HUB_BACKUP_DIR=@ROOT@/server/backups"
+ExecStart=@ROOT@/server/.venv/bin/python -m app.backup
