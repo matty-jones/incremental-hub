@@ -54,35 +54,6 @@ interface SnapshotDao {
     )
     suspend fun releaseAutomaticPin(id: String)
 
-    @Query(
-        """
-        DELETE FROM snapshots
-        WHERE game_id = :gameId
-          AND pinned = 0
-          AND reason NOT IN (
-            'migrated-baseline', 'diagnostic-backup', 'pre-restore', 'post-restore',
-            'workstation', 'checkpoint', 'quarantine', 'lineage-base', 'retained-pointer'
-          )
-          AND id NOT IN (
-            SELECT high_water_snapshot_id FROM game_instances
-            WHERE game_id = :gameId AND high_water_snapshot_id IS NOT NULL
-          )
-          AND id NOT IN (
-            SELECT id FROM snapshots
-            WHERE game_id = :gameId
-              AND pinned = 0
-              AND reason NOT IN (
-                'migrated-baseline', 'diagnostic-backup', 'pre-restore', 'post-restore',
-                'workstation', 'checkpoint', 'quarantine', 'lineage-base', 'retained-pointer'
-              )
-              AND id NOT IN (
-                SELECT high_water_snapshot_id FROM game_instances
-                WHERE game_id = :gameId AND high_water_snapshot_id IS NOT NULL
-              )
-            ORDER BY sequence DESC
-            LIMIT 10
-          )
-        """,
-    )
-    suspend fun pruneAutomatic(gameId: String)
+    @Query("DELETE FROM snapshots WHERE game_id = :gameId AND id IN (:ids)")
+    suspend fun deleteByIds(gameId: String, ids: List<String>)
 }

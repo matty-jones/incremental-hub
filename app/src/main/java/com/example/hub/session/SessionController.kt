@@ -19,6 +19,7 @@ import com.example.hub.database.GameInstanceDao
 import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
+import com.example.hub.database.SnapshotRetention
 import com.example.hub.database.originForReason
 import com.example.hub.games.EnvelopeDecode
 import com.example.hub.games.GameAdapter
@@ -1889,7 +1890,7 @@ class SessionController(
             contentSha256 = PayloadDigest.sha256(payload),
         )
         dao.insert(record)
-        if (!pinned) dao.pruneAutomatic(gameId)
+        if (!pinned) SnapshotRetention.prune(dao, instanceDao, gameId, record.capturedAtMillis)
         return record
     }
 

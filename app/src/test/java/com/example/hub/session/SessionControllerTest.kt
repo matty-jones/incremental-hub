@@ -2517,10 +2517,10 @@ class SessionControllerTest {
         now += 2 * 60L * 60L * 1000L
         repo.commitIfSafe("shark-incremental", fourth, "cadence", adapter, "progressed-session", { true }, false)
         assertEquals(fourth, dao.get("shark-incremental")!!.snapshotPayload)
-        assertEquals(2, snapshots.history("shark-incremental").count { !it.pinned })
+        assertTrue(snapshots.history("shark-incremental").count { !it.pinned } <= 10)
         val stored = dao.get("shark-incremental")!!
         assertEquals(first, snapshots.getById(stored.highWaterSnapshotId!!)!!.payload)
-        assertTrue(snapshots.history("shark-incremental").any { it.pinned && it.payload == third })
+        assertTrue(snapshots.history("shark-incremental").any { it.payload == third })
     }
 
     @Test
@@ -2556,11 +2556,7 @@ class SessionControllerTest {
         assertEquals(stale, stored.snapshotPayload)
         assertNull(stored.captureIncident)
         assertEquals(upgraded, snapshots.getById(stored.highWaterSnapshotId!!)!!.payload)
-        assertTrue(
-            snapshots.history("shark-incremental").any {
-                it.payload == spent && it.pinned && it.reason == SnapshotReasons.RETAINED_POINTER
-            },
-        )
+        assertTrue(snapshots.history("shark-incremental").any { it.payload == spent })
         session.forceCloseForTest()
         val restarted = controllerWithoutDocumentHook(
             documentReady = { true },
@@ -2580,7 +2576,7 @@ class SessionControllerTest {
         assertEquals(SessionState.RecoveryRequired, restarted.state.value)
         assertEquals(stale, afterDeath.snapshotPayload)
         assertEquals(upgraded, snapshots.getById(afterDeath.highWaterSnapshotId!!)!!.payload)
-        assertTrue(snapshots.history("shark-incremental").any { it.payload == spent && it.pinned })
+        assertTrue(snapshots.history("shark-incremental").any { it.payload == spent })
         assertTrue(synced.none { it == feature0 })
         restarted.forceCloseForTest()
     }
@@ -2627,7 +2623,7 @@ class SessionControllerTest {
         assertEquals(saves[0], snapshots.getById(stored.highWaterSnapshotId!!)!!.payload)
         assertEquals(0, snapshots.history("fe000000").count { it.reason == SnapshotReasons.QUARANTINE })
         saves.take(4).forEach { earlier ->
-            assertTrue(snapshots.history("fe000000").any { it.payload == earlier && it.pinned })
+            assertTrue(snapshots.history("fe000000").any { it.payload == earlier })
         }
         val restarted = controllerWithoutDocumentHook(
             documentReady = { true },
@@ -3066,6 +3062,12 @@ class SessionControllerTest {
             if (index >= 0) rows[index] = rows[index].copy(pinned = true)
         }
 
+        override suspend fun deleteByIds(gameId: String, ids: List<String>) {
+            if (ids.isEmpty()) return
+            val drop = ids.toSet()
+            rows.removeAll { it.gameId == gameId && it.id in drop }
+        }
+
         override suspend fun releaseAutomaticPin(id: String) {
             val index = rows.indexOfFirst { it.id == id }
             if (index < 0) return
@@ -3083,31 +3085,6 @@ class SessionControllerTest {
                 return
             }
             rows[index] = row.copy(pinned = false)
-        }
-
-        override suspend fun pruneAutomatic(gameId: String) {
-            val keep = rows
-                .filter { it.gameId == gameId && automaticSnapshot(it) }
-                .sortedByDescending { it.sequence }
-                .take(10)
-                .map { it.id }
-                .toSet()
-            rows.removeAll { record ->
-                record.gameId == gameId && automaticSnapshot(record) && record.id !in keep
-            }
-        }
-
-        private fun automaticSnapshot(record: SnapshotRecord): Boolean {
-            return !record.pinned &&
-                record.reason != SnapshotReasons.MIGRATED_BASELINE &&
-                record.reason != SnapshotReasons.DIAGNOSTIC_BACKUP &&
-                record.reason != SnapshotReasons.PRE_RESTORE &&
-                record.reason != SnapshotReasons.POST_RESTORE &&
-                record.reason != SnapshotReasons.WORKSTATION &&
-                record.reason != SnapshotReasons.CHECKPOINT &&
-                record.reason != SnapshotReasons.QUARANTINE &&
-                record.reason != SnapshotReasons.LINEAGE_BASE &&
-                record.reason != SnapshotReasons.RETAINED_POINTER
         }
     }
 }

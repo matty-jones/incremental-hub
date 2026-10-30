@@ -7,6 +7,7 @@ import com.example.hub.database.GameInstanceDao
 import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
+import com.example.hub.database.SnapshotRetention
 import com.example.hub.database.originForReason
 import com.example.hub.games.GameAdapter
 import com.example.hub.games.PayloadDigest
@@ -229,7 +230,7 @@ class CaptureRepository(
                 releaseSupersededAnchor(instance, previousAnchor, adapter, now)
             }
         }
-        if (snapshotId != null && existing == null && !manual) snapshotDao?.pruneAutomatic(instance.gameId)
+        if (snapshotId != null) pruneAccepted(instance.gameId, now)
         return CaptureCommit(CaptureDisposition.STORED, verdict, updated, null, sync = true)
     }
 
@@ -298,7 +299,7 @@ class CaptureRepository(
         val previous = instance.snapshotPayload
         val previousAnchor = instance.highWaterSnapshotId
         val anchor = if (previousAnchor != null) snapshotDao?.getById(previousAnchor) else null
-        if (anchor != null && anchor.payload.isNotBlank() && anchor.payload != previous && anchor.reason !in DURABLE_REASONS) {
+        if (anchor != null && anchor.payload.isNotBlank() && anchor.payload != previous && !SnapshotRetention.isPermanentReason(anchor.reason)) {
             retainPayload(instance, anchor.payload, adapter, now)
         }
         if (!previous.isNullOrBlank()) {
@@ -374,15 +375,15 @@ class CaptureRepository(
     ) {
         if (payload.isBlank() || snapshotDao == null) return
         val sha = PayloadDigest.sha256(payload)
-        val durable = snapshotDao.history(instance.gameId).any { row ->
-            row.pinned && row.reason in DURABLE_REASONS && samePayload(row, sha, payload)
+        val stored = snapshotDao.history(instance.gameId).any { row ->
+            row.reason != SnapshotReasons.QUARANTINE && samePayload(row, sha, payload)
         }
-        if (durable) return
+        if (stored) return
         insertSnapshot(
             instance = instance,
             payload = payload,
             reason = SnapshotReasons.RETAINED_POINTER,
-            pinned = true,
+            pinned = false,
             adapter = adapter,
             now = now,
             sha = sha,
@@ -396,7 +397,7 @@ class CaptureRepository(
         now: Long,
     ) {
         val old = snapshotDao?.getById(oldId) ?: return
-        if (old.reason in DURABLE_REASONS || old.reason == SnapshotReasons.QUARANTINE) return
+        if (SnapshotRetention.isPermanentReason(old.reason)) return
         if (old.payload.isNotBlank()) retainPayload(owner, old.payload, adapter, now)
         snapshotDao?.releaseAutomaticPin(oldId)
     }
@@ -450,7 +451,7 @@ class CaptureRepository(
             return false
         }
         insertSnapshot(instance, payload, reason, pinned, adapter, now, sha)
-        if (!pinned) snapshotDao?.pruneAutomatic(instance.gameId)
+        pruneAccepted(instance.gameId, now)
         return true
     }
 
@@ -540,17 +541,12 @@ class CaptureRepository(
         return CaptureCommit(CaptureDisposition.REJECTED, classification, null, message, sync = false)
     }
 
+    private suspend fun pruneAccepted(gameId: String, now: Long) {
+        val dao = snapshotDao ?: return
+        SnapshotRetention.prune(dao, instanceDao, gameId, now)
+    }
+
     private companion object {
         const val SAMPLE_WINDOW_MS = 60L * 60L * 1000L
-        val DURABLE_REASONS = setOf(
-            SnapshotReasons.MIGRATED_BASELINE,
-            SnapshotReasons.DIAGNOSTIC_BACKUP,
-            SnapshotReasons.PRE_RESTORE,
-            SnapshotReasons.POST_RESTORE,
-            SnapshotReasons.WORKSTATION,
-            SnapshotReasons.CHECKPOINT,
-            SnapshotReasons.LINEAGE_BASE,
-            SnapshotReasons.RETAINED_POINTER,
-        )
     }
 }

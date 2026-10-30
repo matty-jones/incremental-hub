@@ -5,7 +5,8 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
- * Append-only snapshot. Automatic captures may be pruned. Pinned rows stay.
+ * Append-only snapshot. Accepted automatic rows are kept by UTC time tier.
+ * Pinned rows and recovery reasons stay.
  */
 @Entity(tableName = "snapshots")
 data class SnapshotRecord(

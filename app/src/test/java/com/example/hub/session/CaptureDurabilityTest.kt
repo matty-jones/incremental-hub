@@ -8,6 +8,7 @@ import com.example.hub.database.HubDatabase
 import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
+import com.example.hub.database.SnapshotRetention
 import com.example.hub.games.PayloadDigest
 import com.example.hub.games.ProgressionClass
 import com.example.hub.games.SharkIncrementalAdapter
@@ -52,17 +53,18 @@ class CaptureDurabilityTest {
                 assertEquals(payload, stored.snapshotPayload)
                 val anchor = db.snapshotDao().getById(stored.highWaterSnapshotId!!)
                 assertEquals(payload, anchor!!.payload)
-                db.snapshotDao().pruneAutomatic(gameId)
+                prune(db, gameId, now)
                 assertEquals(payload, db.snapshotDao().getById(stored.highWaterSnapshotId!!)!!.payload)
             }
-            val unpinned = db.snapshotDao().history(gameId).count { !it.pinned && it.reason == "cadence" }
-            assertTrue(unpinned <= 10)
-            assertTrue(db.snapshotDao().history(gameId).any { it.payload == first && it.pinned })
+            val history = db.snapshotDao().history(gameId)
+            assertTrue(history.count { !it.pinned && it.reason == "cadence" } <= 10)
+            assertFalse(history.any { it.payload == first })
+            assertTrue(history.any { it.payload == last })
             val anchorId = db.gameInstanceDao().get(gameId)!!.highWaterSnapshotId!!
             db.snapshotDao().releaseAutomaticPin(anchorId)
             assertFalse(db.snapshotDao().getById(anchorId)!!.pinned)
             flood(db.snapshotDao(), gameId, 20)
-            repeat(3) { db.snapshotDao().pruneAutomatic(gameId) }
+            repeat(3) { prune(db, gameId, now) }
             assertEquals(last, db.snapshotDao().getById(anchorId)!!.payload)
             val regressed = shark(feature = 0, prestige = 0, fish = "99")
             val quarantined = repo.commitIfSafe(gameId, regressed, "cadence", adapter, "session", { true }, false)
@@ -93,7 +95,7 @@ class CaptureDurabilityTest {
             db.snapshotDao().releaseAutomaticPin(checkpointId)
             assertTrue(db.snapshotDao().getById(checkpointId)!!.pinned)
             flood(db.snapshotDao(), checkpointGame, 20)
-            repeat(3) { db.snapshotDao().pruneAutomatic(checkpointGame) }
+            repeat(3) { prune(db, checkpointGame, now) }
             assertEquals(checkpoint, db.snapshotDao().getById(checkpointId)!!.payload)
 
             val dedupGame = "dedup-game"
@@ -120,7 +122,7 @@ class CaptureDurabilityTest {
             db.snapshotDao().releaseAutomaticPin("deduped")
             assertFalse(db.snapshotDao().getById("deduped")!!.pinned)
             flood(db.snapshotDao(), dedupGame, 20)
-            repeat(3) { db.snapshotDao().pruneAutomatic(dedupGame) }
+            repeat(3) { prune(db, dedupGame, now) }
             assertEquals(early, db.snapshotDao().getById("deduped")!!.payload)
             assertEquals("deduped", db.gameInstanceDao().get(dedupGame)!!.highWaterSnapshotId)
 
@@ -144,7 +146,7 @@ class CaptureDurabilityTest {
             db.snapshotDao().releaseAutomaticPin(kept.id)
             assertTrue(db.snapshotDao().getById(kept.id)!!.pinned)
             flood(db.snapshotDao(), lineageGame, 20)
-            repeat(3) { db.snapshotDao().pruneAutomatic(lineageGame) }
+            repeat(3) { prune(db, lineageGame, now) }
             assertEquals(good, db.snapshotDao().getById(kept.id)!!.payload)
             assertEquals(bad, db.snapshotDao().getById(active.highWaterSnapshotId!!)!!.payload)
             assertNotNull(active.lineageId)
@@ -173,12 +175,17 @@ class CaptureDurabilityTest {
                     ),
                 )
             }
-            repeat(2) { db.snapshotDao().pruneAutomatic("shark-incremental") }
+            val now = java.time.Instant.parse("2026-06-15T12:00:00Z").toEpochMilli()
+            repeat(2) { prune(db, "shark-incremental", now) }
             assertNull(db.snapshotDao().getById("auto-0"))
             assertEquals(10, db.snapshotDao().history("shark-incremental").size)
         } finally {
             db.close()
         }
+    }
+
+    private suspend fun prune(db: HubDatabase, gameId: String, now: Long) {
+        SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), gameId, now)
     }
 
     private fun openDatabase(): HubDatabase {
