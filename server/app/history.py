@@ -18,6 +18,7 @@ INTEGRITY_QUARANTINE = "quarantine"
 INTEGRITIES = {INTEGRITY_ACCEPTED, INTEGRITY_ARCHIVED, INTEGRITY_QUARANTINE}
 
 LEGACY_LINEAGE = "legacy"
+INDEX_PAGE_MAX = 500
 
 
 def now_millis() -> int:
@@ -102,6 +103,12 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_save_snapshots_game
             ON save_snapshots (game_id, lineage_id, captured_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_save_snapshots_received
+            ON save_snapshots (game_id, received_at, snapshot_id)
             """
         )
         _migrate_legacy_rows(connection)
@@ -191,6 +198,44 @@ def list_snapshots(connection: sqlite3.Connection, game_id: str) -> list[sqlite3
         """,
         (game_id,),
     ).fetchall()
+
+
+def list_snapshot_index(
+    connection: sqlite3.Connection,
+    game_id: str,
+    after_received_at: int,
+    after_snapshot_id: str,
+    limit: int,
+) -> list[sqlite3.Row]:
+    page = max(1, min(int(limit), INDEX_PAGE_MAX))
+    return connection.execute(
+        """
+        SELECT snapshot_id, game_id, lineage_id, sha256, captured_at, received_at,
+               source, integrity
+        FROM save_snapshots
+        WHERE game_id = ?
+          AND (
+                received_at > ?
+                OR (received_at = ? AND snapshot_id > ?)
+              )
+        ORDER BY received_at ASC, snapshot_id ASC
+        LIMIT ?
+        """,
+        (game_id, after_received_at, after_received_at, after_snapshot_id, page),
+    ).fetchall()
+
+
+def public_snapshot_metadata(row: sqlite3.Row) -> dict:
+    return {
+        "snapshot_id": row["snapshot_id"],
+        "game_id": row["game_id"],
+        "lineage_id": row["lineage_id"],
+        "sha256": row["sha256"],
+        "captured_at_millis": row["captured_at"],
+        "received_at_millis": row["received_at"],
+        "source": row["source"],
+        "integrity": row["integrity"],
+    }
 
 
 def public_snapshot(row: sqlite3.Row) -> dict:

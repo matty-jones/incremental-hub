@@ -25,6 +25,14 @@ interface WorkstationApi {
     fun proposePointer(proposal: PointerProposal): PointerProposalResult? = null
     fun fetchPointer(gameId: String): PointerFetch = PointerFetch.Unreachable
     fun fetchHistory(gameId: String): List<RemoteSnapshot>? = null
+    fun fetchHistoryIndex(
+        gameId: String,
+        afterReceivedAt: Long,
+        afterSnapshotId: String,
+        limit: Int,
+    ): HistoryPage? = HistoryPage(emptyList(), complete = true)
+
+    fun fetchSnapshot(gameId: String, snapshotId: String): RemoteSnapshot? = null
 }
 
 class WorkstationClient(
@@ -126,6 +134,40 @@ class WorkstationClient(
                     item.toRemoteSnapshot()?.let { add(it) }
                 }
             }
+        }
+    }
+
+    override fun fetchHistoryIndex(
+        gameId: String,
+        afterReceivedAt: Long,
+        afterSnapshotId: String,
+        limit: Int,
+    ): HistoryPage? {
+        val url = endpoint("saves/$gameId/snapshots/index").toHttpUrl().newBuilder()
+            .addQueryParameter("after_received_at", afterReceivedAt.toString())
+            .addQueryParameter("after_snapshot_id", afterSnapshotId)
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        val response = get(url.toString()) ?: return null
+        response.use { result ->
+            if (!result.isSuccessful) return null
+            val json = result.body?.string()?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+            val array = json.optJSONArray("entries") ?: return null
+            val entries = buildList {
+                for (index in 0 until array.length()) {
+                    array.optJSONObject(index)?.toSnapshotMetadata()?.let { add(it) }
+                }
+            }
+            return HistoryPage(entries, complete = json.optBoolean("complete"))
+        }
+    }
+
+    override fun fetchSnapshot(gameId: String, snapshotId: String): RemoteSnapshot? {
+        val response = get(endpoint("saves/$gameId/snapshots/$snapshotId")) ?: return null
+        response.use { result ->
+            if (!result.isSuccessful) return null
+            val json = result.body?.string()?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+            return json.toRemoteSnapshot()
         }
     }
 
@@ -241,6 +283,23 @@ private fun SnapshotUpload.toJson(): String = JSONObject()
     .put("resume_token", resumeToken ?: JSONObject.NULL)
     .put("recovery_state", JSONObject.NULL)
     .toString()
+
+private fun JSONObject.toSnapshotMetadata(): SnapshotMetadata? {
+    val snapshotId = optionalString("snapshot_id") ?: return null
+    val gameId = optionalString("game_id") ?: return null
+    val sha = optionalString("sha256") ?: return null
+    if (!has("received_at_millis")) return null
+    return SnapshotMetadata(
+        snapshotId = snapshotId,
+        gameId = gameId,
+        lineageId = optionalString("lineage_id") ?: "legacy",
+        sha256 = sha,
+        capturedAtMillis = optLong("captured_at_millis"),
+        receivedAtMillis = optLong("received_at_millis"),
+        integrity = optionalString("integrity") ?: "archived",
+        source = optionalString("source") ?: "phone",
+    )
+}
 
 private fun JSONObject.toRemoteSnapshot(): RemoteSnapshot? {
     val snapshotId = optionalString("snapshot_id") ?: return null

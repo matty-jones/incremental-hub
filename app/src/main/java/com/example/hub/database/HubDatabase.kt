@@ -13,8 +13,13 @@ import androidx.room.migration.Migration
  * Additional tables are added here as the schema evolves.
  */
 @Database(
-    entities = [GameInstance::class, SnapshotRecord::class, SyncOutboxEntry::class],
-    version = 7,
+    entities = [
+        GameInstance::class,
+        SnapshotRecord::class,
+        SyncOutboxEntry::class,
+        SyncHistoryCursor::class,
+    ],
+    version = 8,
     exportSchema = true,
 )
 abstract class HubDatabase : RoomDatabase() {
@@ -24,6 +29,8 @@ abstract class HubDatabase : RoomDatabase() {
     abstract fun snapshotDao(): SnapshotDao
 
     abstract fun syncOutboxDao(): SyncOutboxDao
+
+    abstract fun syncHistoryCursorDao(): SyncHistoryCursorDao
 
     companion object {
         private const val DATABASE_NAME = "hub_database"
@@ -172,6 +179,22 @@ abstract class HubDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `sync_history_cursor` (
+                      `game_id` TEXT NOT NULL,
+                      `received_at_millis` INTEGER NOT NULL,
+                      `snapshot_id` TEXT NOT NULL,
+                      `seen_count` INTEGER NOT NULL,
+                      PRIMARY KEY(`game_id`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         private fun buildDatabase(context: Context) = Room.databaseBuilder(
             context.applicationContext,
             HubDatabase::class.java,
@@ -183,6 +206,7 @@ abstract class HubDatabase : RoomDatabase() {
             MIGRATION_4_5,
             MIGRATION_5_6,
             MIGRATION_6_7,
+            MIGRATION_7_8,
         )
             .build()
     }

@@ -16,6 +16,7 @@ import com.example.hub.session.SessionController
 import com.example.hub.session.SessionRuntime
 import com.example.hub.session.SessionState
 import com.example.hub.sync.SaveSync
+import com.example.hub.sync.SyncBootstrap
 import com.example.hub.sync.WorkstationApi
 import com.example.hub.sync.WorkstationClient
 import kotlinx.coroutines.launch
@@ -37,8 +38,16 @@ class HubSessionViewModel(
         api = workstation,
         snapshotDao = database.snapshotDao(),
         outboxDao = database.syncOutboxDao(),
+        historyCursorDao = database.syncHistoryCursorDao(),
     )
     init {
+        viewModelScope.launch {
+            SyncBootstrap.enqueueExisting(
+                database.gameInstanceDao(),
+                database.snapshotDao(),
+                database.syncOutboxDao(),
+            )
+        }
         saveSync.classify = classify@{ gameId, candidate, reference ->
             val game = gameRegistry.getGame(gameId) ?: return@classify ProgressionClass.INCOMPARABLE
             val adapter = GameAdapters.create(game.adapterId) ?: return@classify ProgressionClass.INCOMPARABLE

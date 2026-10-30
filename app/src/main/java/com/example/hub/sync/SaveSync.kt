@@ -7,6 +7,8 @@ import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotOrigins
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
+import com.example.hub.database.SyncHistoryCursor
+import com.example.hub.database.SyncHistoryCursorDao
 import com.example.hub.database.SyncOutboxDao
 import com.example.hub.database.SyncOutboxEntry
 import com.example.hub.games.PayloadDigest
@@ -18,9 +20,10 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
- * Uploads the local outbox after a commit and archives remote history without
- * moving a stored pointer. The phone keeps playing from Room when the
- * workstation does not answer. A wall-clock timestamp is not a reason to
+ * Uploads the local outbox after a commit and reads workstation history as
+ * metadata. A full payload is stored only when the phone adopts an empty slot
+ * or the caller asks for one snapshot. The phone keeps playing from Room when
+ * the workstation does not answer. A wall-clock timestamp is not a reason to
  * replace either side.
  */
 class SaveSync(
@@ -28,6 +31,7 @@ class SaveSync(
     private val api: WorkstationApi,
     private val snapshotDao: SnapshotDao? = null,
     private val outboxDao: SyncOutboxDao? = null,
+    private val historyCursorDao: SyncHistoryCursorDao? = null,
 ) {
     var activeGameId: () -> String? = { null }
     var onDecision: (String) -> Unit = {}
@@ -53,7 +57,24 @@ class SaveSync(
         mutex.withLock { syncLocked() }
     }
 
+    /**
+     * Fetches one historical payload and keeps it as a local workstation snapshot.
+     * A second request for the same bytes does not insert another row.
+     */
+    suspend fun recoverSnapshot(gameId: String, snapshotId: String): Boolean {
+        return mutex.withLock {
+            val remote = withContext(Dispatchers.IO) { api.fetchSnapshot(gameId, snapshotId) } ?: return false
+            rememberWorkstationPayload(
+                gameId = remote.gameId,
+                lineageId = remote.lineageId,
+                payload = remote.snapshotPayload,
+                capturedAtMillis = remote.capturedAtMillis,
+            )
+        }
+    }
+
     private suspend fun syncLocked() {
+        bootstrapExisting()
         val remoteSaves = withContext(Dispatchers.IO) { api.fetchSaves() }
         if (remoteSaves == null) {
             Log.i(TAG, "workstation unreachable; keeping local saves")
@@ -203,16 +224,20 @@ class SaveSync(
         }
     }
 
+    private suspend fun bootstrapExisting() {
+        val snapshots = snapshotDao ?: return
+        val outbox = outboxDao ?: return
+        SyncBootstrap.enqueueExisting(dao, snapshots, outbox)
+    }
+
     private suspend fun reconcile(remoteSaves: List<RemoteSave>) {
         val local = dao.getAll().associateBy { it.gameId }
         val gameIds = local.keys + remoteSaves.map { it.gameId }
         for (gameId in gameIds) {
-            val history = withContext(Dispatchers.IO) { api.fetchHistory(gameId) }
-            if (history == null) {
+            if (!syncHistoryIndex(gameId)) {
                 onDecision("Saved locally; workstation sync pending.")
                 return
             }
-            history.forEach { archiveRemote(it) }
             when (val pointer = withContext(Dispatchers.IO) { api.fetchPointer(gameId) }) {
                 PointerFetch.Unreachable -> {
                     onDecision("Saved locally; workstation sync pending.")
@@ -225,12 +250,6 @@ class SaveSync(
     }
 
     private suspend fun considerRemote(pointer: RemotePointer) {
-        archivePayload(
-            gameId = pointer.gameId,
-            lineageId = pointer.lineageId,
-            payload = pointer.snapshotPayload,
-            capturedAtMillis = pointer.capturedAtMillis,
-        )
         val existing = dao.get(pointer.gameId)
         val localPayload = existing?.snapshotPayload?.takeIf { it.isNotBlank() }
         if (localPayload != null) {
@@ -255,41 +274,61 @@ class SaveSync(
             return
         }
         dao.upsert(pointer.toGameInstance(existing))
+        rememberWorkstationPayload(
+            gameId = pointer.gameId,
+            lineageId = pointer.lineageId,
+            payload = pointer.snapshotPayload,
+            capturedAtMillis = pointer.capturedAtMillis,
+        )
         onDecision("Pulled workstation save for ${pointer.gameId}.")
     }
 
     private suspend fun archiveLegacy(remote: RemoteSave?) {
         if (remote == null) return
-        archivePayload(
-            gameId = remote.gameId,
-            lineageId = "legacy",
-            payload = remote.snapshotPayload,
-            capturedAtMillis = remote.capturedAtMillis,
-        )
         val existing = dao.get(remote.gameId)
         if (!existing?.snapshotPayload.isNullOrBlank() && existing?.snapshotPayload != remote.snapshotPayload) {
             onDecision("Rejected workstation save for ${remote.gameId}. The stored snapshot was kept.")
         }
     }
 
-    private suspend fun archiveRemote(remote: RemoteSnapshot) {
-        archivePayload(
-            gameId = remote.gameId,
-            lineageId = remote.lineageId,
-            payload = remote.snapshotPayload,
-            capturedAtMillis = remote.capturedAtMillis,
-        )
+    private suspend fun syncHistoryIndex(gameId: String): Boolean {
+        val cursors = historyCursorDao ?: return true
+        val cursor = cursors.get(gameId)
+        var afterAt = cursor?.receivedAtMillis ?: 0L
+        var afterId = cursor?.snapshotId.orEmpty()
+        var seen = cursor?.seenCount ?: 0
+        while (true) {
+            val page = withContext(Dispatchers.IO) {
+                api.fetchHistoryIndex(gameId, afterAt, afterId, HISTORY_PAGE)
+            } ?: return false
+            if (page.entries.isEmpty()) return true
+            val last = page.entries.last()
+            seen += page.entries.size
+            cursors.upsert(
+                SyncHistoryCursor(
+                    gameId = gameId,
+                    receivedAtMillis = last.receivedAtMillis,
+                    snapshotId = last.snapshotId,
+                    seenCount = seen,
+                ),
+            )
+            afterAt = last.receivedAtMillis
+            afterId = last.snapshotId
+            if (page.complete || page.entries.size < HISTORY_PAGE) return true
+        }
     }
 
-    private suspend fun archivePayload(
+    private suspend fun rememberWorkstationPayload(
         gameId: String,
         lineageId: String,
         payload: String,
         capturedAtMillis: Long,
-    ) {
-        val snapshots = snapshotDao ?: return
-        if (payload.isBlank()) return
-        if (snapshots.history(gameId).any { it.payload == payload }) return
+    ): Boolean {
+        val snapshots = snapshotDao ?: return false
+        if (payload.isBlank()) return false
+        val sha = PayloadDigest.sha256(payload)
+        if (snapshots.findBySha(gameId, sha)?.payload == payload) return true
+        if (snapshots.history(gameId).any { it.payload == payload }) return true
         snapshots.insert(
             SnapshotRecord(
                 id = UUID.randomUUID().toString(),
@@ -302,9 +341,10 @@ class SaveSync(
                 progressJson = null,
                 origin = SnapshotOrigins.WORKSTATION,
                 lineageId = lineageId,
-                contentSha256 = PayloadDigest.sha256(payload),
+                contentSha256 = sha,
             ),
         )
+        return true
     }
 
     private suspend fun clearsHighWater(existing: GameInstance, payload: String): Boolean {
@@ -315,6 +355,7 @@ class SaveSync(
 
     private companion object {
         const val TAG = "SaveSync"
+        const val HISTORY_PAGE = 200
     }
 }
 

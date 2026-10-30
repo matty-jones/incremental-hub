@@ -1,6 +1,7 @@
 package com.example.hub.sync
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.hub.database.GameInstance
@@ -71,7 +72,7 @@ class SyncOutboxTest {
             })
             assertEquals(saved.last(), db.gameInstanceDao().get(gameId)!!.snapshotPayload)
             assertEquals(0, db.syncOutboxDao().pendingCount(gameId))
-            assertTrue(db.snapshotDao().history(gameId).any { it.payload == shark(feature = 0, prestige = 0) && it.pinned })
+            assertTrue(db.snapshotDao().history(gameId).none { it.payload == shark(feature = 0, prestige = 0) })
             val calls = server.appendCalls
             sync.merge()
             assertEquals(calls, server.appendCalls)
@@ -216,7 +217,13 @@ class SyncOutboxTest {
             assertEquals(second, db.gameInstanceDao().get(gameId)!!.snapshotPayload)
             assertEquals(shark(feature = 9, prestige = 8), db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
             assertTrue(server.records.values.none { it.snapshotPayload == regressed })
-            assertTrue(server.proposals.isEmpty())
+            assertTrue(
+                server.proposals.all { proposal ->
+                    server.records.values.first { it.snapshotId == proposal.snapshotId }.snapshotPayload ==
+                        shark(feature = 9, prestige = 8)
+                },
+            )
+            assertTrue(server.proposals.isNotEmpty())
             assertTrue(
                 server.records.values.any {
                     it.snapshotPayload == second && it.integrity == SyncOutboxEntry.INTEGRITY_ARCHIVED
@@ -225,6 +232,186 @@ class SyncOutboxTest {
         } finally {
             db.close()
         }
+    }
+
+    @Test
+    fun upgradedV6SaveUploadsWithoutNewGameplay() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "v6-shark-bootstrap"
+        context.deleteDatabase(name)
+        val path = context.getDatabasePath(name)
+        path.parentFile?.mkdirs()
+        val feature9 = shark(feature = 9, prestige = 2639)
+        val baseline = shark(feature = 9, prestige = 1)
+        val quarantined = shark(feature = 0, prestige = 0)
+        val keptWorkstation = "already-\u0000-workstation"
+        val sqlite = SQLiteDatabase.openOrCreateDatabase(path, null)
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `game_instances` (
+              `gameId` TEXT NOT NULL,
+              `profile_name` TEXT NOT NULL,
+              `session_identity` TEXT NOT NULL,
+              `last_played_at_millis` INTEGER NOT NULL,
+              `resume_token` TEXT,
+              `recovery_state` TEXT,
+              `last_capture_at_millis` INTEGER NOT NULL,
+              `snapshot_payload` TEXT,
+              `last_capture_attempt_at_millis` INTEGER NOT NULL,
+              `last_capture_success_at_millis` INTEGER NOT NULL,
+              `last_capture_failure_at_millis` INTEGER NOT NULL,
+              `last_capture_error` TEXT,
+              PRIMARY KEY(`gameId`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `snapshots` (
+              `id` TEXT NOT NULL,
+              `game_id` TEXT NOT NULL,
+              `sequence` INTEGER NOT NULL,
+              `captured_at_millis` INTEGER NOT NULL,
+              `reason` TEXT NOT NULL,
+              `pinned` INTEGER NOT NULL,
+              `payload` TEXT NOT NULL,
+              `progress_json` TEXT,
+              `origin` TEXT NOT NULL DEFAULT 'local-capture',
+              PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL("ALTER TABLE game_instances ADD COLUMN lineage_id TEXT NOT NULL DEFAULT 'legacy'")
+        sqlite.execSQL("ALTER TABLE game_instances ADD COLUMN high_water_snapshot_id TEXT")
+        sqlite.execSQL("ALTER TABLE game_instances ADD COLUMN capture_incident TEXT")
+        sqlite.execSQL("ALTER TABLE game_instances ADD COLUMN capture_incident_sha TEXT")
+        sqlite.execSQL("ALTER TABLE game_instances ADD COLUMN capture_incident_count INTEGER NOT NULL DEFAULT 0")
+        sqlite.execSQL("ALTER TABLE game_instances ADD COLUMN last_seen_at_millis INTEGER NOT NULL DEFAULT 0")
+        sqlite.execSQL("ALTER TABLE snapshots ADD COLUMN lineage_id TEXT NOT NULL DEFAULT 'legacy'")
+        sqlite.execSQL("ALTER TABLE snapshots ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''")
+        sqlite.execSQL(
+            """
+            INSERT INTO game_instances (
+              gameId, profile_name, session_identity, last_played_at_millis, resume_token, recovery_state,
+              last_capture_at_millis, snapshot_payload, last_capture_attempt_at_millis, last_capture_success_at_millis,
+              last_capture_failure_at_millis, last_capture_error, lineage_id, high_water_snapshot_id,
+              capture_incident, capture_incident_sha, capture_incident_count, last_seen_at_millis
+            ) VALUES ('shark-incremental', 'hub-game-shark-incremental', 'kept', 40, NULL, NULL, 40, ?, 40, 40, 0, NULL, 'legacy', 'feature9', NULL, NULL, 0, 40)
+            """.trimIndent(),
+            arrayOf(feature9),
+        )
+        sqlite.execSQL(
+            """
+            INSERT INTO game_instances (
+              gameId, profile_name, session_identity, last_played_at_millis, resume_token, recovery_state,
+              last_capture_at_millis, snapshot_payload, last_capture_attempt_at_millis, last_capture_success_at_millis,
+              last_capture_failure_at_millis, last_capture_error, lineage_id, high_water_snapshot_id,
+              capture_incident, capture_incident_sha, capture_incident_count, last_seen_at_millis
+            ) VALUES ('other-game', 'hub-game-other-game', 'other', 40, NULL, NULL, 40, 'do-not-upload', 40, 40, 0, NULL, 'fresh-lineage', NULL, NULL, NULL, 0, 40)
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            "INSERT INTO snapshots (id, game_id, sequence, captured_at_millis, reason, pinned, payload, progress_json, origin, lineage_id, content_sha256) VALUES ('feature9', 'shark-incremental', 2, 40, 'post-restore', 1, ?, NULL, 'recovery', 'legacy', ?)",
+            arrayOf(feature9, PayloadDigest.sha256(feature9)),
+        )
+        sqlite.execSQL(
+            "INSERT INTO snapshots (id, game_id, sequence, captured_at_millis, reason, pinned, payload, progress_json, origin, lineage_id, content_sha256) VALUES ('baseline', 'shark-incremental', 1, 10, 'migrated-baseline', 1, ?, NULL, 'local-capture', 'legacy', ?)",
+            arrayOf(baseline, PayloadDigest.sha256(baseline)),
+        )
+        sqlite.execSQL(
+            "INSERT INTO snapshots (id, game_id, sequence, captured_at_millis, reason, pinned, payload, progress_json, origin, lineage_id, content_sha256) VALUES ('bad', 'shark-incremental', 3, 30, 'quarantine', 1, ?, NULL, 'recovery', 'legacy', ?)",
+            arrayOf(quarantined, PayloadDigest.sha256(quarantined)),
+        )
+        sqlite.execSQL(
+            "INSERT INTO snapshots (id, game_id, sequence, captured_at_millis, reason, pinned, payload, progress_json, origin, lineage_id, content_sha256) VALUES ('kept-remote', 'shark-incremental', 4, 20, 'workstation', 1, ?, NULL, 'workstation-sync', 'legacy', ?)",
+            arrayOf(keptWorkstation, PayloadDigest.sha256(keptWorkstation)),
+        )
+        sqlite.version = 6
+        sqlite.close()
+
+        val server = MemoryWorkstation()
+        val first = openV6(name)
+        try {
+            assertEquals(feature9, first.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            assertEquals(keptWorkstation, first.snapshotDao().getById("kept-remote")!!.payload)
+            assertEquals(0, first.syncOutboxDao().pendingCount("shark-incremental"))
+            SyncBootstrap.enqueueExisting(first.gameInstanceDao(), first.snapshotDao(), first.syncOutboxDao(), now = 100)
+            SyncBootstrap.enqueueExisting(first.gameInstanceDao(), first.snapshotDao(), first.syncOutboxDao(), now = 100)
+            val pending = first.syncOutboxDao().pending()
+            assertEquals(setOf(feature9, baseline), pending.map { it.payload }.toSet())
+            assertTrue(pending.none { it.payload == quarantined || it.payload == "do-not-upload" || it.payload == keptWorkstation })
+            assertEquals(listOf(feature9), pending.filter { it.proposePointer }.map { it.payload })
+        } finally {
+            first.close()
+        }
+
+        val reopened = openV6(name)
+        try {
+            assertEquals(feature9, reopened.snapshotDao().getById("feature9")!!.payload)
+            assertEquals(keptWorkstation, reopened.snapshotDao().getById("kept-remote")!!.payload)
+            SyncBootstrap.enqueueExisting(reopened.gameInstanceDao(), reopened.snapshotDao(), reopened.syncOutboxDao(), now = 200)
+            assertEquals(2, reopened.syncOutboxDao().pendingCount("shark-incremental"))
+            server.reachable = false
+            server.pointer = remotePointer(shark(feature = 0, prestige = 0), version = 4, capturedAt = 90_000L)
+            val offline = sync(reopened, server)
+            offline.merge()
+            assertEquals(0, server.appendCalls)
+            assertEquals(2, reopened.syncOutboxDao().pendingCount("shark-incremental"))
+            assertEquals(feature9, reopened.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+        } finally {
+            reopened.close()
+        }
+
+        val connected = openV6(name)
+        try {
+            server.reachable = true
+            val sync = sync(connected, server)
+            sync.merge()
+            assertEquals(setOf(feature9, baseline), server.records.values.map { it.snapshotPayload }.toSet())
+            assertEquals(listOf(feature9), server.proposals.map { proposal ->
+                server.records.values.first { it.snapshotId == proposal.snapshotId }.snapshotPayload
+            })
+            assertTrue(server.records.values.none { it.snapshotPayload == quarantined || it.snapshotPayload == "do-not-upload" })
+            assertEquals(feature9, connected.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            assertEquals(feature9, connected.snapshotDao().getById("feature9")!!.payload)
+            assertEquals(keptWorkstation, connected.snapshotDao().getById("kept-remote")!!.payload)
+            assertTrue(connected.snapshotDao().history("shark-incremental").none { it.payload == shark(feature = 0, prestige = 0) && it.id != "bad" })
+            val calls = server.appendCalls
+            val records = server.records.size
+            val repo = CaptureRepository(
+                connected.gameInstanceDao(),
+                connected.snapshotDao(),
+                connected,
+                outboxDao = connected.syncOutboxDao(),
+                clock = { 50_000L },
+            )
+            repo.commitIfSafe(
+                "shark-incremental",
+                feature9,
+                "checkpoint",
+                SharkIncrementalAdapter(),
+                "kept",
+                { true },
+                true,
+            )
+            sync.merge()
+            assertEquals(calls, server.appendCalls)
+            assertEquals(records, server.records.size)
+            assertEquals(feature9, connected.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+        } finally {
+            connected.close()
+        }
+    }
+
+    private fun openV6(name: String): HubDatabase {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val inline = Executor { it.run() }
+        return Room.databaseBuilder(context, HubDatabase::class.java, name)
+            .addMigrations(HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
+            .allowMainThreadQueries()
+            .setQueryExecutor(inline)
+            .setTransactionExecutor(inline)
+            .build()
     }
 
     private fun sync(db: HubDatabase, server: MemoryWorkstation): SaveSync {

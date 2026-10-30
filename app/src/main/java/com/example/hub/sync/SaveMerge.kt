@@ -167,6 +167,22 @@ data class RemoteSnapshot(
     val source: String,
 )
 
+data class SnapshotMetadata(
+    val snapshotId: String,
+    val gameId: String,
+    val lineageId: String,
+    val sha256: String,
+    val capturedAtMillis: Long,
+    val receivedAtMillis: Long,
+    val integrity: String,
+    val source: String,
+)
+
+data class HistoryPage(
+    val entries: List<SnapshotMetadata>,
+    val complete: Boolean,
+)
+
 sealed class PointerFetch {
     data class Found(val pointer: RemotePointer) : PointerFetch()
     data object Absent : PointerFetch()

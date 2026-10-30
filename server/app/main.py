@@ -12,12 +12,16 @@ from pydantic import BaseModel, Field
 from .backup import read_status
 from .db import apk_dir, connect, row_to_dict
 from .history import (
+    INDEX_PAGE_MAX,
     append_snapshot,
     immediate,
+    list_snapshot_index,
     list_snapshots,
     propose_pointer,
     public_pointer,
     public_snapshot,
+    public_snapshot_metadata,
+    snapshot_by_id,
     valid_token,
     apply_legacy_put,
 )
@@ -296,6 +300,44 @@ def get_snapshots(game_id: str) -> list[dict]:
     with closing(connect()) as connection:
         rows = list_snapshots(connection, game_id)
     return [public_snapshot(row) for row in rows]
+
+
+@app.get("/saves/{game_id}/snapshots/index")
+def get_snapshot_index(
+    game_id: str,
+    after_received_at: int = 0,
+    after_snapshot_id: str = "",
+    limit: int = 200,
+) -> dict:
+    _require_game_id(game_id)
+    if after_received_at < 0:
+        raise HTTPException(status_code=400, detail="invalid cursor")
+    if after_snapshot_id and not valid_token(after_snapshot_id):
+        raise HTTPException(status_code=400, detail="invalid snapshot id")
+    page = max(1, min(limit, INDEX_PAGE_MAX))
+    with closing(connect()) as connection:
+        rows = list_snapshot_index(
+            connection,
+            game_id,
+            after_received_at,
+            after_snapshot_id,
+            page,
+        )
+    return {
+        "entries": [public_snapshot_metadata(row) for row in rows],
+        "complete": len(rows) < page,
+    }
+
+
+@app.get("/saves/{game_id}/snapshots/{snapshot_id}")
+def get_snapshot(game_id: str, snapshot_id: str) -> dict:
+    _require_game_id(game_id)
+    _require_token(snapshot_id, "invalid snapshot id")
+    with closing(connect()) as connection:
+        row = snapshot_by_id(connection, snapshot_id)
+    if row is None or row["game_id"] != game_id:
+        raise HTTPException(status_code=404, detail="no snapshot")
+    return public_snapshot(row)
 
 
 @app.get("/saves/{game_id}/pointer")

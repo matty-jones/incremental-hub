@@ -12,7 +12,17 @@ HUB_BACKUP_DIR=/absolute/path/backups \
 .venv/bin/python -m app.backup
 ```
 
-The command prints the new file, named `hub-YYYYMMDDTHHMMSSZ.db`. It checks `PRAGMA integrity_check` and recomputes the SHA-256 of every `save_snapshots` payload before it publishes the file. A failed check deletes the partial file and records the error in `backup-status.json`. The live database is left in place.
+The command prints the new file, named `hub-YYYYMMDDTHHMMSSZ.db`. It checks `PRAGMA integrity_check`. When `save_snapshots` exists it recomputes the SHA-256 of every snapshot payload. When that table does not exist it recomputes the SHA-256 of every `saves` payload. A failed check deletes the partial file and records the error in `backup-status.json`. The live database is left in place. This command does not migrate the database.
+
+## Migrate once, before the new server starts
+
+Stop the service first. From `server/`:
+
+```
+.venv/bin/python -m app.backup migrate
+```
+
+That writes `pre-migrate-YYYYMMDDTHHMMSSZ.db` before it opens the live file through the history schema. It checks integrity and every legacy `saves` payload. It then migrates, checks those payloads are unchanged in `save_snapshots`, and writes a separate `hub-` backup. If any step fails, the `pre-migrate-` file is left where it is. Daily retention does not delete `pre-migrate-` files. The timer must keep running `python -m app.backup` without `migrate`.
 
 `GET /health` reports the last success, the last failure, and the backup filename. It does not include save payloads.
 

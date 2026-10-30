@@ -44,7 +44,8 @@ class SaveSyncIncidentTest {
             db.syncOutboxDao().insert(outbox(accepted.snapshotPayload!!, propose = true))
             sync.push(accepted)
             assertTrue(uploads.isEmpty())
-            assertEquals(1, db.syncOutboxDao().pendingCount("shark-incremental"))
+            assertTrue(db.syncOutboxDao().pending().any { it.payload == accepted.snapshotPayload })
+            assertTrue(db.syncOutboxDao().pending().none { it.lineageId == "lineage-2" })
         } finally {
             db.close()
         }
@@ -88,7 +89,7 @@ class SaveSyncIncidentTest {
             assertEquals(local, db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
             assertTrue(decisions.any { it.contains("stored snapshot was kept") })
             assertEquals(listOf("local"), proposals)
-            assertTrue(db.snapshotDao().history("shark-incremental").any { it.payload == remote && it.pinned })
+            assertTrue(db.snapshotDao().history("shark-incremental").none { it.payload == remote })
         } finally {
             db.close()
         }

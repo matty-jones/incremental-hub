@@ -69,7 +69,7 @@ class SnapshotMigrationTest {
                 HubDatabase.MIGRATION_3_4,
                 HubDatabase.MIGRATION_4_5,
                 HubDatabase.MIGRATION_5_6,
-                HubDatabase.MIGRATION_6_7,
+                HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8,
             )
             .allowMainThreadQueries()
             .build()
@@ -152,7 +152,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7)
+            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
             .allowMainThreadQueries()
             .build()
         val history = db.snapshotDao().history("shark-incremental")
@@ -233,7 +233,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7)
+            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
             .allowMainThreadQueries()
             .build()
         val snapshots = db.snapshotDao()
@@ -339,7 +339,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7)
+            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
             .allowMainThreadQueries()
             .build()
         val instance = db.gameInstanceDao().get("shark-incremental")
@@ -470,7 +470,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7)
+            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
             .allowMainThreadQueries()
             .build()
         repeat(40) { index ->

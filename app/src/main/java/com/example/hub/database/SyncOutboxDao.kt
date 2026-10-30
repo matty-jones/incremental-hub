@@ -23,6 +23,15 @@ interface SyncOutboxDao {
     @Query("SELECT * FROM sync_outbox WHERE idempotency_key = :key LIMIT 1")
     suspend fun find(key: String): SyncOutboxEntry?
 
+    @Query(
+        """
+        SELECT * FROM sync_outbox
+        WHERE game_id = :gameId AND content_sha256 = :sha
+        LIMIT 1
+        """,
+    )
+    suspend fun findBySha(gameId: String, sha: String): SyncOutboxEntry?
+
     @Query("SELECT COUNT(*) FROM sync_outbox WHERE game_id = :gameId AND state = 'pending'")
     suspend fun pendingCount(gameId: String): Int
 
