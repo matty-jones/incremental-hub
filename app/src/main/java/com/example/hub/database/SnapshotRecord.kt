@@ -34,6 +34,7 @@ object SnapshotReasons {
     const val CHECKPOINT = "checkpoint"
     const val QUARANTINE = "quarantine"
     const val LINEAGE_BASE = "lineage-base"
+    const val RETAINED_POINTER = "retained-pointer"
 }
 
 object SnapshotOrigins {

@@ -103,6 +103,8 @@ class CaptureRepository(
             ProgressionClass.REGRESSED, ProgressionClass.INCOMPARABLE ->
                 quarantine(instance, candidate, pointer, highWater, verdict, adapter, now)
             ProgressionClass.EQUAL -> acceptEqual(instance, candidate, reason, adapter, manual, now)
+            ProgressionClass.UNORDERED ->
+                acceptContinued(instance, candidate, reason, adapter, manual, now, ProgressionClass.UNORDERED)
             ProgressionClass.ADVANCED, ProgressionClass.RESET_APPROVED ->
                 acceptAdvance(instance, candidate, reason, adapter, manual, now, verdict)
         }
@@ -116,19 +118,34 @@ class CaptureRepository(
         manual: Boolean,
         now: Long,
     ): CaptureCommit {
-        fault?.invoke("before-write")
         val sameBytes = candidate == instance.snapshotPayload
-        val seen = instance.copy(lastSeenAtMillis = now, lastCaptureAttemptAtMillis = now)
         if (sameBytes && !manual) {
+            fault?.invoke("before-write")
+            val seen = instance.copy(lastSeenAtMillis = now, lastCaptureAttemptAtMillis = now)
             instanceDao.upsert(seen)
             return CaptureCommit(CaptureDisposition.UNCHANGED, ProgressionClass.EQUAL, seen, null, sync = false)
         }
+        return acceptContinued(instance, candidate, reason, adapter, manual, now, ProgressionClass.EQUAL)
+    }
+
+    private suspend fun acceptContinued(
+        instance: GameInstance,
+        candidate: String,
+        reason: String,
+        adapter: GameAdapter,
+        manual: Boolean,
+        now: Long,
+        verdict: ProgressionClass,
+    ): CaptureCommit {
+        fault?.invoke("before-write")
+        val sameBytes = candidate == instance.snapshotPayload
+        if (!sameBytes) retainOutgoingPointer(instance, adapter, now)
         val sha = PayloadDigest.sha256(candidate)
         val history = snapshotDao?.history(instance.gameId).orEmpty()
         val inserted = if (manual) {
             ensureSnapshot(
                 history = history,
-                instance = seen,
+                instance = instance,
                 payload = candidate,
                 reason = SnapshotReasons.CHECKPOINT,
                 pinned = true,
@@ -136,10 +153,10 @@ class CaptureRepository(
                 now = now,
                 sha = sha,
             )
-        } else if (!alreadyStored(history, sha, candidate) && !recentAutomatic(history, seen.lineageId, now)) {
+        } else if (!alreadyStored(history, sha, candidate) && !recentAutomatic(history, instance.lineageId, now)) {
             ensureSnapshot(
                 history = history,
-                instance = seen,
+                instance = instance,
                 payload = candidate,
                 reason = reason,
                 pinned = false,
@@ -150,6 +167,7 @@ class CaptureRepository(
         } else {
             false
         }
+        val seen = instance.copy(lastSeenAtMillis = now, lastCaptureAttemptAtMillis = now)
         val updated = if (sameBytes) {
             seen
         } else {
@@ -163,7 +181,7 @@ class CaptureRepository(
         fault?.invoke("after-pointer")
         instanceDao.upsert(updated)
         val disposition = if (sameBytes && !inserted) CaptureDisposition.UNCHANGED else CaptureDisposition.STORED
-        return CaptureCommit(disposition, ProgressionClass.EQUAL, updated, null, sync = !sameBytes)
+        return CaptureCommit(disposition, verdict, updated, null, sync = !sameBytes)
     }
 
     private suspend fun acceptAdvance(
@@ -176,6 +194,7 @@ class CaptureRepository(
         verdict: ProgressionClass,
     ): CaptureCommit {
         fault?.invoke("before-write")
+        retainOutgoingPointer(instance, adapter, now)
         val sha = PayloadDigest.sha256(candidate)
         val history = snapshotDao?.history(instance.gameId).orEmpty()
         val snapshotReason = if (manual) SnapshotReasons.CHECKPOINT else reason
@@ -189,7 +208,7 @@ class CaptureRepository(
             now = now,
             sha = sha,
         )
-        if (snapshotId != null && existing == null && !manual) snapshotDao?.pruneAutomatic(instance.gameId)
+        val previousAnchor = instance.highWaterSnapshotId
         val updated = instance.copy(
             lastCaptureAttemptAtMillis = now,
             lastCaptureSuccessAtMillis = now,
@@ -204,6 +223,13 @@ class CaptureRepository(
         )
         fault?.invoke("after-pointer")
         instanceDao.upsert(updated)
+        if (snapshotId != null) {
+            snapshotDao?.pinById(snapshotId)
+            if (previousAnchor != null && previousAnchor != snapshotId) {
+                releaseSupersededAnchor(instance, previousAnchor, adapter, now)
+            }
+        }
+        if (snapshotId != null && existing == null && !manual) snapshotDao?.pruneAutomatic(instance.gameId)
         return CaptureCommit(CaptureDisposition.STORED, verdict, updated, null, sync = true)
     }
 
@@ -270,6 +296,11 @@ class CaptureRepository(
         }
         val now = clock()
         val previous = instance.snapshotPayload
+        val previousAnchor = instance.highWaterSnapshotId
+        val anchor = if (previousAnchor != null) snapshotDao?.getById(previousAnchor) else null
+        if (anchor != null && anchor.payload.isNotBlank() && anchor.payload != previous && anchor.reason !in DURABLE_REASONS) {
+            retainPayload(instance, anchor.payload, adapter, now)
+        }
         if (!previous.isNullOrBlank()) {
             insertSnapshot(
                 instance = instance,
@@ -322,8 +353,52 @@ class CaptureRepository(
             lastSeenAtMillis = now,
         )
         instanceDao.upsert(updated)
+        if (snapshotId != null) snapshotDao?.pinById(snapshotId)
+        if (previousAnchor != null && previousAnchor != updated.highWaterSnapshotId) {
+            releaseSupersededAnchor(instance, previousAnchor, adapter, now)
+        }
         val message = lineageMessage(adapter, previous, candidate)
         return CaptureCommit(CaptureDisposition.STORED, ProgressionClass.RESET_APPROVED, updated, message, sync = false)
+    }
+
+    private suspend fun retainOutgoingPointer(instance: GameInstance, adapter: GameAdapter, now: Long) {
+        val payload = instance.snapshotPayload?.takeIf { it.isNotBlank() } ?: return
+        retainPayload(instance, payload, adapter, now)
+    }
+
+    private suspend fun retainPayload(
+        instance: GameInstance,
+        payload: String,
+        adapter: GameAdapter,
+        now: Long,
+    ) {
+        if (payload.isBlank() || snapshotDao == null) return
+        val sha = PayloadDigest.sha256(payload)
+        val durable = snapshotDao.history(instance.gameId).any { row ->
+            row.pinned && row.reason in DURABLE_REASONS && samePayload(row, sha, payload)
+        }
+        if (durable) return
+        insertSnapshot(
+            instance = instance,
+            payload = payload,
+            reason = SnapshotReasons.RETAINED_POINTER,
+            pinned = true,
+            adapter = adapter,
+            now = now,
+            sha = sha,
+        )
+    }
+
+    private suspend fun releaseSupersededAnchor(
+        owner: GameInstance,
+        oldId: String,
+        adapter: GameAdapter,
+        now: Long,
+    ) {
+        val old = snapshotDao?.getById(oldId) ?: return
+        if (old.reason in DURABLE_REASONS || old.reason == SnapshotReasons.QUARANTINE) return
+        if (old.payload.isNotBlank()) retainPayload(owner, old.payload, adapter, now)
+        snapshotDao?.releaseAutomaticPin(oldId)
     }
 
     private suspend fun recordFailure(instance: GameInstance, now: Long, error: String) {
@@ -409,7 +484,11 @@ class CaptureRepository(
     }
 
     private fun matching(history: List<SnapshotRecord>, sha: String, payload: String): SnapshotRecord? {
-        return history.firstOrNull { it.contentSha256 == sha || (it.contentSha256.isEmpty() && it.payload == payload) }
+        return history.firstOrNull { samePayload(it, sha, payload) }
+    }
+
+    private fun samePayload(row: SnapshotRecord, sha: String, payload: String): Boolean {
+        return row.contentSha256 == sha || (row.contentSha256.isEmpty() && row.payload == payload)
     }
 
     private fun alreadyStored(history: List<SnapshotRecord>, sha: String, payload: String): Boolean {
@@ -463,5 +542,15 @@ class CaptureRepository(
 
     private companion object {
         const val SAMPLE_WINDOW_MS = 60L * 60L * 1000L
+        val DURABLE_REASONS = setOf(
+            SnapshotReasons.MIGRATED_BASELINE,
+            SnapshotReasons.DIAGNOSTIC_BACKUP,
+            SnapshotReasons.PRE_RESTORE,
+            SnapshotReasons.POST_RESTORE,
+            SnapshotReasons.WORKSTATION,
+            SnapshotReasons.CHECKPOINT,
+            SnapshotReasons.LINEAGE_BASE,
+            SnapshotReasons.RETAINED_POINTER,
+        )
     }
 }

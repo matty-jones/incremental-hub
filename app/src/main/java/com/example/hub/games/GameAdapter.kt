@@ -221,14 +221,17 @@ interface GameAdapter {
     }
 
     /**
-     * Capture-commit order. The default refuses to treat an unequal payload as
-     * progress. A missing reference is a first save and may become the pointer.
+     * Capture-commit order. A missing reference is a first save and may become
+     * the pointer. An unequal payload is [ProgressionClass.UNORDERED] unless
+     * the adapter has a real order or an explicit contradiction. Unordered
+     * saves may replace the pointer only after the previous payload is retained.
+     * They do not move the high-water anchor.
      */
     fun classifyProgress(candidate: String?, reference: String?): ProgressionClass {
         if (candidate.isNullOrBlank()) return ProgressionClass.INVALID
         if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
         if (candidate == reference) return ProgressionClass.EQUAL
-        return ProgressionClass.INCOMPARABLE
+        return ProgressionClass.UNORDERED
     }
 
     /**

@@ -348,6 +348,34 @@ class SnapshotMigrationTest {
         assertEquals("", history.single().contentSha256)
         db.snapshotDao().pruneAutomatic("shark-incremental")
         assertEquals(payload, db.snapshotDao().history("shark-incremental").single().payload)
+        val anchor = SnapshotRecord(
+            id = "anchor",
+            gameId = "shark-incremental",
+            sequence = 10,
+            capturedAtMillis = 60,
+            reason = "cadence",
+            pinned = false,
+            payload = "unpinned-high-water",
+            progressJson = null,
+        )
+        db.snapshotDao().insert(anchor)
+        repeat(15) { index ->
+            db.snapshotDao().insert(
+                anchor.copy(
+                    id = "newer-$index",
+                    sequence = 11L + index,
+                    capturedAtMillis = 70L + index,
+                    payload = "newer-$index",
+                ),
+            )
+        }
+        db.gameInstanceDao().upsert(instance!!.copy(highWaterSnapshotId = "anchor"))
+        repeat(3) { db.snapshotDao().pruneAutomatic("shark-incremental") }
+        assertEquals("unpinned-high-water", db.snapshotDao().getById("anchor")!!.payload)
+        assertEquals("anchor", db.gameInstanceDao().get("shark-incremental")!!.highWaterSnapshotId)
+        assertEquals(payload, db.snapshotDao().getById("pre")!!.payload)
+        assertNull(db.snapshotDao().getById("newer-0"))
+        assertEquals("newer-14", db.snapshotDao().getById("newer-14")!!.payload)
         db.close()
     }
 }

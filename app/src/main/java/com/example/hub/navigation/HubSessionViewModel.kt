@@ -55,7 +55,11 @@ class HubSessionViewModel(
                 com.example.hub.games.ProgressionClass.EQUAL,
                 com.example.hub.games.ProgressionClass.RESET_APPROVED,
                 -> true
-                else -> false
+                com.example.hub.games.ProgressionClass.UNORDERED,
+                com.example.hub.games.ProgressionClass.REGRESSED,
+                com.example.hub.games.ProgressionClass.INCOMPARABLE,
+                com.example.hub.games.ProgressionClass.INVALID,
+                -> false
             }
         }
     }

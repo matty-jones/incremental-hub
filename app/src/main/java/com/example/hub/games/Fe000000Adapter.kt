@@ -23,6 +23,10 @@ import java.util.zip.Inflater
  * There is no `saveData` global. Readiness is `player` plus `Saving`.
  * Capture calls `Saving.saveGame(true, false)` so the heap is flushed before
  * localStorage is read. Restore calls `Saving.loadGame` when that function exists.
+ *
+ * There is no reliable progression order. Two valid unequal saves are
+ * [ProgressionClass.UNORDERED]. [compare] may still report [SaveComparison.LIVE_AHEAD]
+ * for any difference, and that result is not a capture-commit proof.
  */
 class Fe000000Adapter : GameAdapter {
 
@@ -227,6 +231,14 @@ class Fe000000Adapter : GameAdapter {
         return StorageBootstrap.markerConfirms(marker)
     }
 
+    override fun classifyProgress(candidate: String?, reference: String?): ProgressionClass {
+        if (!structurallyValid(candidate)) return ProgressionClass.INVALID
+        if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
+        if (!structurallyValid(reference)) return ProgressionClass.INCOMPARABLE
+        if (candidate == reference) return ProgressionClass.EQUAL
+        return ProgressionClass.UNORDERED
+    }
+
     override fun summarize(payload: String?): SaveSummary {
         if (payload.isNullOrBlank()) {
             return SaveSummary(SaveStanding.ABSENT, null, "No save key", 0)
@@ -261,6 +273,17 @@ class Fe000000Adapter : GameAdapter {
 
     override fun chooseStored(candidates: List<String>): String? =
         candidates.firstOrNull { summarize(it).standing == SaveStanding.PROGRESSED }
+
+    private fun structurallyValid(payload: String?): Boolean {
+        if (payload.isNullOrBlank()) return false
+        val decoded = decodeSave(payload) ?: return false
+        return try {
+            val json = JSONObject(decoded)
+            REQUIRED_KEYS.all { json.has(it) }
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     override suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean {
         val decoded = decodeSave(importedPayload) ?: return false

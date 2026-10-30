@@ -11,6 +11,7 @@ import com.example.hub.database.SnapshotOrigins
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.EnvelopeProbeAdapter
+import com.example.hub.games.Fe000000Adapter
 import com.example.hub.games.GameAdapter
 import com.example.hub.games.SharkIncrementalAdapter
 import com.example.hub.games.GameRegistry
@@ -1727,10 +1728,14 @@ class SessionControllerTest {
         assertEquals(1, pinned.size)
         assertTrue(pinned.single().pinned)
         assertEquals(SnapshotOrigins.MANUAL_CHECKPOINT, pinned.single().origin)
-        val automatic = rows.filter { it.reason == "request" }
+        val automatic = rows.filter { it.reason == "request" && !it.pinned }
         assertTrue(automatic.isNotEmpty())
-        assertTrue(automatic.all { !it.pinned })
         assertTrue(automatic.size <= 10)
+        val stored = dao.get("shark-incremental")!!
+        val anchor = snapshots.getById(stored.highWaterSnapshotId!!)
+        assertNotNull(anchor)
+        assertTrue(anchor!!.pinned)
+        assertEquals(stored.snapshotPayload, anchor.payload)
         session.forceCloseForTest()
     }
 
@@ -2513,6 +2518,130 @@ class SessionControllerTest {
         repo.commitIfSafe("shark-incremental", fourth, "cadence", adapter, "progressed-session", { true }, false)
         assertEquals(fourth, dao.get("shark-incremental")!!.snapshotPayload)
         assertEquals(2, snapshots.history("shark-incremental").count { !it.pinned })
+        val stored = dao.get("shark-incremental")!!
+        assertEquals(first, snapshots.getById(stored.highWaterSnapshotId!!)!!.payload)
+        assertTrue(snapshots.history("shark-incremental").any { it.pinned && it.payload == third })
+    }
+
+    @Test
+    fun sameMilestoneChangesKeepThePreviousPayload() = runTest {
+        val upgraded = sharkWithResearch(fishExponent = "40", research = 1)
+        val spent = sharkWithResearch(fishExponent = "10", research = 2)
+        val stale = sharkWithResearch(fishExponent = "80", research = null)
+        val feature0 = freshSharkPayload()
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(spent, upgraded))
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(stale, spent))
+        var payload = upgraded
+        val snapshots = StubSnapshotDao()
+        val synced = mutableListOf<String?>()
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> payload },
+            snapshots = snapshots,
+            onSnapshotSaved = { synced.add(it.snapshotPayload) },
+        )
+        session.open("shark-incremental")
+        session.webView = WebView(ApplicationProvider.getApplicationContext())
+        session.requestCheckpoint()
+        payload = spent
+        session.requestCapture()
+        val afterSpent = snapshots.history("shark-incremental").size
+        session.requestCapture()
+        assertEquals(afterSpent, snapshots.history("shark-incremental").size)
+        assertEquals(spent, dao.get("shark-incremental")!!.snapshotPayload)
+        assertEquals(SessionState.Playing, session.state.value)
+        payload = stale
+        session.requestCapture()
+        val stored = dao.get("shark-incremental")!!
+        assertEquals(stale, stored.snapshotPayload)
+        assertNull(stored.captureIncident)
+        assertEquals(upgraded, snapshots.getById(stored.highWaterSnapshotId!!)!!.payload)
+        assertTrue(
+            snapshots.history("shark-incremental").any {
+                it.payload == spent && it.pinned && it.reason == SnapshotReasons.RETAINED_POINTER
+            },
+        )
+        session.forceCloseForTest()
+        val restarted = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> payload },
+            snapshots = snapshots,
+            onSnapshotSaved = { synced.add(it.snapshotPayload) },
+        )
+        restarted.onAttached()
+        restarted.open("shark-incremental")
+        restarted.webView = WebView(ApplicationProvider.getApplicationContext())
+        assertEquals(SessionState.Playing, restarted.state.value)
+        assertEquals(stale, dao.get("shark-incremental")!!.snapshotPayload)
+        assertEquals(upgraded, snapshots.getById(dao.get("shark-incremental")!!.highWaterSnapshotId!!)!!.payload)
+        payload = feature0
+        restarted.requestCapture()
+        val afterDeath = dao.get("shark-incremental")!!
+        assertEquals(SessionState.RecoveryRequired, restarted.state.value)
+        assertEquals(stale, afterDeath.snapshotPayload)
+        assertEquals(upgraded, snapshots.getById(afterDeath.highWaterSnapshotId!!)!!.payload)
+        assertTrue(snapshots.history("shark-incremental").any { it.payload == spent && it.pinned })
+        assertTrue(synced.none { it == feature0 })
+        restarted.forceCloseForTest()
+    }
+
+    @Test
+    fun fe000000CapturesKeepEarlierPayloads() = runTest {
+        val saves = (1..5).map { step ->
+            Fe000000Adapter.encodeSave(
+                JSONObject()
+                    .put("boost", step)
+                    .put("currentTab", "main")
+                    .put("generators", org.json.JSONArray(listOf(step)))
+                    .put("lastUpdate", step * 10)
+                    .put("prestigePower", 1)
+                    .put("stars", step.toString())
+                    .toString(),
+            )
+        }
+        var payload = saves[0]
+        val snapshots = StubSnapshotDao()
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> payload },
+            snapshots = snapshots,
+        )
+        session.open("fe000000")
+        session.webView = WebView(ApplicationProvider.getApplicationContext())
+        session.requestCheckpoint()
+        payload = saves[1]
+        session.requestCheckpoint()
+        payload = saves[2]
+        session.captureNowForTest("cadence")
+        payload = saves[3]
+        session.requestBackground()
+        session.requestForeground()
+        payload = "not-a-fe-save"
+        session.requestCapture()
+        assertEquals(saves[3], dao.get("fe000000")!!.snapshotPayload)
+        payload = saves[4]
+        session.close()
+        val stored = dao.get("fe000000")!!
+        assertEquals(saves[4], stored.snapshotPayload)
+        assertNull(stored.captureIncident)
+        assertEquals(saves[0], snapshots.getById(stored.highWaterSnapshotId!!)!!.payload)
+        assertEquals(0, snapshots.history("fe000000").count { it.reason == SnapshotReasons.QUARANTINE })
+        saves.take(4).forEach { earlier ->
+            assertTrue(snapshots.history("fe000000").any { it.payload == earlier && it.pinned })
+        }
+        val restarted = controllerWithoutDocumentHook(
+            documentReady = { true },
+            capture = { _, _ -> payload },
+            snapshots = snapshots,
+        )
+        restarted.onAttached()
+        restarted.open("fe000000")
+        assertEquals(SessionState.Playing, restarted.state.value)
+        val resumed = dao.get("fe000000")!!
+        assertEquals(saves[4], resumed.snapshotPayload)
+        assertEquals(saves[0], snapshots.getById(resumed.highWaterSnapshotId!!)!!.payload)
+        assertNull(resumed.captureIncident)
+        restarted.forceCloseForTest()
     }
 
     @Test
@@ -2637,6 +2766,21 @@ class SessionControllerTest {
             .put("core", JSONObject().put("times", core))
             .put("humanoid", JSONObject().put("times", 0))
             .put("singularity", JSONObject().put("first", false))
+        return Base64.getEncoder().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun sharkWithResearch(fishExponent: String, research: Int?): String {
+        val json = JSONObject()
+            .put("VERSION", 3)
+            .put("feature", 9)
+            .put("totalTimePlayed", "100")
+            .put("shark_level", JSONObject().put("s", 1).put("e", 20).put("c", org.json.JSONArray().put(1)))
+            .put("total_fish", JSONObject().put("s", 1).put("e", fishExponent).put("c", org.json.JSONArray().put(1)))
+            .put("prestige", JSONObject().put("times", 2639))
+            .put("core", JSONObject().put("times", 2026))
+            .put("humanoid", JSONObject().put("times", 0))
+            .put("singularity", JSONObject().put("first", false))
+        if (research != null) json.put("research", research)
         return Base64.getEncoder().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
     }
 
@@ -2917,6 +3061,30 @@ class SessionControllerTest {
         override suspend fun latestByReason(gameId: String, reason: String): SnapshotRecord? =
             rows.filter { it.gameId == gameId && it.reason == reason }.maxByOrNull { it.sequence }
 
+        override suspend fun pinById(id: String) {
+            val index = rows.indexOfFirst { it.id == id }
+            if (index >= 0) rows[index] = rows[index].copy(pinned = true)
+        }
+
+        override suspend fun releaseAutomaticPin(id: String) {
+            val index = rows.indexOfFirst { it.id == id }
+            if (index < 0) return
+            val row = rows[index]
+            if (row.reason == SnapshotReasons.MIGRATED_BASELINE ||
+                row.reason == SnapshotReasons.DIAGNOSTIC_BACKUP ||
+                row.reason == SnapshotReasons.PRE_RESTORE ||
+                row.reason == SnapshotReasons.POST_RESTORE ||
+                row.reason == SnapshotReasons.WORKSTATION ||
+                row.reason == SnapshotReasons.CHECKPOINT ||
+                row.reason == SnapshotReasons.QUARANTINE ||
+                row.reason == SnapshotReasons.LINEAGE_BASE ||
+                row.reason == SnapshotReasons.RETAINED_POINTER
+            ) {
+                return
+            }
+            rows[index] = row.copy(pinned = false)
+        }
+
         override suspend fun pruneAutomatic(gameId: String) {
             val keep = rows
                 .filter { it.gameId == gameId && automaticSnapshot(it) }
@@ -2938,7 +3106,8 @@ class SessionControllerTest {
                 record.reason != SnapshotReasons.WORKSTATION &&
                 record.reason != SnapshotReasons.CHECKPOINT &&
                 record.reason != SnapshotReasons.QUARANTINE &&
-                record.reason != SnapshotReasons.LINEAGE_BASE
+                record.reason != SnapshotReasons.LINEAGE_BASE &&
+                record.reason != SnapshotReasons.RETAINED_POINTER
         }
     }
 }

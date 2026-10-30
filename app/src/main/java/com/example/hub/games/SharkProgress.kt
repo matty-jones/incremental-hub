@@ -124,6 +124,13 @@ data class SharkProgress(
          * Milestone order for a capture commit. Feature, prestige, core, humanoid,
          * and singularity are monotonic. A later milestone may spend currencies.
          * Play time and currency rank never prove an advance or excuse a lost milestone.
+         *
+         * Inside one milestone, totalTimePlayed, shark level, total fish, and every
+         * other JSON field are unordered. Identical bytes and different bytes at
+         * the same milestones are both [ProgressionClass.EQUAL]. Spending resources
+         * or gaining an upgrade is continued play. The previous payload is retained
+         * by the commit. A stale save at the same milestones can become the pointer,
+         * and the earlier payload remains recoverable.
          */
         fun classifyCapture(candidate: String?, reference: String?): ProgressionClass {
             val current = parsePayload(candidate)

@@ -31,6 +31,13 @@ class Fe000000AdapterTest {
         val decoded = JSONObject(Fe000000Adapter.decodeSave(wrapped))
         assertEquals(4, decoded.getInt("boost"))
         assertEquals("1.5e3", decoded.getString("stars"))
+        val other = JSONObject(json).put("stars", "9").toString()
+        val changed = Fe000000Adapter.encodeSave(other)
+        assertEquals(SaveComparison.LIVE_AHEAD, adapter.compare(changed, wrapped))
+        assertEquals(ProgressionClass.UNORDERED, adapter.classifyProgress(changed, wrapped))
+        assertEquals(ProgressionClass.EQUAL, adapter.classifyProgress(wrapped, wrapped))
+        assertEquals(ProgressionClass.ADVANCED, adapter.classifyProgress(wrapped, null))
+        assertEquals(ProgressionClass.INVALID, adapter.classifyProgress("not-a-save", wrapped))
     }
 
     @Test
