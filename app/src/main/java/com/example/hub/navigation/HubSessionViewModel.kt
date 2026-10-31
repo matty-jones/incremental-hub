@@ -19,6 +19,8 @@ import com.example.hub.sync.SaveSync
 import com.example.hub.sync.SyncBootstrap
 import com.example.hub.sync.WorkstationApi
 import com.example.hub.sync.WorkstationClient
+import com.example.hub.vault.RoomVaultIndex
+import com.example.hub.vault.VaultCatalog
 import kotlinx.coroutines.launch
 
 /**
@@ -33,6 +35,10 @@ class HubSessionViewModel(
 ) : ViewModel() {
     private val workstation = WorkstationClient()
     val workstationApi: WorkstationApi = workstation
+    val vaultCatalog: VaultCatalog = VaultCatalog(
+        local = RoomVaultIndex(database.snapshotDao(), database.gameInstanceDao()),
+        api = workstation,
+    )
     val saveSync: SaveSync = SaveSync(
         dao = database.gameInstanceDao(),
         api = workstation,

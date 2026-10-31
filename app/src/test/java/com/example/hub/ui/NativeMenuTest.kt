@@ -191,10 +191,14 @@ class NativeMenuTest {
     }
 
     @Test
-    fun vaultStaysDisabledAndDisplayOpensWhilePlaying() {
-        for (state in allStates()) {
-            assertFalse(isActionEnabled(MenuAction.Vault, state))
-        }
+    fun vaultOpensWhilePlayingAndDuringRecovery() {
+        assertTrue(isActionEnabled(MenuAction.Vault, SessionState.Playing))
+        assertTrue(isActionEnabled(MenuAction.Vault, SessionState.Background))
+        assertTrue(isActionEnabled(MenuAction.Vault, SessionState.Degraded))
+        assertTrue(isActionEnabled(MenuAction.Vault, SessionState.RecoveryRequired))
+        assertFalse(isActionEnabled(MenuAction.Vault, SessionState.Closed))
+        assertFalse(isActionEnabled(MenuAction.Vault, SessionState.Capturing))
+        assertFalse(isActionEnabled(MenuAction.Vault, SessionState.Opening))
         assertTrue(isActionEnabled(MenuAction.Display, SessionState.Playing))
         assertTrue(isActionEnabled(MenuAction.Diagnostics, SessionState.Playing))
         assertFalse(isActionEnabled(MenuAction.Display, SessionState.Closed))

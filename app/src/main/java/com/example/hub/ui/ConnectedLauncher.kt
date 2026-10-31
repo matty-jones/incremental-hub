@@ -58,6 +58,7 @@ fun ConnectedLauncher(
     onInspect: (String) -> Unit = {},
     onSafeLaunch: (String) -> Unit = {},
     onRecover: (String) -> Unit = {},
+    onVault: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val installer = remember(context, api) { UpdateInstaller(context, api) }
@@ -149,6 +150,7 @@ fun ConnectedLauncher(
                 onInspect = onInspect,
                 onSafeLaunch = onSafeLaunch,
                 onRecover = onRecover,
+                onVault = onVault,
             )
         }
         val available = update

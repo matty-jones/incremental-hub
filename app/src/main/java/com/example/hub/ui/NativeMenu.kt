@@ -207,10 +207,17 @@ private fun MenuItems(
     ) {
         actions.forEach { action ->
             val blocked = action is MenuAction.Save && !saveBlockedReason.isNullOrBlank()
+            val enabled = isActionEnabled(action, state, saveBusy, saveBlocked = blocked)
+            val disabledReason = when {
+                blocked -> saveBlockedReason
+                action is MenuAction.Vault && !enabled ->
+                    "Vault opens during play and from recovery. It does not reload the game."
+                else -> null
+            }
             MenuItemRow(
                 action = action,
-                enabled = isActionEnabled(action, state, saveBusy, saveBlocked = blocked),
-                disabledReason = if (blocked) saveBlockedReason else null,
+                enabled = enabled,
+                disabledReason = disabledReason,
                 onTrigger = {
                     Log.d(TAG, "NativeMenu: action triggered=${action.label} (state=$state)")
                     onAction(action)
@@ -231,7 +238,10 @@ internal fun isActionEnabled(
             state is SessionState.Background ||
             state is SessionState.Degraded
         is MenuAction.Save -> state is SessionState.Playing && !saveBusy && !saveBlocked
-        is MenuAction.Vault -> false
+        is MenuAction.Vault -> state is SessionState.Playing ||
+            state is SessionState.Background ||
+            state is SessionState.Degraded ||
+            state is SessionState.RecoveryRequired
         is MenuAction.Reload -> state is SessionState.Playing
         is MenuAction.Display -> state !is SessionState.Closed && state !is SessionState.Closing
         is MenuAction.Diagnostics -> state !is SessionState.Closed && state !is SessionState.Closing

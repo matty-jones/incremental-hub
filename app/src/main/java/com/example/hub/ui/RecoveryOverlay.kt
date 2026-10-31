@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.SaveDiagnostic
@@ -48,6 +49,7 @@ fun RecoveryOverlay(
     onClose: () -> Unit,
     onExport: () -> Unit = {},
     onKeepWebView: () -> Unit = {},
+    onOpenVault: () -> Unit = {},
     onInspectSnapshot: (Long) -> Unit = {},
     onExportSnapshot: (Long) -> Unit = {},
     onRestoreSnapshot: (Long) -> Unit = {},
@@ -335,12 +337,20 @@ fun RecoveryOverlay(
                 Text("Check storage again")
             }
         }
-        HubOutlinedButton(
-            onClick = onExport,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Export diagnostics")
-        }
+            HubOutlinedButton(
+                onClick = onOpenVault,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("recovery-vault"),
+            ) {
+                Text("Vault")
+            }
+            HubOutlinedButton(
+                onClick = onExport,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Export diagnostics")
+            }
         HubOutlinedButton(
             onClick = onClose,
             modifier = Modifier.fillMaxWidth(),

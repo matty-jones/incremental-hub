@@ -13,6 +13,27 @@ interface SnapshotDao {
     @Query("SELECT * FROM snapshots WHERE game_id = :gameId ORDER BY sequence ASC")
     suspend fun history(gameId: String): List<SnapshotRecord>
 
+    @Query(
+        """
+        SELECT id, game_id, sequence, captured_at_millis, reason, pinned, progress_json,
+               origin, lineage_id, content_sha256, length(payload) AS payload_bytes
+        FROM snapshots
+        WHERE game_id = :gameId
+        ORDER BY sequence DESC, id ASC
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun pageMeta(gameId: String, limit: Int, offset: Int): List<SnapshotMeta>
+
+    @Query("SELECT COUNT(*) FROM snapshots WHERE game_id = :gameId")
+    suspend fun countForGame(gameId: String): Int
+
+    @Query("SELECT id FROM snapshots WHERE id IN (:ids)")
+    suspend fun existingIds(ids: List<String>): List<String>
+
+    @Query("SELECT payload FROM snapshots WHERE id = :id LIMIT 1")
+    suspend fun payloadById(id: String): String?
+
     @Query("SELECT COALESCE(MAX(sequence), 0) FROM snapshots WHERE game_id = :gameId")
     suspend fun maxSequence(gameId: String): Long
 

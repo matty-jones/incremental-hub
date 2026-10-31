@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,7 @@ fun PlaySurface(
     controller: SessionController,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
+    vaultCatalog: com.example.hub.vault.VaultCatalog? = null,
 ) {
     val state by controller.state.collectAsState()
     val profile by controller.activeProfile.collectAsState()
@@ -84,6 +86,7 @@ fun PlaySurface(
     val scope = rememberCoroutineScope()
     var menuOpen by remember(gameId) { mutableStateOf(false) }
     var menuPanel by remember(gameId) { mutableStateOf(MenuPanel.Actions) }
+    var vaultOpen by rememberSaveable(gameId) { mutableStateOf(false) }
 
     ImmersiveSystemBars()
 
@@ -131,7 +134,7 @@ fun PlaySurface(
                         .fillMaxWidth()
                         .padding(bottom = trimpsInset),
                 ) {
-                    androidx.compose.runtime.key(gameId, generation) {
+                    androidx.compose.runtime.key(webViewIdentity(gameId, generation)) {
                         WebViewHost(
                             gameId = gameId,
                             launchUrl = launchUrl,
@@ -185,7 +188,10 @@ fun PlaySurface(
                                     }
                                     MenuAction.Save -> controller.requestCheckpoint()
                                     MenuAction.Reload -> controller.requestReload()
-                                    MenuAction.Vault -> Unit
+                                    MenuAction.Vault -> {
+                                        menuOpen = false
+                                        vaultOpen = true
+                                    }
                                     MenuAction.Display -> menuPanel = MenuPanel.Display
                                     MenuAction.Diagnostics -> menuPanel = MenuPanel.Diagnostics
                                     MenuAction.ReturnToHub -> exitSession()
@@ -240,7 +246,16 @@ fun PlaySurface(
                         )
                     }
 
-                    if (state is SessionState.RecoveryRequired) {
+                    if (vaultOpen && vaultCatalog != null) {
+                        VaultHost(
+                            gameId = gameId,
+                            catalog = vaultCatalog,
+                            onBack = { vaultOpen = false },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
+                    if (state is SessionState.RecoveryRequired && !vaultOpen) {
                         RecoveryOverlay(
                             gameId = gameId,
                             launchUrl = launchUrl,
@@ -254,6 +269,9 @@ fun PlaySurface(
                             onClose = { exitSession() },
                             onExport = { shareReport(context, controller.diagnosticReport()) },
                             onKeepWebView = { controller.keepWebViewSave() },
+                            onOpenVault = {
+                                if (vaultCatalog != null) vaultOpen = true
+                            },
                             onInspectSnapshot = { controller.inspectSnapshot(it) },
                             onExportSnapshot = { controller.requestSnapshotExport(it) },
                             onRestoreSnapshot = { controller.confirmRecover(it) },

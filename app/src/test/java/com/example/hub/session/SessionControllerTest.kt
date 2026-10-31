@@ -3567,6 +3567,38 @@ class SessionControllerTest {
         override suspend fun history(gameId: String): List<SnapshotRecord> =
             rows.filter { it.gameId == gameId }.sortedBy { it.sequence }
 
+        override suspend fun pageMeta(gameId: String, limit: Int, offset: Int): List<com.example.hub.database.SnapshotMeta> {
+            return rows.filter { it.gameId == gameId }
+                .sortedWith(compareByDescending<SnapshotRecord> { it.sequence }.thenBy { it.id })
+                .drop(offset)
+                .take(limit)
+                .map { row ->
+                    com.example.hub.database.SnapshotMeta(
+                        id = row.id,
+                        gameId = row.gameId,
+                        sequence = row.sequence,
+                        capturedAtMillis = row.capturedAtMillis,
+                        reason = row.reason,
+                        pinned = row.pinned,
+                        progressJson = row.progressJson,
+                        origin = row.origin,
+                        lineageId = row.lineageId,
+                        contentSha256 = row.contentSha256,
+                        payloadBytes = row.payload.length,
+                    )
+                }
+        }
+
+        override suspend fun countForGame(gameId: String): Int = rows.count { it.gameId == gameId }
+
+        override suspend fun existingIds(ids: List<String>): List<String> {
+            if (ids.isEmpty()) return emptyList()
+            val wanted = ids.toSet()
+            return rows.filter { it.id in wanted }.map { it.id }
+        }
+
+        override suspend fun payloadById(id: String): String? = rows.firstOrNull { it.id == id }?.payload
+
         override suspend fun maxSequence(gameId: String): Long =
             rows.filter { it.gameId == gameId }.maxOfOrNull { it.sequence } ?: 0L
 

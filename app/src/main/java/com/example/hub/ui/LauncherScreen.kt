@@ -71,6 +71,7 @@ fun LauncherScreen(
     onInspect: (String) -> Unit = {},
     onSafeLaunch: (String) -> Unit = {},
     onRecover: (String) -> Unit = {},
+    onVault: (String) -> Unit = {},
 ) {
     val instances by produceState(initialValue = LauncherInstances(), instanceDao) {
         instanceDao.getAllOrdered().collect { rows ->
@@ -166,6 +167,7 @@ fun LauncherScreen(
                             onInspect = onInspect,
                             onSafeLaunch = onSafeLaunch,
                             onRecover = onRecover,
+                            onVault = onVault,
                         )
                     }
                 }
@@ -189,6 +191,7 @@ private fun GameCard(
     onInspect: (String) -> Unit,
     onSafeLaunch: (String) -> Unit,
     onRecover: (String) -> Unit,
+    onVault: (String) -> Unit,
 ) {
     val hasSession = hasPlayHistory(game.lastPlayedAtMillis, hasSnapshot)
     val statusText = primaryPlayLabel(hasSession)
@@ -247,6 +250,12 @@ private fun GameCard(
                 onClick = { onPlay(game.gameId) },
             ) {
                 Text(primaryPlayLabel(hasSession))
+            }
+            HubTextButton(
+                modifier = Modifier.testTag("vault-${game.gameId}"),
+                onClick = { onVault(game.gameId) },
+            ) {
+                Text("Vault")
             }
         }
         if (diagnosticLaunchActionsVisible(debugTools)) {

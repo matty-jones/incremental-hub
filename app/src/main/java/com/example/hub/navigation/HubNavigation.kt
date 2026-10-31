@@ -20,6 +20,7 @@ import com.example.hub.games.GameRegistry
 import com.example.hub.session.LaunchMode
 import com.example.hub.ui.ConnectedLauncher
 import com.example.hub.ui.PlaySurface
+import com.example.hub.ui.VaultHost
 import com.example.hub.ui.findActivity
 
 private const val TAG = "HubNavigation"
@@ -85,6 +86,22 @@ fun HubNavigation(
                     Log.d(TAG, "navigate to play_surface/$gameId (recover)")
                     navController.navigate("play_surface/$gameId?mode=recover")
                 },
+                onVault = { gameId ->
+                    Log.d(TAG, "navigate to vault/$gameId")
+                    navController.navigate("vault/$gameId")
+                },
+            )
+        }
+        composable(
+            route = "vault/{gameId}",
+            arguments = listOf(navArgument("gameId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val gameId = backStackEntry.arguments?.getString("gameId")
+                ?: throw IllegalArgumentException("gameId is required for vault route")
+            VaultHost(
+                gameId = gameId,
+                catalog = sessionModel.vaultCatalog,
+                onBack = { navController.popBackStack() },
             )
         }
         composable(
@@ -109,6 +126,7 @@ fun HubNavigation(
             PlaySurface(
                 gameId = gameId,
                 controller = controller,
+                vaultCatalog = sessionModel.vaultCatalog,
                 onExit = {
                     Log.d(TAG, "return to launcher from $gameId")
                     navController.popBackStack()
