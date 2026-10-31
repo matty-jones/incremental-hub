@@ -98,7 +98,12 @@ fun WebViewHost(
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.textZoom = textZoomPercent
-                    if (launchUrl?.contains("trimps.github.io") == true) {
+                    if (isSharkUrl(launchUrl)) {
+                        // Resolve device-width from the first document; folding must not
+                        // depend on a later layout event to enable wide viewport mode.
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = false
+                    } else if (launchUrl?.contains("trimps.github.io") == true) {
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
                     }
