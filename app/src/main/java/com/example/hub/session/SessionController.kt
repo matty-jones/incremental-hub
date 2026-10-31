@@ -67,6 +67,8 @@ import java.util.UUID
  * and, when that peek is safe, one load of the real game. Room snapshots are
  * not written back unless the user confirms a restore.
  */
+data class SnapshotShare(val nonce: Int, val payload: String)
+
 class SessionController(
     private val context: Context,
     private val gameRegistry: GameRegistry,
@@ -131,6 +133,8 @@ class SessionController(
         RESTORE_VERIFY,
         ROLLBACK,
         JOURNAL_APPLY,
+        INSPECT_WRITE,
+        INSPECT_VERIFY,
     }
 
     private val _state = MutableStateFlow<SessionState>(SessionState.Closed)
@@ -227,9 +231,14 @@ class SessionController(
     private var preparedPayload: String? = null
     private var ambiguousLive: Boolean = false
     private var explicitRestore: Boolean = false
+    private var inspectSequence: Long? = null
+    private var inspectPayload: String? = null
+    private var inspectVerifyToken: Int = -1
     internal var inspectionProfileName: String? = null
     private val _exportedSnapshot = MutableStateFlow<String?>(null)
     val exportedSnapshot: StateFlow<String?> = _exportedSnapshot.asStateFlow()
+    private val _snapshotShare = MutableStateFlow<SnapshotShare?>(null)
+    val snapshotShare: StateFlow<SnapshotShare?> = _snapshotShare.asStateFlow()
     private val _inspectedSequence = MutableStateFlow<Long?>(null)
     val inspectedSequence: StateFlow<Long?> = _inspectedSequence.asStateFlow()
     private val consoleBuffer = ArrayDeque<String>()
@@ -402,6 +411,13 @@ class SessionController(
             chosenPayload = null
             liveBeforeRestore = null
             preparedPayload = null
+            ambiguousLive = false
+            explicitRestore = false
+            inspectSequence = null
+            inspectPayload = null
+            inspectVerifyToken = -1
+            inspectionProfileName = null
+            _inspectedSequence.value = null
             gameDocumentLoads = 0
             documentGate.phase = DocumentPhase.PEEK
             documentGate.payload = null
@@ -644,8 +660,12 @@ class SessionController(
         scope.launch {
             mutex.withLock {
                 if (_state.value !is SessionState.RecoveryRequired) return@withLock
-                _sessionError.value =
-                    "The WebView save was kept. Room, the live profile, and the workstation pointer were not changed."
+                val message =
+                    "Nothing resumed. The WebView save was left where it is. The game was not loaded, " +
+                        "no snapshot was captured, and the workstation was not synchronised. " +
+                        "Room and the live profile were not changed."
+                _sessionError.value = message
+                _diagnostic.value = _diagnostic.value?.copy(note = message, webViewLeftUntouched = true)
             }
         }
     }
@@ -658,7 +678,10 @@ class SessionController(
 
     fun requestSnapshotExport(sequence: Long) {
         scope.launch {
-            _exportedSnapshot.value = exportSnapshotPayload(sequence)
+            val payload = exportSnapshotPayload(sequence) ?: return@launch
+            _exportedSnapshot.value = payload
+            val nonce = (_snapshotShare.value?.nonce ?: 0) + 1
+            _snapshotShare.value = SnapshotShare(nonce, payload)
         }
     }
 
@@ -689,6 +712,16 @@ class SessionController(
                 pendingDocumentUrl = null
                 restoreInProgress = false
                 preparedPayload = null
+                _inspectedSequence.value = null
+                inspectSequence = null
+                inspectPayload = null
+                val inspectName = inspectionProfileName
+                inspectionProfileName = null
+                if (inspectName != null) runCatching { profileStore.deleteProfile(inspectName) }
+                if (launchMode == LaunchMode.INSPECT) {
+                    launchMode = LaunchMode.RESUME
+                    setCaptureSuppressed(false)
+                }
                 if (launchMode == LaunchMode.SAFE) {
                     openStep = OpenStep.LOAD_GAME
                     documentGate.phase = DocumentPhase.GAME
@@ -981,7 +1014,8 @@ class SessionController(
             if (_state.value !is SessionState.Opening) return
             // Stale peek finishes that arrive after beginGameLoad bumped the token.
             if ((openStep == OpenStep.LOAD_GAME || openStep == OpenStep.RESTORE_VERIFY ||
-                    openStep == OpenStep.ROLLBACK) && finishToken != _loadToken.value
+                    openStep == OpenStep.ROLLBACK || openStep == OpenStep.INSPECT_VERIFY) &&
+                finishToken != _loadToken.value
             ) {
                 recordDiagnostic(
                     DiagnosticSeverity.INFO,
@@ -1084,6 +1118,8 @@ class SessionController(
             OpenStep.RESTORE_VERIFY -> finishRestoreVerify(work)
             OpenStep.ROLLBACK -> finishRollback(work)
             OpenStep.JOURNAL_APPLY -> finishJournalApply(work)
+            OpenStep.INSPECT_WRITE -> finishInspectWrite(work)
+            OpenStep.INSPECT_VERIFY -> finishInspectVerify(work)
         }
     }
 
@@ -1112,13 +1148,25 @@ class SessionController(
         } else {
             null
         }
+        val classifierRejects = milestone == ProgressionClass.REGRESSED ||
+            milestone == ProgressionClass.INCOMPARABLE ||
+            milestone == ProgressionClass.INVALID
+        val sharkResume = work.gameId == "shark-incremental" &&
+            (
+                milestone == ProgressionClass.EQUAL ||
+                    milestone == ProgressionClass.ADVANCED ||
+                    (milestone == null && comparison == SaveComparison.NO_SNAPSHOT)
+                )
         val shouldPlay = launchMode == LaunchMode.RESUME &&
             outcome !is PeekOutcome.Failed &&
-            (
+            !classifierRejects &&
+            if (work.gameId == "shark-incremental") {
+                sharkResume
+            } else {
                 shouldResumeLive(comparison) ||
                     milestone == ProgressionClass.EQUAL ||
                     milestone == ProgressionClass.ADVANCED
-                )
+            }
         if (!shouldPlay) {
             pinCopy(work.gameId, work.adapter, livePayload, SnapshotReasons.DIAGNOSTIC_BACKUP)
             if (!pointer.isNullOrBlank() && pointer != livePayload) {
@@ -1142,10 +1190,13 @@ class SessionController(
         val pinnedLiveAt = snapshotDao?.history(work.gameId)
             ?.lastOrNull { it.reason == SnapshotReasons.DIAGNOSTIC_BACKUP && it.payload == livePayload }
             ?.capturedAtMillis
-        val note = if (ambiguous) {
-            "The WebView save could not be ordered against Room. The game was not loaded. Both saves were kept."
-        } else {
-            diagnosticNote(outcome, comparison)
+        val note = when {
+            ambiguous ->
+                "The WebView save could not be ordered against Room. The game was not loaded. Both saves were kept."
+            classifierRejects ->
+                "The WebView save is ${milestone!!.name.lowercase()} against the Room pointer. " +
+                    "It was not loaded. The Room pointer was kept."
+            else -> diagnosticNote(outcome, comparison)
         }
         val consequence = if (ambiguous) {
             "Recovering the Room snapshot would replace the live profile with the older pointer and drop this WebView save from the game. Both payloads stay pinned. Inspect a snapshot in a disposable profile before choosing it."
@@ -1932,19 +1983,154 @@ class SessionController(
         }
         val profileName = "hub-inspect-$gameId-$sequence"
         val profile = obtainProfile(profileName)
+        _inspectedSequence.value = null
+        inspectSequence = sequence
+        inspectPayload = record.payload
+        inspectVerifyToken = -1
+        launchMode = LaunchMode.INSPECT
+        setCaptureSuppressed(true)
         inspectionProfileName = profileName
-        _inspectedSequence.value = sequence
         _activeProfile.value = profile
         _activeProfileName.value = profileName
         documentGate.phase = DocumentPhase.WRITE
         documentGate.payload = record.payload
+        openStep = OpenStep.INSPECT_WRITE
         val dead = webView
         webView = null
         dead?.let { runCatching { it.destroy() } }
         _webViewGeneration.value = _webViewGeneration.value + 1
-        _sessionError.value =
-            "Inspection loaded snapshot #$sequence into disposable profile $profileName. " +
-            "The live profile and the Room pointer were not written."
+        val message =
+            "Snapshot #$sequence is loading in disposable profile $profileName. " +
+                "Use stays off until that profile loads the game and runtime verification passes. " +
+                "The live profile, Room, and the workstation were not changed."
+        _sessionError.value = message
+        _diagnostic.value = _diagnostic.value?.copy(note = message)
+        transitionTo(SessionState.Opening, gameId)
+    }
+
+    private suspend fun finishInspectWrite(work: ReadyWork) {
+        val expected = inspectPayload
+        if (peekClient == null) {
+            val marker = try {
+                work.adapter.confirmBootstrap(work.view)
+            } catch (e: Exception) {
+                false
+            }
+            if (!marker) {
+                mutex.withLock {
+                    if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
+                        failInspection(
+                            work.gameId,
+                            "The disposable profile did not load snapshot #${inspectSequence ?: "?"}. " +
+                                "Use stays off. The live profile and Room were not written.",
+                        )
+                    }
+                }
+                return
+            }
+        }
+        onBootstrapWrite?.invoke(expected)
+        val readback = when (val outcome = readPeek(work)) {
+            is PeekOutcome.Value -> outcome.payload
+            else -> null
+        }
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (expected != null && storageMatches(work.adapter, readback, expected)) {
+                openStep = OpenStep.INSPECT_VERIFY
+                documentGate.phase = DocumentPhase.GAME
+                documentGate.payload = null
+                gameDocumentLoads += 1
+                _loadToken.value = _loadToken.value + 1
+                inspectVerifyToken = _loadToken.value
+            } else {
+                failInspection(
+                    work.gameId,
+                    "The disposable profile did not hold the stored snapshot bytes. " +
+                        "Use stays off. The live profile and Room were not written.",
+                )
+            }
+        }
+    }
+
+    private suspend fun finishInspectVerify(work: ReadyWork) {
+        if (shouldIgnoreAsBootstrap(work)) return
+        val generation = mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (openStep != OpenStep.INSPECT_VERIFY || work.loadToken != inspectVerifyToken) return
+            restoreGeneration
+        }
+        val payload = inspectPayload
+        val sequence = inspectSequence
+        val ready = awaitGameReady(work)
+        val verdict = if (!ready || payload == null || sequence == null) {
+            RuntimeVerdict.REJECTED
+        } else {
+            try {
+                val check = runtimeCheck
+                if (check != null) {
+                    if (check.invoke(work.view, work.adapter, payload)) {
+                        RuntimeVerdict.ACCEPTED
+                    } else {
+                        RuntimeVerdict.REJECTED
+                    }
+                } else {
+                    work.adapter.runtimeVerdict(work.view, payload)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "inspect runtime verify failed", e)
+                RuntimeVerdict.REJECTED
+            }
+        }
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (openStep != OpenStep.INSPECT_VERIFY || work.loadToken != inspectVerifyToken) return
+            if (generation != restoreGeneration) return
+            if (verdict == RuntimeVerdict.ACCEPTED && sequence != null) {
+                acceptInspection(work.gameId, sequence)
+            } else {
+                failInspection(
+                    work.gameId,
+                    "Runtime verification did not accept snapshot #${sequence ?: "?"}. " +
+                        "Use stays off. The live profile and Room were not written.",
+                )
+            }
+        }
+    }
+
+    private suspend fun acceptInspection(gameId: String, sequence: Long) {
+        _inspectedSequence.value = sequence
+        val profileName = inspectionProfileName ?: "the inspection profile"
+        val message =
+            "Snapshot #$sequence loaded in disposable profile $profileName and runtime verification passed. " +
+                "Use can overwrite the live profile after you confirm. " +
+                "Play has not resumed, and the workstation was not synchronised. Room was not changed."
+        openStep = OpenStep.DECIDE
+        documentGate.phase = DocumentPhase.PEEK
+        documentGate.payload = null
+        _sessionError.value = message
+        _diagnostic.value = _diagnostic.value?.copy(note = message)
+        transitionTo(SessionState.RecoveryRequired, gameId)
+    }
+
+    private suspend fun failInspection(gameId: String, message: String) {
+        _inspectedSequence.value = null
+        inspectSequence = null
+        inspectPayload = null
+        val inspectName = inspectionProfileName
+        inspectionProfileName = null
+        bindLiveProfile(gameId)
+        if (inspectName != null) runCatching { profileStore.deleteProfile(inspectName) }
+        openStep = OpenStep.DECIDE
+        documentGate.phase = DocumentPhase.PEEK
+        documentGate.payload = null
+        launchMode = LaunchMode.RESUME
+        setCaptureSuppressed(true)
+        _sessionError.value = message
+        _diagnostic.value = _diagnostic.value?.copy(note = message)
+        if (_state.value is SessionState.Opening) {
+            transitionTo(SessionState.RecoveryRequired, gameId)
+        }
     }
 
     private suspend fun confirmRecoverLocked(sequence: Long? = null) {
@@ -2488,9 +2674,9 @@ class SessionController(
     }
 
     /**
-     * Prefer the post-load storage when the adapter accepts it as the same
-     * save or a legitimate advance. A regression or an incomparable rewrite
-     * keeps the intended payload.
+     * Prefer the post-load storage when classification says it is the same
+     * save or a real advance. Lexical LIVE_AHEAD is not an advance, including
+     * when the classifier returns UNORDERED.
      */
     private suspend fun acceptedRestorePayload(work: ReadyWork, intended: String): String {
         val readback = when (val outcome = readPeek(work)) {
@@ -2513,7 +2699,6 @@ class SessionController(
             SaveComparison.INCONCLUSIVE
         }
         if (comparison == SaveComparison.MATCH) return readback
-        if (comparison == SaveComparison.LIVE_AHEAD && relation == ProgressionClass.UNORDERED) return readback
         return intended
     }
 

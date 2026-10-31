@@ -33,4 +33,5 @@ data class SaveDiagnostic(
     val consequence: String = "",
     val storedCapturedAtMillis: Long? = null,
     val livePinnedAtMillis: Long? = null,
+    val webViewLeftUntouched: Boolean = false,
 )

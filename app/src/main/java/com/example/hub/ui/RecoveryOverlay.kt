@@ -58,6 +58,7 @@ fun RecoveryOverlay(
     Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId url=$launchUrl detail=$detail")
     var confirming by rememberSaveable(gameId) { mutableStateOf(false) }
     var confirmingStartOver by rememberSaveable(gameId) { mutableStateOf(false) }
+    var confirmingUse by rememberSaveable(gameId) { mutableStateOf(-1L) }
     val incident = detail?.contains("Capture incident") == true ||
         diagnostic?.note?.contains("Capture incident") == true
     OverlaySheet(
@@ -134,6 +135,36 @@ fun RecoveryOverlay(
             ) {
                 Text("Back")
             }
+        } else if (confirmingUse >= 0L) {
+            Text(
+                text = "Use snapshot #$confirmingUse",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "This overwrites the live profile with snapshot #$confirmingUse. " +
+                    "Milestones can match while play time, currencies, and upgrades differ, and those differences are not ordered. " +
+                    "The game reloads and is checked before Room changes. Cancel writes nothing. " +
+                    "Play and workstation sync do not start until that check passes.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HubPrimaryButton(
+                onClick = {
+                    val sequence = confirmingUse
+                    confirmingUse = -1L
+                    onRestoreSnapshot(sequence)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Overwrite the live profile")
+            }
+            HubOutlinedButton(
+                onClick = { confirmingUse = -1L },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Back")
+            }
         } else {
             Text(
                 text = diagnostic.note,
@@ -192,7 +223,7 @@ fun RecoveryOverlay(
                                 Text("Export")
                             }
                             HubOutlinedButton(
-                                onClick = { onRestoreSnapshot(entry.sequence) },
+                                onClick = { confirmingUse = entry.sequence },
                                 enabled = inspectedSequence == entry.sequence,
                                 modifier = Modifier.weight(1f),
                             ) {
@@ -204,7 +235,7 @@ fun RecoveryOverlay(
             }
             if (!exportedPayload.isNullOrEmpty()) {
                 Text(
-                    text = "Exact export, ${exportedPayload.length} bytes. This does not restore or modify the snapshot.",
+                    text = "Sharing the exact stored bytes, ${exportedPayload.length} characters. This does not restore or modify the snapshot.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -271,11 +302,23 @@ fun RecoveryOverlay(
                 }
             }
             if (diagnostic.ambiguous) {
+                Text(
+                    text = "Leave WebView save untouched does not load the game, capture a snapshot, or synchronise the workstation.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 HubOutlinedButton(
                     onClick = onKeepWebView,
+                    enabled = !diagnostic.webViewLeftUntouched,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Keep WebView save")
+                    Text(
+                        if (diagnostic.webViewLeftUntouched) {
+                            "WebView save left untouched"
+                        } else {
+                            "Leave WebView save untouched"
+                        },
+                    )
                 }
             }
             HubPrimaryButton(

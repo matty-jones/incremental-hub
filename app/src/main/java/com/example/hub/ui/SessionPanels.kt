@@ -4,6 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.FileProvider
+import com.example.hub.BuildConfig
+import java.io.File
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -232,6 +235,30 @@ private fun severityColor(severity: DiagnosticSeverity) = when (severity) {
     DiagnosticSeverity.FATAL -> MaterialTheme.colorScheme.error
     DiagnosticSeverity.WARNING -> hubWarning()
     DiagnosticSeverity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+internal fun writeSnapshotExport(file: File, payload: String) {
+    file.parentFile?.mkdirs()
+    file.writeBytes(payload.toByteArray(Charsets.UTF_8))
+}
+
+internal fun shareSnapshotPayload(context: Context, payload: String) {
+    val file = File(context.cacheDir, "snapshot-exports/snapshot.txt")
+    writeSnapshotExport(file, payload)
+    val uri = FileProvider.getUriForFile(
+        context,
+        "${BuildConfig.APPLICATION_ID}.fileprovider",
+        file,
+    )
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        clipData = ClipData.newRawUri("snapshot", uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(
+        Intent.createChooser(send, "Export snapshot").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
 }
 
 internal fun shareReport(context: Context, report: String) {

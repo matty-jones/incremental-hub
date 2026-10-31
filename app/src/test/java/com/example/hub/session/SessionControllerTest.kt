@@ -2922,7 +2922,29 @@ class SessionControllerTest {
         session.confirmRecover(pointerCopy.sequence)
         assertEquals(SessionState.RecoveryRequired, session.state.value)
         assertEquals(web, storage)
+        session.keepWebViewSave()
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertTrue(session.sessionError.value!!.contains("Nothing resumed"))
+        assertTrue(session.sessionError.value!!.contains("not synchronised"))
+        assertEquals(web, storage)
+        assertEquals(room, dao.get("shark-incremental")!!.snapshotPayload)
         session.inspectSnapshot(pointerCopy.sequence)
+        assertNull(session.inspectedSequence.value)
+        assertEquals(SessionState.Opening, session.state.value)
+        session.confirmRecover(pointerCopy.sequence)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertEquals(room, dao.get("shark-incremental")!!.snapshotPayload)
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(pointerCopy.sequence, session.inspectedSequence.value)
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(
+            "hub-inspect-shark-incremental-${pointerCopy.sequence}",
+            session.activeProfileName.value,
+        )
+        assertEquals("hub-game-shark-incremental", dao.get("shark-incremental")!!.profileName)
+        assertTrue(synced.isEmpty())
         session.confirmRecover(pointerCopy.sequence)
         session.registerWebView(view)
         session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
@@ -3005,13 +3027,156 @@ class SessionControllerTest {
         session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
         assertEquals(SessionState.RecoveryRequired, session.state.value)
         session.inspectSnapshot(3)
+        assertNull(session.inspectedSequence.value)
         session.confirmRecover(3)
-        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertNull(session.inspectedSequence.value)
         assertEquals(live, storage)
         assertEquals(room, dao.get("shark-incremental")!!.snapshotPayload)
         assertTrue(synced.isEmpty())
         assertEquals(older, snapshots.history("shark-incremental").single { it.id == "older-history" }.payload)
         assertTrue(snapshots.history("shark-incremental").single { it.id == "older-history" }.pinned)
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun coldStartDoesNotResumeASameFeatureRegression() = runTest {
+        val room = sharkPayload(feature = 9, fishExponent = "40", played = "100", prestige = 2639, core = 2026)
+        val live = sharkPayload(feature = 9, fishExponent = "80", played = "999999999", prestige = 10, core = 1)
+        assertEquals(SaveComparison.LIVE_AHEAD, SharkProgress.compare(live, room))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(live, room))
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(live) },
+        )
+        dao.upsert(progressedInstance(room, playedAt = 110L))
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(room, dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(session.sessionError.value!!.contains("regressed"))
+        assertTrue(session.sessionError.value!!.contains("was not loaded"))
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun inspectionFailureDoesNotEnableUse() = runTest {
+        val room = sharkPayload(feature = 9, fishExponent = "40", prestige = 2639)
+        val live = freshSharkPayload()
+        val snapshots = StubSnapshotDao()
+        var storage = live
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(storage) },
+            runtime = { _, _, _ -> false },
+            onWrite = { storage = it.orEmpty() },
+            snapshots = snapshots,
+        )
+        dao.upsert(progressedInstance(room, playedAt = 111L))
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        val copy = snapshots.history("shark-incremental").single { it.payload == room }
+        val view = WebView(ApplicationProvider.getApplicationContext())
+        session.inspectSnapshot(copy.sequence)
+        assertNull(session.inspectedSequence.value)
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertNull(session.inspectedSequence.value)
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertTrue(session.sessionError.value!!.contains("Use stays off"))
+        assertEquals(room, dao.get("shark-incremental")!!.snapshotPayload)
+        assertEquals("hub-game-shark-incremental", dao.get("shark-incremental")!!.profileName)
+        session.confirmRecover(copy.sequence)
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(room, dao.get("shark-incremental")!!.snapshotPayload)
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun unorderedLiveAheadRestoreKeepsTheIntendedPayload() = runTest {
+        val intended = feSave("1.5e3")
+        val rewritten = feSave("9e9")
+        assertEquals(SaveComparison.LIVE_AHEAD, Fe000000Adapter().compare(rewritten, intended))
+        assertEquals(ProgressionClass.UNORDERED, Fe000000Adapter().classifyProgress(rewritten, intended))
+        var storage = intended
+        var verifying = false
+        val snapshots = StubSnapshotDao()
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ ->
+                if (verifying) PeekOutcome.Value(rewritten) else PeekOutcome.Value(storage)
+            },
+            runtime = { _, _, _ ->
+                verifying = true
+                true
+            },
+            onWrite = { storage = it.orEmpty() },
+            snapshots = snapshots,
+        )
+        dao.upsert(
+            GameInstance(
+                gameId = "fe000000",
+                profileName = "hub-game-fe000000",
+                sessionIdentity = "fe-session",
+                lastPlayedAtMillis = 112L,
+                lastCaptureAtMillis = 112L,
+                snapshotPayload = intended,
+                lastCaptureSuccessAtMillis = 112L,
+            ),
+        )
+        session.open("fe000000", LaunchMode.RECOVER)
+        val view = WebView(ApplicationProvider.getApplicationContext())
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://dan-simon.github.io/misc/fe000000/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        session.confirmRecover()
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://dan-simon.github.io/misc/fe000000/")
+        session.onMainFrameFinished("https://dan-simon.github.io/misc/fe000000/")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(intended, dao.get("fe000000")!!.snapshotPayload)
+        assertFalse(dao.get("fe000000")!!.snapshotPayload == rewritten)
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun exportRoundTripsUnusualSnapshotBytes() = runTest {
+        val payload = "caf\u00e9 \u2603 ee100 (e^6)10 \"quotes\" \u2028 \u0000 end"
+        val snapshots = StubSnapshotDao()
+        snapshots.insert(
+            SnapshotRecord(
+                id = "unusual",
+                gameId = "shark-incremental",
+                sequence = 7,
+                capturedAtMillis = 7L,
+                reason = SnapshotReasons.DIAGNOSTIC_BACKUP,
+                pinned = true,
+                payload = payload,
+                progressJson = null,
+            ),
+        )
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Empty },
+            snapshots = snapshots,
+        )
+        dao.upsert(progressedInstance(sharkPayload(feature = 9, fishExponent = "40"), playedAt = 113L))
+        session.open("shark-incremental")
+        val exported = session.exportSnapshotPayload(7)
+        assertEquals(payload, exported)
+        val file = java.io.File(
+            ApplicationProvider.getApplicationContext<android.content.Context>().cacheDir,
+            "snapshot-round-trip.txt",
+        )
+        com.example.hub.ui.writeSnapshotExport(file, exported!!)
+        val bytes = file.readBytes()
+        assertEquals(payload.toByteArray(Charsets.UTF_8).size, bytes.size)
+        assertTrue(payload.length < bytes.size)
+        assertEquals(payload, bytes.toString(Charsets.UTF_8))
         session.forceCloseForTest()
     }
 
@@ -3063,6 +3228,18 @@ class SessionControllerTest {
         assertEquals(SessionState.Playing, restarted.state.value)
         assertEquals(played, dao.get("shark-incremental")!!.snapshotPayload)
         restarted.forceCloseForTest()
+    }
+
+    private fun feSave(stars: String): String {
+        val json = JSONObject()
+            .put("boost", 4)
+            .put("currentTab", "main")
+            .put("generators", JSONArray(listOf(1, 2)))
+            .put("lastUpdate", 99)
+            .put("prestigePower", 8)
+            .put("stars", stars)
+            .toString()
+        return Fe000000Adapter.encodeSave(json)
     }
 
     private fun sharkFixture(name: String): String {

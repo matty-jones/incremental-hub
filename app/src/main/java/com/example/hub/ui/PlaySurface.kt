@@ -14,6 +14,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,9 +59,14 @@ fun PlaySurface(
     val diagnostic by controller.diagnostic.collectAsState()
     val inspectedSequence by controller.inspectedSequence.collectAsState()
     val exportedSnapshot by controller.exportedSnapshot.collectAsState()
+    val snapshotShare by controller.snapshotShare.collectAsState()
     val consoleLines by controller.consoleLines.collectAsState()
     val events by controller.diagnosticEvents.collectAsState()
     val context = LocalContext.current
+    LaunchedEffect(snapshotShare?.nonce) {
+        val payload = snapshotShare?.payload ?: return@LaunchedEffect
+        shareSnapshotPayload(context, payload)
+    }
     val displayStore = remember(context) { DisplayPreferenceStore(context) }
     var displayPrefs by remember(gameId) { mutableStateOf(displayStore.read(gameId)) }
     var presentation by remember(gameId) { mutableStateOf<PresentationAck?>(null) }
