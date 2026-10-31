@@ -174,6 +174,32 @@ fun presentationScript(
 }
 
 /**
+ * Writes Shark's device-width viewport before page scripts run.
+ * The game ships no viewport meta. Wide-viewport mode without this tag
+ * lays the first document out near 980 CSS pixels.
+ * It does not navigate and it does not read or write the save.
+ */
+fun sharkDocumentStartScript(): String =
+    "(function(){ try {" +
+        " var root = document.documentElement;" +
+        " if (!root) return 'no-root';" +
+        " var head = document.head;" +
+        " if (!head) {" +
+        " head = document.createElement('head');" +
+        " root.insertBefore(head, root.firstChild);" +
+        " }" +
+        " var meta = document.querySelector('meta[name=\"viewport\"]');" +
+        " if (!meta) {" +
+        " meta = document.createElement('meta');" +
+        " meta.setAttribute('name', 'viewport');" +
+        " head.appendChild(meta);" +
+        " }" +
+        " var next = 'width=device-width, initial-scale=1';" +
+        " if (meta.getAttribute('content') !== next) meta.setAttribute('content', next);" +
+        " return next;" +
+        " } catch (e) { return String(e).slice(0, 160); } })()"
+
+/**
  * Drops a frozen layout width on a page that has no viewport tag.
  * The content is written twice so Chromium resolves device-width again.
  * It does not navigate and it does not read or write the save.

@@ -131,6 +131,12 @@ object DocumentLayout {
             " }" +
             " table.setAttribute('data-hub-fit', 'table');" +
             "}" +
+            "function zoomText(value) {" +
+            " if (!value || value === 'normal') return '';" +
+            " var n = parseFloat(value);" +
+            " if (!(n > 0) || n >= 0.999) return '';" +
+            " return String(Math.round(n * 1000) / 1000);" +
+            "}" +
             "function scale(el) {" +
             " if (hidden(el)) return;" +
             " var parent = el.parentElement;" +
@@ -138,20 +144,64 @@ object DocumentLayout {
             " var visible = visibleWidth();" +
             " if (visible > 0) avail = Math.min(avail || visible, visible);" +
             " if (!(avail > 8)) return;" +
-            " var inset = el.getBoundingClientRect().left;" +
+            " var previous = zoomText(el.style.zoom);" +
+            " var zoomNow = parseFloat(previous);" +
+            " if (!(zoomNow > 0)) zoomNow = 1;" +
+            " var inset = 0;" +
+            " if (parent) {" +
+            " var bounds = el.getBoundingClientRect();" +
+            " var host = parent.getBoundingClientRect();" +
+            " inset = (bounds.left - host.left) / zoomNow;" +
+            " }" +
             " if (!(inset > 0) || inset >= avail) inset = 0;" +
-            " var signature = Math.round(avail) + ':' + Math.round(inset);" +
-            " if (el.getAttribute('data-hub-fit') === 'zoom' &&" +
-            " el.getAttribute('data-hub-room') === signature) return;" +
-            " /* Changing zoom on every game tick resets scroll anchoring on mobile WebView. */" +
-            " el.style.zoom = '1';" +
-            " var needed = el.scrollWidth;" +
-            " if (!(needed > 8)) return;" +
+            " var apparent = el.scrollWidth;" +
+            " var storedApparent = parseFloat(el.getAttribute('data-hub-apparent') || '');" +
+            " var geo = Math.round(avail) + ':' + Math.round(inset);" +
+            " var storedRoom = el.getAttribute('data-hub-room') || '';" +
+            " var storedGeo = storedRoom.split(':').slice(0, 2).join(':');" +
+            " if (el.getAttribute('data-hub-fit') === 'zoom' && geo === storedGeo &&" +
+            " Math.abs(apparent - storedApparent) <= 1) {" +
+            " el.removeAttribute('data-hub-dirty');" +
+            " return;" +
+            " }" +
+            " var needed = zoomNow < 0.999 ? apparent / zoomNow : apparent;" +
+            " var dirty = el.getAttribute('data-hub-dirty') === '1';" +
+            " if (!(needed > 8)) {" +
+            " if (dirty) el.removeAttribute('data-hub-dirty');" +
+            " return;" +
+            " }" +
             " var room = avail - inset;" +
             " var zoom = Math.min(1, (room - 4) / needed);" +
-            " el.style.zoom = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
+            " var next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
+            " var signature = Math.round(avail) + ':' + Math.round(inset) + ':' + Math.round(needed);" +
+            " if (!dirty && el.getAttribute('data-hub-fit') === 'zoom' &&" +
+            " el.getAttribute('data-hub-room') === signature && previous === next) return;" +
+            " /* Assigning the same zoom again resets scroll anchoring on mobile WebView. */" +
+            " if (zoomNow < 0.999 && previous !== next) {" +
+            " el.style.zoom = '1';" +
+            " var measured = el.scrollWidth;" +
+            " if (!(measured > 8)) {" +
+            " el.style.zoom = previous;" +
+            " el.removeAttribute('data-hub-dirty');" +
+            " return;" +
+            " }" +
+            " needed = measured;" +
+            " room = avail - inset;" +
+            " zoom = Math.min(1, (room - 4) / needed);" +
+            " next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
+            " signature = Math.round(avail) + ':' + Math.round(inset) + ':' + Math.round(needed);" +
+            " }" +
             " el.setAttribute('data-hub-fit', 'zoom');" +
             " el.setAttribute('data-hub-room', signature);" +
+            " el.removeAttribute('data-hub-dirty');" +
+            " if (previous === next) {" +
+            " if (zoomText(el.style.zoom) !== previous) el.style.zoom = previous;" +
+            " el.setAttribute('data-hub-apparent', String(Math.round(el.scrollWidth)));" +
+            " return;" +
+            " }" +
+            " window.__hubZoomWrites = (window.__hubZoomWrites || 0) + 1;" +
+            " el.style.zoom = next;" +
+            " el.setAttribute('data-hub-apparent', String(Math.round(el.scrollWidth)));" +
             "}" +
             "function spill(el) {" +
             " if (!el || el === document.body || el === document.documentElement) return;" +
@@ -225,24 +275,36 @@ object DocumentLayout {
             " }" +
             "}" +
             "watchTabs();" +
+            "function markBoard(node) {" +
+            " if (!node || node.nodeType !== 1) return;" +
+            " var board = (node.matches && node.matches(SPATIAL)) ? node :" +
+            " (node.closest ? node.closest(SPATIAL) : null);" +
+            " if (board) board.setAttribute('data-hub-dirty', '1');" +
+            "}" +
             "var app = document.getElementById('app') || document.body;" +
             "new MutationObserver(function(records){" +
+            " var structural = false;" +
             " for (var i = 0; i < records.length; i++) {" +
             " var target = records[i].target;" +
             " if (!target || target.nodeType !== 1) continue;" +
-            " var structural = target === app || (target.matches &&" +
-            " target.matches('[id$=\\\"-tab\\\"],' + SPATIAL));" +
-            " if (!structural) {" +
+            " if (target.closest && target.closest(SPATIAL)) {" +
+            " markBoard(target); structural = true; break; }" +
+            " if (target.matches && target.matches('[id' + '$=' + '\"-tab\"]')) {" +
+            " structural = true; break; }" +
             " var added = records[i].addedNodes;" +
             " for (var j = 0; j < added.length; j++) {" +
             " var node = added[j];" +
-            " if (node.nodeType === 1 && node.matches &&" +
-            " node.matches('table,section,[id$=\\\"-tab\\\"],' + SPATIAL)) {" +
-            " structural = true; break; } } }" +
-            " if (!structural) continue;" +
-            " if (target.matches && target.matches(SPATIAL)) target.removeAttribute('data-hub-room');" +
-            " watchTabs(); schedule(); return;" +
+            " if (node.nodeType !== 1) continue;" +
+            " var mounted = (node.matches && node.matches('table,section,[id' + '$=' + '\"-tab\"],' + SPATIAL)) ||" +
+            " (node.closest && node.closest(SPATIAL)) ||" +
+            " (node.querySelector && node.querySelector(SPATIAL));" +
+            " if (!mounted) continue;" +
+            " markBoard(node.querySelector ? (node.querySelector(SPATIAL) || node) : node);" +
+            " structural = true; break; }" +
+            " if (structural) break;" +
             " }" +
+            " if (!structural) return;" +
+            " watchTabs(); schedule();" +
             "}).observe(app, {childList:true, subtree:true});" +
             "fit();" +
             "return '$MARKER';" +
