@@ -133,19 +133,25 @@ object DocumentLayout {
             "}" +
             "function scale(el) {" +
             " if (hidden(el)) return;" +
-            " el.style.zoom = '1';" +
-            " var needed = el.scrollWidth;" +
             " var parent = el.parentElement;" +
             " var avail = parent ? parent.clientWidth : visibleWidth();" +
             " var visible = visibleWidth();" +
             " if (visible > 0) avail = Math.min(avail || visible, visible);" +
-            " if (!(needed > 8) || !(avail > 8)) return;" +
+            " if (!(avail > 8)) return;" +
             " var inset = el.getBoundingClientRect().left;" +
             " if (!(inset > 0) || inset >= avail) inset = 0;" +
+            " var signature = Math.round(avail) + ':' + Math.round(inset);" +
+            " if (el.getAttribute('data-hub-fit') === 'zoom' &&" +
+            " el.getAttribute('data-hub-room') === signature) return;" +
+            " /* Changing zoom on every game tick resets scroll anchoring on mobile WebView. */" +
+            " el.style.zoom = '1';" +
+            " var needed = el.scrollWidth;" +
+            " if (!(needed > 8)) return;" +
             " var room = avail - inset;" +
             " var zoom = Math.min(1, (room - 4) / needed);" +
             " el.style.zoom = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
             " el.setAttribute('data-hub-fit', 'zoom');" +
+            " el.setAttribute('data-hub-room', signature);" +
             "}" +
             "function spill(el) {" +
             " if (!el || el === document.body || el === document.documentElement) return;" +
@@ -210,7 +216,24 @@ object DocumentLayout {
             "}" +
             "watchTabs();" +
             "var app = document.getElementById('app') || document.body;" +
-            "new MutationObserver(function(){ watchTabs(); schedule(); }).observe(app, {childList:true, subtree:true});" +
+            "new MutationObserver(function(records){" +
+            " for (var i = 0; i < records.length; i++) {" +
+            " var target = records[i].target;" +
+            " if (!target || target.nodeType !== 1) continue;" +
+            " var structural = target === app || (target.matches &&" +
+            " target.matches('[id$=\\\"-tab\\\"],' + SPATIAL));" +
+            " if (!structural) {" +
+            " var added = records[i].addedNodes;" +
+            " for (var j = 0; j < added.length; j++) {" +
+            " var node = added[j];" +
+            " if (node.nodeType === 1 && node.matches &&" +
+            " node.matches('table,section,[id$=\\\"-tab\\\"],' + SPATIAL)) {" +
+            " structural = true; break; } } }" +
+            " if (!structural) continue;" +
+            " if (target.matches && target.matches(SPATIAL)) target.removeAttribute('data-hub-room');" +
+            " watchTabs(); schedule(); return;" +
+            " }" +
+            "}).observe(app, {childList:true, subtree:true});" +
             "fit();" +
             "return '$MARKER';" +
             "})()"
