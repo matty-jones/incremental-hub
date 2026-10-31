@@ -68,6 +68,16 @@ class SharkFoldLayoutTest {
             assertLayout(inner, wide = true)
             assertEquals(doc, inner.getString("doc"))
             assertEquals(loads, finishes.get())
+            // The old test stopped at unfold, missing the stale tablet layout
+            // that remained after returning to the cover display.
+            shell("cmd device_state state 0")
+            waitSize("1080")
+            val coverAgain = waitForLayout(web, wide = false)
+            assertLayout(coverAgain, wide = false)
+            assertTrue("cover viewport remained tablet-sized: $coverAgain",
+                coverAgain.optDouble("iw") in 380.0..460.0)
+            assertEquals(doc, coverAgain.getString("doc"))
+            assertEquals("folding must retain the live document", loads, finishes.get())
             scenario.onActivity {
                 (web.parent as? ViewGroup)?.removeView(web)
                 web.destroy()
