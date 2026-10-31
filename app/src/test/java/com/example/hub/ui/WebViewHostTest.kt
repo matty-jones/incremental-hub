@@ -76,6 +76,95 @@ class WebViewHostTest {
     }
 
     @Test
+    fun sharkViewportIsInstalledForTheSharkOriginAndRearmsOncePerSize() {
+        val script = sharkDocumentStartScript()
+        assertTrue(script.contains("width=device-width, initial-scale=1"))
+        assertFalse(script.contains("width=980"))
+        assertFalse(script.contains("localStorage"))
+        assertFalse(script.contains("location.reload"))
+        assertEquals(setOf("https://mrredshark77.github.io"), sharkDocumentStartRules(SHARK_URL))
+        assertEquals(
+            setOf("https://example.com"),
+            sharkDocumentStartRules("https://example.com/shark-incremental/"),
+        )
+        assertTrue(sharkDocumentStartRules("https://trimps.github.io/").isEmpty())
+        assertTrue(sharkDocumentStartRules(null).isEmpty())
+        assertTrue(sharkDocumentStartRules("file:///shark-incremental/index.html").isEmpty())
+        assertTrue(
+            shouldRearmSharkViewport(
+                shark = true,
+                fault = FAULT_STALE_VIEWPORT,
+                viewWidth = 1080,
+                viewHeight = 2092,
+                unlockedWidth = 2208,
+                unlockedHeight = 1840,
+                gaveUpWidth = -1,
+                gaveUpHeight = -1,
+            ),
+        )
+        assertTrue(
+            shouldRearmSharkViewport(
+                shark = true,
+                fault = FAULT_STALE_FRAME,
+                viewWidth = 1080,
+                viewHeight = 2092,
+                unlockedWidth = 2208,
+                unlockedHeight = 1840,
+                gaveUpWidth = 2208,
+                gaveUpHeight = 1840,
+            ),
+        )
+        assertFalse(
+            shouldRearmSharkViewport(
+                shark = true,
+                fault = FAULT_STALE_VIEWPORT,
+                viewWidth = 1080,
+                viewHeight = 2092,
+                unlockedWidth = 2208,
+                unlockedHeight = 1840,
+                gaveUpWidth = 1080,
+                gaveUpHeight = 2092,
+            ),
+        )
+        assertFalse(
+            shouldRearmSharkViewport(
+                shark = true,
+                fault = FAULT_STALE_VIEWPORT,
+                viewWidth = 2208,
+                viewHeight = 1840,
+                unlockedWidth = 2208,
+                unlockedHeight = 1840,
+                gaveUpWidth = -1,
+                gaveUpHeight = -1,
+            ),
+        )
+        assertFalse(
+            shouldRearmSharkViewport(
+                shark = false,
+                fault = FAULT_STALE_VIEWPORT,
+                viewWidth = 1080,
+                viewHeight = 2092,
+                unlockedWidth = 2208,
+                unlockedHeight = 1840,
+                gaveUpWidth = -1,
+                gaveUpHeight = -1,
+            ),
+        )
+        assertFalse(
+            shouldRearmSharkViewport(
+                shark = true,
+                fault = FAULT_ZOOM,
+                viewWidth = 1080,
+                viewHeight = 2092,
+                unlockedWidth = 2208,
+                unlockedHeight = 1840,
+                gaveUpWidth = -1,
+                gaveUpHeight = -1,
+            ),
+        )
+    }
+
+    @Test
     fun documentLayoutCoversTheRegisteredGames() {
         assertTrue(wantsDocumentLayout(SHARK_URL))
         assertTrue(wantsDocumentLayout("https://trimps.github.io/"))

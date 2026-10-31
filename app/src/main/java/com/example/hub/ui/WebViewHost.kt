@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.Profile
 import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.example.hub.games.DocumentLayout
 import com.example.hub.games.SharkLayout
 import com.example.hub.games.TrimpsLayout
@@ -98,7 +99,9 @@ fun WebViewHost(
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.textZoom = textZoomPercent
-                    if (launchUrl?.contains("trimps.github.io") == true) {
+                    if (isSharkUrl(launchUrl)) {
+                        prepareSharkViewport(this)
+                    } else if (launchUrl?.contains("trimps.github.io") == true) {
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
                     }
@@ -158,6 +161,9 @@ fun WebViewHost(
                                 TAG,
                                 "WebViewHost: onPageStarted url=$url token=${current.finishToken} gameId=$gameId",
                             )
+                            if (isSharkUrl(url)) {
+                                view.evaluateJavascript(sharkDocumentStartScript(), null)
+                            }
                         }
 
                         override fun onPageFinished(view: WebView, url: String) {
@@ -287,6 +293,12 @@ private fun navigate(
     reason: String,
     onExplicitLoad: (String) -> Unit,
 ) {
+    if (isSharkUrl(url)) {
+        prepareSharkViewport(webView)
+        if (!slot.documentStartInstalled) {
+            slot.documentStartInstalled = installSharkDocumentStart(webView, url)
+        }
+    }
     slot.layoutAppliedForUrl = null
     slot.appliedPageZoom = -1
     // Stamp before loadUrl so onPageStarted/onPageFinished can attribute the document.
@@ -318,6 +330,8 @@ private fun ensureLayoutListener(webView: WebView) {
             current.viewportStable = 0
             current.holdZoom = isSharkUrl((view as? WebView)?.url)
             current.unlockPosted = false
+            current.gaveUpWidth = -1
+            current.gaveUpHeight = -1
         }
         Log.d(TAG, "WebViewHost: size ${width}x$height; reconciling presentation without reload")
         view.post { reconcilePresentation(view as WebView, current) }
@@ -327,6 +341,55 @@ private fun ensureLayoutListener(webView: WebView) {
 }
 
 internal fun isSharkUrl(url: String?): Boolean = url?.contains("shark-incremental") == true
+
+/** Wide viewport stays on so a device-width meta can track both fold postures. */
+internal fun prepareSharkViewport(webView: WebView) {
+    webView.settings.useWideViewPort = true
+    webView.settings.loadWithOverviewMode = false
+}
+
+/** Origin rules for [sharkDocumentStartScript]. Empty when [url] is not Shark. */
+internal fun sharkDocumentStartRules(url: String?): Set<String> {
+    if (!isSharkUrl(url) || url.isNullOrBlank()) return emptySet()
+    val match = Regex("^(https?)://([^/]+)").find(url) ?: return emptySet()
+    return setOf("${match.groupValues[1]}://${match.groupValues[2]}")
+}
+
+/**
+ * Registers the device-width meta before the Shark document is parsed.
+ * Returns false when the WebView cannot install a document-start script.
+ * [onPageStarted] still writes the same meta in that case.
+ */
+internal fun installSharkDocumentStart(webView: WebView, url: String?): Boolean {
+    val rules = sharkDocumentStartRules(url)
+    if (rules.isEmpty()) return false
+    if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return false
+    return runCatching {
+        WebViewCompat.addDocumentStartJavaScript(webView, sharkDocumentStartScript(), rules)
+        true
+    }.getOrDefault(false)
+}
+
+/**
+ * A stale Shark viewport gets another in-place unlock when the view size
+ * has changed and this size has not already exhausted its polls.
+ */
+internal fun shouldRearmSharkViewport(
+    shark: Boolean,
+    fault: String,
+    viewWidth: Int,
+    viewHeight: Int,
+    unlockedWidth: Int,
+    unlockedHeight: Int,
+    gaveUpWidth: Int,
+    gaveUpHeight: Int,
+): Boolean {
+    if (!shark || viewWidth <= 0 || viewHeight <= 0) return false
+    if (fault != FAULT_STALE_VIEWPORT && fault != FAULT_STALE_FRAME) return false
+    if (viewWidth == unlockedWidth && viewHeight == unlockedHeight) return false
+    if (viewWidth == gaveUpWidth && viewHeight == gaveUpHeight) return false
+    return true
+}
 
 /** Shark, Trimps, and FE000000 share the viewport fitter. Synergism does not. */
 internal fun wantsDocumentLayout(url: String?): Boolean {
@@ -526,6 +589,8 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
                     slot.viewportPolls = 0
                     slot.unlockedWidth = widthNow
                     slot.unlockedHeight = heightNow
+                    slot.gaveUpWidth = -1
+                    slot.gaveUpHeight = -1
                     slot.forceReconcile = true
                     webView.post { reconcilePresentation(webView, slot) }
                     return@evaluateJavascript
@@ -533,6 +598,8 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
                 if (slot.viewportPolls >= MAX_VIEWPORT_POLLS) {
                     slot.holdZoom = false
                     slot.unlockPosted = false
+                    slot.gaveUpWidth = widthNow
+                    slot.gaveUpHeight = heightNow
                     retryReconcile(webView, slot, generation, fault)
                     return@evaluateJavascript
                 }
@@ -552,13 +619,26 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
                 slot.ackedHeight = heightNow
                 slot.ackedDensity = densityNow
                 slot.retries = 0
+                slot.gaveUpWidth = -1
+                slot.gaveUpHeight = -1
                 if (!slot.confirming) scheduleConfirmation(webView, slot, generation)
                 slot.confirming = false
             } else {
-                val sameUnlock = widthNow == slot.unlockedWidth && heightNow == slot.unlockedHeight
-                if (shark && !sameUnlock && slot.viewportPolls < MAX_VIEWPORT_POLLS &&
-                    (fault == FAULT_STALE_VIEWPORT || fault == FAULT_STALE_FRAME)
+                if (shouldRearmSharkViewport(
+                        shark = shark,
+                        fault = fault,
+                        viewWidth = widthNow,
+                        viewHeight = heightNow,
+                        unlockedWidth = slot.unlockedWidth,
+                        unlockedHeight = slot.unlockedHeight,
+                        gaveUpWidth = slot.gaveUpWidth,
+                        gaveUpHeight = slot.gaveUpHeight,
+                    )
                 ) {
+                    if (slot.viewportPolls >= MAX_VIEWPORT_POLLS) {
+                        slot.viewportPolls = 0
+                        slot.retries = 0
+                    }
                     slot.holdZoom = true
                     slot.unlockPosted = false
                     slot.viewportStable = 0
@@ -608,6 +688,8 @@ private fun publishTextOnly(slot: Slot) {
 
 private fun retryReconcile(webView: WebView, slot: Slot, generation: Int, fault: String) {
     if (slot.retries >= MAX_PRESENTATION_RETRIES) {
+        slot.gaveUpWidth = webView.width
+        slot.gaveUpHeight = webView.height
         Log.i(
             TAG,
             "reconcile fault=$FAULT_TIMEOUT last=$fault view=${webView.width}x${webView.height} " +
@@ -660,6 +742,9 @@ private class Slot(
     var viewportPolls: Int = 0,
     var unlockedWidth: Int = -1,
     var unlockedHeight: Int = -1,
+    var gaveUpWidth: Int = -1,
+    var gaveUpHeight: Int = -1,
+    var documentStartInstalled: Boolean = false,
     var lastFault: String = "",
     var lastAck: PresentationAck? = null,
     var onAck: ((PresentationAck) -> Unit)? = null,

@@ -131,21 +131,77 @@ object DocumentLayout {
             " }" +
             " table.setAttribute('data-hub-fit', 'table');" +
             "}" +
+            "function zoomText(value) {" +
+            " if (!value || value === 'normal') return '';" +
+            " var n = parseFloat(value);" +
+            " if (!(n > 0) || n >= 0.999) return '';" +
+            " return String(Math.round(n * 1000) / 1000);" +
+            "}" +
             "function scale(el) {" +
             " if (hidden(el)) return;" +
-            " el.style.zoom = '1';" +
-            " var needed = el.scrollWidth;" +
             " var parent = el.parentElement;" +
             " var avail = parent ? parent.clientWidth : visibleWidth();" +
             " var visible = visibleWidth();" +
             " if (visible > 0) avail = Math.min(avail || visible, visible);" +
-            " if (!(needed > 8) || !(avail > 8)) return;" +
-            " var inset = el.getBoundingClientRect().left;" +
+            " if (!(avail > 8)) return;" +
+            " var previous = zoomText(el.style.zoom);" +
+            " var zoomNow = parseFloat(previous);" +
+            " if (!(zoomNow > 0)) zoomNow = 1;" +
+            " var inset = 0;" +
+            " if (parent) {" +
+            " var bounds = el.getBoundingClientRect();" +
+            " var host = parent.getBoundingClientRect();" +
+            " inset = (bounds.left - host.left) / zoomNow;" +
+            " }" +
             " if (!(inset > 0) || inset >= avail) inset = 0;" +
+            " var apparent = el.scrollWidth;" +
+            " var storedApparent = parseFloat(el.getAttribute('data-hub-apparent') || '');" +
+            " var geo = Math.round(avail) + ':' + Math.round(inset);" +
+            " var storedRoom = el.getAttribute('data-hub-room') || '';" +
+            " var storedGeo = storedRoom.split(':').slice(0, 2).join(':');" +
+            " if (el.getAttribute('data-hub-fit') === 'zoom' && geo === storedGeo &&" +
+            " Math.abs(apparent - storedApparent) <= 1) {" +
+            " el.removeAttribute('data-hub-dirty');" +
+            " return;" +
+            " }" +
+            " var needed = zoomNow < 0.999 ? apparent / zoomNow : apparent;" +
+            " var dirty = el.getAttribute('data-hub-dirty') === '1';" +
+            " if (!(needed > 8)) {" +
+            " if (dirty) el.removeAttribute('data-hub-dirty');" +
+            " return;" +
+            " }" +
             " var room = avail - inset;" +
             " var zoom = Math.min(1, (room - 4) / needed);" +
-            " el.style.zoom = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
+            " var next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
+            " var signature = Math.round(avail) + ':' + Math.round(inset) + ':' + Math.round(needed);" +
+            " if (!dirty && el.getAttribute('data-hub-fit') === 'zoom' &&" +
+            " el.getAttribute('data-hub-room') === signature && previous === next) return;" +
+            " /* Assigning the same zoom again resets scroll anchoring on mobile WebView. */" +
+            " if (zoomNow < 0.999 && previous !== next) {" +
+            " el.style.zoom = '1';" +
+            " var measured = el.scrollWidth;" +
+            " if (!(measured > 8)) {" +
+            " el.style.zoom = previous;" +
+            " el.removeAttribute('data-hub-dirty');" +
+            " return;" +
+            " }" +
+            " needed = measured;" +
+            " room = avail - inset;" +
+            " zoom = Math.min(1, (room - 4) / needed);" +
+            " next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
+            " signature = Math.round(avail) + ':' + Math.round(inset) + ':' + Math.round(needed);" +
+            " }" +
             " el.setAttribute('data-hub-fit', 'zoom');" +
+            " el.setAttribute('data-hub-room', signature);" +
+            " el.removeAttribute('data-hub-dirty');" +
+            " if (previous === next) {" +
+            " if (zoomText(el.style.zoom) !== previous) el.style.zoom = previous;" +
+            " el.setAttribute('data-hub-apparent', String(Math.round(el.scrollWidth)));" +
+            " return;" +
+            " }" +
+            " window.__hubZoomWrites = (window.__hubZoomWrites || 0) + 1;" +
+            " el.style.zoom = next;" +
+            " el.setAttribute('data-hub-apparent', String(Math.round(el.scrollWidth)));" +
             "}" +
             "function spill(el) {" +
             " if (!el || el === document.body || el === document.documentElement) return;" +
@@ -199,18 +255,57 @@ object DocumentLayout {
             "window.addEventListener('resize', schedule);" +
             "if (window.visualViewport) window.visualViewport.addEventListener('resize', schedule);" +
             "document.addEventListener('click', schedule, true);" +
-            "var tabObs = new MutationObserver(schedule);" +
+            "var tabObs = new MutationObserver(function(records){" +
+            " var changed = false;" +
+            " for (var i = 0; i < records.length; i++) {" +
+            " var tab = records[i].target;" +
+            " var showing = getComputedStyle(tab).display !== 'none';" +
+            " if (tab.__hubShowing !== showing) {" +
+            " tab.__hubShowing = showing; changed = true; }" +
+            " }" +
+            " if (changed) schedule();" +
+            "});" +
             "function watchTabs() {" +
             " var tabs = document.querySelectorAll('[id' + '$=' + '\"-tab\"]');" +
             " for (var t = 0; t < tabs.length; t++) {" +
             " if (tabs[t].__hubWatch) continue;" +
             " tabs[t].__hubWatch = true;" +
+            " tabs[t].__hubShowing = getComputedStyle(tabs[t]).display !== 'none';" +
             " tabObs.observe(tabs[t], {attributes:true, attributeFilter:['style','class']});" +
             " }" +
             "}" +
             "watchTabs();" +
+            "function markBoard(node) {" +
+            " if (!node || node.nodeType !== 1) return;" +
+            " var board = (node.matches && node.matches(SPATIAL)) ? node :" +
+            " (node.closest ? node.closest(SPATIAL) : null);" +
+            " if (board) board.setAttribute('data-hub-dirty', '1');" +
+            "}" +
             "var app = document.getElementById('app') || document.body;" +
-            "new MutationObserver(function(){ watchTabs(); schedule(); }).observe(app, {childList:true, subtree:true});" +
+            "new MutationObserver(function(records){" +
+            " var structural = false;" +
+            " for (var i = 0; i < records.length; i++) {" +
+            " var target = records[i].target;" +
+            " if (!target || target.nodeType !== 1) continue;" +
+            " if (target.closest && target.closest(SPATIAL)) {" +
+            " markBoard(target); structural = true; break; }" +
+            " if (target.matches && target.matches('[id' + '$=' + '\"-tab\"]')) {" +
+            " structural = true; break; }" +
+            " var added = records[i].addedNodes;" +
+            " for (var j = 0; j < added.length; j++) {" +
+            " var node = added[j];" +
+            " if (node.nodeType !== 1) continue;" +
+            " var mounted = (node.matches && node.matches('table,section,[id' + '$=' + '\"-tab\"],' + SPATIAL)) ||" +
+            " (node.closest && node.closest(SPATIAL)) ||" +
+            " (node.querySelector && node.querySelector(SPATIAL));" +
+            " if (!mounted) continue;" +
+            " markBoard(node.querySelector ? (node.querySelector(SPATIAL) || node) : node);" +
+            " structural = true; break; }" +
+            " if (structural) break;" +
+            " }" +
+            " if (!structural) return;" +
+            " watchTabs(); schedule();" +
+            "}).observe(app, {childList:true, subtree:true});" +
             "fit();" +
             "return '$MARKER';" +
             "})()"
