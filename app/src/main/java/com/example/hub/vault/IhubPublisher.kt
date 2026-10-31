@@ -27,12 +27,24 @@ class IhubPublisher(
         if (archive.encrypted || archive.formatVersion != IhubArchive.FORMAT_VERSION) {
             return IhubImportResult(0, 0, "This archive format cannot be imported.")
         }
+        return writeSnapshots(archive.snapshots.size) { archive.snapshots[it] }
+    }
+
+    suspend fun import(source: IhubSource): IhubImportResult {
+        if (source.encrypted || source.formatVersion != IhubArchive.FORMAT_VERSION) {
+            return IhubImportResult(0, 0, "This archive format cannot be imported.")
+        }
+        return writeSnapshots(source.entries.size) { source.snapshot(it) }
+    }
+
+    private suspend fun writeSnapshots(count: Int, load: (Int) -> IhubSnapshotFile): IhubImportResult {
         val before = instances.getAll().associate { it.gameId to it.snapshotPayload }
         var imported = 0
         var duplicates = 0
         try {
             room.withTransaction {
-                for (file in archive.snapshots) {
+                for (index in 0 until count) {
+                    val file = load(index)
                     val existing = snapshots.getById(file.id)
                     if (existing != null) {
                         if (existing.payload != file.payload || existing.contentSha256 != file.contentSha256) {

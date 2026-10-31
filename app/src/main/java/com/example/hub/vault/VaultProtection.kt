@@ -9,7 +9,11 @@ import com.example.hub.database.SnapshotRecord
 import com.example.hub.database.SnapshotRetention
 import com.example.hub.database.originForReason
 import com.example.hub.games.PayloadDigest
+import com.example.hub.sync.RemoteSnapshot
 import com.example.hub.sync.WorkstationApi
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class ProtectionOutcome(
     val applied: Boolean,
@@ -28,11 +32,27 @@ class VaultProtection(
     private val room: RoomDatabase? = null,
 ) {
     suspend fun protect(entry: VaultEntry): ProtectionOutcome {
-        val apply = suspend {
-            if (entry.residence == VaultResidence.REMOTE_ONLY) protectRemote(entry) else protectLocal(entry)
+        if (entry.residence != VaultResidence.REMOTE_ONLY) {
+            return transaction { protectLocal(entry) }
         }
-        val database = room
-        return if (database != null) database.withTransaction { apply() } else apply()
+        val fetched = try {
+            withContext(Dispatchers.IO) { api.fetchSnapshot(entry.gameId, entry.id) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } ?: return ProtectionOutcome(
+            false,
+            "The workstation snapshot could not be downloaded. It is not protected.",
+        )
+        val sha = PayloadDigest.sha256(fetched.snapshotPayload)
+        if (fetched.sha256.isEmpty() || fetched.sha256 != sha || entry.sha256 != sha) {
+            return ProtectionOutcome(false, "The downloaded payload did not match its hash. It is not protected.")
+        }
+        if (fetched.snapshotId != entry.id || fetched.lineageId != entry.lineageId || fetched.gameId != entry.gameId) {
+            return ProtectionOutcome(false, "The downloaded snapshot identity does not match. It is not protected.")
+        }
+        return transaction { writeRemote(fetched, sha) }
     }
 
     suspend fun unprotect(entry: VaultEntry): ProtectionOutcome {
@@ -77,19 +97,7 @@ class VaultProtection(
         return ProtectionOutcome(true, "Protected. Retention will keep this snapshot.")
     }
 
-    private suspend fun protectRemote(entry: VaultEntry): ProtectionOutcome {
-        val fetched = api.fetchSnapshot(entry.gameId, entry.id)
-            ?: return ProtectionOutcome(
-                false,
-                "The workstation snapshot could not be downloaded. It is not protected.",
-            )
-        val sha = PayloadDigest.sha256(fetched.snapshotPayload)
-        if (fetched.sha256.isEmpty() || fetched.sha256 != sha || entry.sha256 != sha) {
-            return ProtectionOutcome(false, "The downloaded payload did not match its hash. It is not protected.")
-        }
-        if (fetched.snapshotId != entry.id || fetched.lineageId != entry.lineageId || fetched.gameId != entry.gameId) {
-            return ProtectionOutcome(false, "The downloaded snapshot identity does not match. It is not protected.")
-        }
+    private suspend fun writeRemote(fetched: RemoteSnapshot, sha: String): ProtectionOutcome {
         val existing = snapshots.getById(fetched.snapshotId)
         if (existing != null) {
             if (existing.payload != fetched.snapshotPayload) {
@@ -121,6 +129,11 @@ class VaultProtection(
             error("Protection was not stored.")
         }
         return ProtectionOutcome(true, "Downloaded, verified, and protected on this phone.")
+    }
+
+    private suspend fun <T> transaction(block: suspend () -> T): T {
+        val database = room
+        return if (database != null) database.withTransaction { block() } else block()
     }
 
     private suspend fun systemProtected(row: SnapshotRecord): Boolean {

@@ -7,6 +7,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.RandomAccessFile
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -102,6 +104,28 @@ class IhubArchiveTest {
         val linkRead = IhubArchive.read(link)
         val linkMessage = (linkRead as IhubReadResult.Rejected).message
         assertTrue(linkMessage, linkMessage.contains("symbolic link"))
+    }
+
+    @Test
+    fun streamingStopsBeforeAnOversizedArchiveIsAllocated() {
+        val input = ByteArray(200) { 1 }.inputStream()
+        val file = File.createTempFile("ihub-limit", ".bin")
+        try {
+            val copied = IhubArchive.copyLimited(input, file, 100)
+            assertFalse(copied)
+            assertTrue(file.length() <= 100L)
+        } finally {
+            file.delete()
+        }
+        val sparse = File.createTempFile("ihub-sparse", ".zip")
+        try {
+            RandomAccessFile(sparse, "rw").use { it.setLength(IhubArchive.MAX_COMPRESSED_BYTES + 1) }
+            val read = IhubArchive.read(sparse)
+            assertTrue(read is IhubReadResult.Rejected)
+            assertTrue((read as IhubReadResult.Rejected).message.contains("compressed"))
+        } finally {
+            sparse.delete()
+        }
     }
 
     @Test

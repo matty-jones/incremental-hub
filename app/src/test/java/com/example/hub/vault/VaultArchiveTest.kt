@@ -112,6 +112,81 @@ class VaultArchiveTest {
         }
     }
 
+    @Test
+    fun exportAllIncludesAWorkstationOnlyGame() = runTest {
+        val db = open()
+        try {
+            val payload = "remote-only-save"
+            val sha = PayloadDigest.sha256(payload)
+            val api = object : WorkstationApi {
+                override fun fetchSaves(): List<RemoteSave> = listOf(
+                    RemoteSave(
+                        gameId = "remote-only",
+                        snapshotPayload = payload,
+                        capturedAtMillis = 5L,
+                        profileName = "hub",
+                        sessionIdentity = "session",
+                        lastPlayedAtMillis = 5L,
+                        resumeToken = null,
+                        recoveryState = null,
+                    ),
+                )
+                override fun putSave(save: RemoteSave): PutResult? = null
+                override fun lookupUpdate(): UpdateCheck = UpdateCheck.Current
+                override fun download(url: String, destination: File): Boolean = false
+                override fun fetchHistoryIndex(
+                    gameId: String,
+                    afterReceivedAt: Long,
+                    afterSnapshotId: String,
+                    limit: Int,
+                ): HistoryPage = HistoryPage(
+                    listOf(
+                        SnapshotMetadata(
+                            snapshotId = "remote-1",
+                            gameId = gameId,
+                            lineageId = "line-r",
+                            sha256 = sha,
+                            capturedAtMillis = 5L,
+                            receivedAtMillis = 6L,
+                            integrity = "accepted",
+                            source = "workstation",
+                        ),
+                    ),
+                    complete = true,
+                )
+                override fun fetchSnapshot(gameId: String, snapshotId: String): RemoteSnapshot = RemoteSnapshot(
+                    snapshotId = snapshotId,
+                    gameId = gameId,
+                    lineageId = "line-r",
+                    sha256 = sha,
+                    snapshotPayload = payload,
+                    capturedAtMillis = 5L,
+                    integrity = "accepted",
+                    source = "workstation",
+                )
+            }
+            assertTrue(db.snapshotDao().gameIds().isEmpty())
+            val exported = VaultArchive(
+                db.snapshotDao(),
+                api,
+                IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao()),
+                "test",
+            ).exportAll()
+            assertTrue(exported is IhubExportResult.Ready)
+            val ready = exported as IhubExportResult.Ready
+            val read = IhubArchive.read(ready.bytes)
+            assertTrue(read is IhubReadResult.Ok)
+            val archive = (read as IhubReadResult.Ok).archive
+            assertEquals(1, archive.snapshots.size)
+            assertEquals("remote-only", archive.snapshots.single().gameId)
+            assertEquals(payload, archive.snapshots.single().payload)
+            assertTrue(archive.complete)
+            ready.file.delete()
+        } finally {
+            db.close()
+        }
+    }
+
     private fun open(): HubDatabase {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val inline = Executor { it.run() }

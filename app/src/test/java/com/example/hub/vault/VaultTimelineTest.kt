@@ -239,6 +239,51 @@ class VaultCatalogTest {
         assertEquals(0, api.snapshotCalls)
     }
 
+    @Test
+    fun workstationIoRunsOffTheCallerAndANetworkFailureKeepsLocalHistory() = runTest {
+        val caller = Thread.currentThread().name
+        val remote = SnapshotMetadata(
+            snapshotId = "remote-1",
+            gameId = SHARK_GAME_ID,
+            lineageId = "legacy",
+            sha256 = PayloadDigest.sha256("remote-bytes"),
+            capturedAtMillis = 20,
+            receivedAtMillis = 30,
+            integrity = "accepted",
+            source = "phone",
+        )
+        val api = FakeWorkstation(
+            index = HistoryPage(listOf(remote), complete = true),
+            snapshot = RemoteSnapshot(
+                snapshotId = "remote-1",
+                gameId = SHARK_GAME_ID,
+                lineageId = "legacy",
+                sha256 = PayloadDigest.sha256("remote-bytes"),
+                snapshotPayload = "remote-bytes",
+                capturedAtMillis = 20,
+                integrity = "accepted",
+                source = "phone",
+            ),
+        )
+        val catalog = VaultCatalog(MemoryIndex(listOf(meta("local", 2, 4))), api, pageSize = 10)
+        val browse = catalog.browse(SHARK_GAME_ID, 0, advanceRemote = true)
+        assertTrue(browse.entries.any { it.id == "local" })
+        assertTrue(api.indexThread!!.contains("DefaultDispatcher-worker"))
+        assertTrue(api.indexThread != caller)
+        val entry = browse.entries.single { it.id == "remote-1" }
+        assertEquals("remote-bytes", catalog.readPayload(entry))
+        assertTrue(api.snapshotThread!!.contains("DefaultDispatcher-worker"))
+        assertTrue(api.snapshotThread != caller)
+
+        val failed = FakeWorkstation()
+        failed.failNetwork = true
+        val offline = VaultCatalog(MemoryIndex(listOf(meta("local", 2, 4))), failed, pageSize = 10)
+            .browse(SHARK_GAME_ID, 0, advanceRemote = true)
+        assertFalse(offline.workstationReachable)
+        assertTrue(offline.entries.any { it.id == "local" })
+        assertEquals(0, failed.snapshotCalls)
+    }
+
     private fun meta(id: String, sequence: Long, bytes: Int): SnapshotMeta {
         return SnapshotMeta(
             id = id,
@@ -291,6 +336,9 @@ private class FakeWorkstation(
     var snapshot: RemoteSnapshot? = null,
 ) : WorkstationApi {
     var snapshotCalls = 0
+    var indexThread: String? = null
+    var snapshotThread: String? = null
+    var failNetwork = false
 
     override fun fetchSaves(): List<RemoteSave>? = null
 
@@ -305,10 +353,16 @@ private class FakeWorkstation(
         afterReceivedAt: Long,
         afterSnapshotId: String,
         limit: Int,
-    ): HistoryPage? = index
+    ): HistoryPage? {
+        indexThread = Thread.currentThread().name
+        if (failNetwork) throw java.io.IOException("workstation down")
+        return index
+    }
 
     override fun fetchSnapshot(gameId: String, snapshotId: String): RemoteSnapshot? {
+        snapshotThread = Thread.currentThread().name
         snapshotCalls += 1
+        if (failNetwork) throw java.io.IOException("workstation down")
         return snapshot
     }
 }

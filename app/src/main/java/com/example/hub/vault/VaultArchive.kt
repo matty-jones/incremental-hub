@@ -4,11 +4,14 @@ import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotRecord
 import com.example.hub.games.PayloadDigest
 import com.example.hub.sync.HistoryPage
+import com.example.hub.sync.RemoteSave
 import com.example.hub.sync.RemoteSnapshot
 import com.example.hub.sync.SnapshotMetadata
 import com.example.hub.sync.WorkstationApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.util.UUID
 
@@ -35,17 +38,44 @@ class VaultArchive(
     }
 
     suspend fun exportAll(): IhubExportResult {
-        return exportGames(snapshots.gameIds())
+        val remote = try {
+            withContext(Dispatchers.IO) { api.fetchSaves() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } ?: return IhubExportResult.Refused(
+            "The workstation game list could not be read. This is not a complete archive.",
+            listOf("workstation games"),
+        )
+        val ids = (snapshots.gameIds() + remote.map { it.gameId }).distinct().sorted()
+        return exportGames(ids, remote)
     }
 
-    suspend fun import(bytes: ByteArray): IhubImportResult {
-        return when (val read = IhubArchive.read(bytes)) {
-            is IhubReadResult.Rejected -> IhubImportResult(0, 0, read.message)
-            is IhubReadResult.Ok -> publisher.import(read.archive)
+    suspend fun import(file: File): IhubImportResult {
+        return when (val opened = IhubArchive.open(file)) {
+            is IhubOpenResult.Rejected -> IhubImportResult(0, 0, opened.message)
+            is IhubOpenResult.Ready -> publisher.import(opened.source)
         }
     }
 
-    private suspend fun exportGames(gameIds: List<String>): IhubExportResult {
+    suspend fun import(bytes: ByteArray): IhubImportResult {
+        if (bytes.size.toLong() > IhubArchive.MAX_COMPRESSED_BYTES) {
+            return IhubImportResult(0, 0, "The archive is larger than the compressed limit.")
+        }
+        val file = File.createTempFile("ihub-import", ".zip")
+        return try {
+            file.outputStream().use { it.write(bytes) }
+            import(file)
+        } finally {
+            file.delete()
+        }
+    }
+
+    private suspend fun exportGames(
+        gameIds: List<String>,
+        remoteSaves: List<RemoteSave> = emptyList(),
+    ): IhubExportResult {
         val drafts = mutableListOf<IhubSnapshotDraft>()
         val omissions = mutableListOf<String>()
         for (gameId in gameIds) {
@@ -66,6 +96,12 @@ class VaultArchive(
                 } else {
                     drafts.add(draft)
                 }
+            }
+            val save = remoteSaves.firstOrNull { it.gameId == gameId }
+            if (save != null && save.snapshotPayload.isNotEmpty() &&
+                drafts.none { it.gameId == gameId && it.payload == save.snapshotPayload }
+            ) {
+                omissions.add("$gameId workstation pointer")
             }
         }
         if (omissions.isNotEmpty()) {

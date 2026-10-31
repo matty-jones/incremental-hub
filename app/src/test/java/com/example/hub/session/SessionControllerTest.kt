@@ -2967,6 +2967,7 @@ class SessionControllerTest {
         val session = controllerWithoutDocumentHook(
             documentReady = { true },
             readiness = { _, _ -> true },
+            capture = { _, _ -> storage },
             peek = { _, _ -> PeekOutcome.Value(storage) },
             runtime = { _, _, _ -> true },
             onWrite = { storage = it.orEmpty() },
@@ -3048,6 +3049,158 @@ class SessionControllerTest {
         assertTrue(synced.isEmpty())
         assertFalse(session.blocksExternalPointerMove())
         assertTrue(session.vaultPlan.value!!.localBranch)
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun aFailedPreRestoreCaptureLeavesTheLiveProfileAlone() = runTest {
+        val saved = sharkPayload(feature = 4, fishExponent = "15", played = "10", prestige = 2)
+        val older = sharkPayload(feature = 1, fishExponent = "2", played = "1", prestige = 0)
+        val snapshots = StubSnapshotDao()
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            readiness = { _, _ -> true },
+            capture = { _, _ -> null },
+            peek = { _, _ -> PeekOutcome.Value(saved) },
+            runtime = { _, _, _ -> true },
+            snapshots = snapshots,
+        )
+        snapshots.insert(
+            SnapshotRecord(
+                id = "older",
+                gameId = "shark-incremental",
+                sequence = 1,
+                capturedAtMillis = 10L,
+                reason = "cadence",
+                pinned = false,
+                payload = older,
+                progressJson = null,
+                lineageId = "legacy",
+                contentSha256 = PayloadDigest.sha256(older),
+            ),
+        )
+        dao.upsert(progressedInstance(saved, playedAt = 20L).copy(highWaterSnapshotId = "kept", lineageId = "legacy"))
+        snapshots.insert(
+            SnapshotRecord(
+                id = "kept",
+                gameId = "shark-incremental",
+                sequence = 2,
+                capturedAtMillis = 20L,
+                reason = "cadence",
+                pinned = true,
+                payload = saved,
+                progressJson = null,
+                lineageId = "legacy",
+                contentSha256 = PayloadDigest.sha256(saved),
+            ),
+        )
+        session.open("shark-incremental")
+        assertEquals(SessionState.Playing, session.state.value)
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        val generation = session.webViewGeneration.value
+        session.stageVaultRestore("older", "legacy")
+        session.confirmVaultRestore(branch = true)
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(generation, session.webViewGeneration.value)
+        assertEquals(saved, dao.get("shark-incremental")!!.snapshotPayload)
+        assertEquals("legacy", dao.get("shark-incremental")!!.lineageId)
+        assertEquals(saved, snapshots.getById("kept")!!.payload)
+        assertTrue(snapshots.getById("kept")!!.pinned)
+        assertTrue(session.sessionError.value.orEmpty().contains("could not be saved"))
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun playingForwardToBStaysRecoverableWhenAnOlderRestoreFailsOrIsConfirmed() = runTest {
+        val savedA = sharkPayload(feature = 4, fishExponent = "15", played = "10", prestige = 2)
+        val playedB = sharkPayload(feature = 9, fishExponent = "40", played = "100", prestige = 2639)
+        val older = sharkPayload(feature = 1, fishExponent = "2", played = "1", prestige = 0)
+        val snapshots = StubSnapshotDao()
+        val synced = mutableListOf<String?>()
+        var acceptRuntime = false
+        var storage = savedA
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            readiness = { _, _ -> true },
+            capture = { _, _ -> playedB },
+            peek = { _, _ -> PeekOutcome.Value(storage) },
+            runtime = { _, _, _ -> acceptRuntime },
+            onWrite = { storage = it.orEmpty() },
+            snapshots = snapshots,
+            onSnapshotSaved = { synced.add(it.snapshotPayload) },
+        )
+        snapshots.insert(
+            SnapshotRecord(
+                id = "older",
+                gameId = "shark-incremental",
+                sequence = 1,
+                capturedAtMillis = 10L,
+                reason = "cadence",
+                pinned = false,
+                payload = older,
+                progressJson = null,
+                lineageId = "legacy",
+                contentSha256 = PayloadDigest.sha256(older),
+            ),
+        )
+        snapshots.insert(
+            SnapshotRecord(
+                id = "saved-a",
+                gameId = "shark-incremental",
+                sequence = 2,
+                capturedAtMillis = 20L,
+                reason = "cadence",
+                pinned = true,
+                payload = savedA,
+                progressJson = null,
+                lineageId = "legacy",
+                contentSha256 = PayloadDigest.sha256(savedA),
+            ),
+        )
+        dao.upsert(
+            progressedInstance(savedA, playedAt = 20L).copy(
+                highWaterSnapshotId = "saved-a",
+                lineageId = "legacy",
+            ),
+        )
+        session.open("shark-incremental")
+        assertEquals(SessionState.Playing, session.state.value)
+        val view = WebView(ApplicationProvider.getApplicationContext())
+        session.registerWebView(view)
+        val generation = session.webViewGeneration.value
+        session.stageVaultRestore("older", "legacy")
+        session.confirmVaultRestore(branch = false)
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(generation, session.webViewGeneration.value)
+        assertEquals(playedB, dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(snapshots.history("shark-incremental").any { it.payload == playedB && it.pinned })
+        assertTrue(synced.all { it == playedB })
+        assertEquals(older, snapshots.getById("older")!!.payload)
+
+        session.confirmVaultRestore(branch = true)
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(playedB, dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(snapshots.history("shark-incremental").any { it.payload == playedB && it.pinned })
+
+        acceptRuntime = true
+        session.confirmVaultRestore(branch = true)
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(1L, session.inspectedSequence.value)
+        session.confirmVaultRestore(branch = true)
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(older, dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(dao.get("shark-incremental")!!.lineageId != "legacy")
+        assertTrue(snapshots.history("shark-incremental").any { it.payload == playedB && it.pinned })
+        assertEquals(older, snapshots.getById("older")!!.payload)
+        assertTrue(synced.all { it == playedB })
         session.forceCloseForTest()
     }
 

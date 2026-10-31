@@ -6,6 +6,9 @@ import com.example.hub.database.SnapshotReasons
 import com.example.hub.games.PayloadDigest
 import com.example.hub.sync.SnapshotMetadata
 import com.example.hub.sync.WorkstationApi
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Local snapshot index. Implementations must not return payload text from
@@ -42,7 +45,7 @@ class VaultCatalog(
         val highWaterId = local.highWaterId(gameId)
         val walk = remote.getOrPut(gameId) { RemoteWalk() }
         if (advanceRemote && !walk.complete) {
-            val page = api.fetchHistoryIndex(gameId, walk.afterAt, walk.afterId, pageSize)
+            val page = workstation { api.fetchHistoryIndex(gameId, walk.afterAt, walk.afterId, pageSize) }
             if (page == null) {
                 walk.reachable = false
             } else {
@@ -89,7 +92,7 @@ class VaultCatalog(
         }
         val walk = remote[entry.gameId]
         if (walk == null || !walk.reachable) return null
-        val fetched = api.fetchSnapshot(entry.gameId, entry.id) ?: run {
+        val fetched = workstation { api.fetchSnapshot(entry.gameId, entry.id) } ?: run {
             walk.reachable = false
             return null
         }
@@ -149,6 +152,16 @@ class VaultCatalog(
             highWater = false,
             storedDetail = null,
         )
+    }
+
+    private suspend fun <T> workstation(block: () -> T): T? {
+        return try {
+            withContext(Dispatchers.IO) { block() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private class RemoteWalk {

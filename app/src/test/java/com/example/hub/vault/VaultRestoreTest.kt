@@ -55,6 +55,31 @@ class VaultRestoreTest {
     }
 
     @Test
+    fun aSaveBehindTheHighWaterRequiresABranchEvenWhenItIsAheadOfThePointer() = runTest {
+        val pointer = shark(feature = 4, fish = "1", played = "10", prestige = 2)
+        val highWater = shark(feature = 9, fish = "1", played = "100", prestige = 2639)
+        val selected = shark(feature = 6, fish = "1", played = "20", prestige = 10)
+        val assessed = assessVaultRestore(
+            requestedId = "snap",
+            requestedLineageId = "legacy",
+            recordId = "snap",
+            recordLineageId = "legacy",
+            recordSha256 = PayloadDigest.sha256(selected),
+            payload = selected,
+            capturedAtMillis = 10L,
+            pointerPayload = pointer,
+            highWaterPayload = highWater,
+            adapter = adapter,
+            confirmed = true,
+            branchConfirmed = false,
+        )
+        assertEquals(ProgressionClass.REGRESSED, assessed.classification)
+        assertTrue(assessed.requiresBranch)
+        assertFalse(assessed.allowed)
+        assertFalse(assessed.proposeWorkstationPointer)
+    }
+
+    @Test
     fun hashAndLineageFailuresWriteNothing() = runTest {
         val payload = shark(feature = 4, fish = "1", played = "10", prestige = 1)
         val mismatch = assessVaultRestore(

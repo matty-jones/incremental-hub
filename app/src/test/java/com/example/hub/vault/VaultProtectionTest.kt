@@ -145,6 +145,35 @@ class VaultProtectionTest {
         }
     }
 
+    @Test
+    fun remoteFetchRunsOutsideTheRoomTransaction() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val inline = Executor { it.run() }
+        val db = Room.inMemoryDatabaseBuilder(context, HubDatabase::class.java)
+            .allowMainThreadQueries()
+            .setQueryExecutor(inline)
+            .setTransactionExecutor(inline)
+            .build()
+        try {
+            var insideTransaction = true
+            var threadName = ""
+            val api = MutableApi(null)
+            api.onFetch = {
+                insideTransaction = db.inTransaction()
+                threadName = Thread.currentThread().name
+                throw java.io.IOException("workstation down")
+            }
+            val protection = VaultProtection(db.snapshotDao(), db.gameInstanceDao(), api, db)
+            val outcome = protection.protect(remoteEntry("remote-1", "abc"))
+            assertFalse(outcome.applied)
+            assertFalse(insideTransaction)
+            assertTrue(threadName.contains("DefaultDispatcher-worker"))
+            assertEquals(0, db.snapshotDao().countForGame(SHARK_GAME_ID))
+        } finally {
+            db.close()
+        }
+    }
+
     private fun open(context: Context, name: String): HubDatabase {
         return Room.databaseBuilder(context, HubDatabase::class.java, name)
             .allowMainThreadQueries()
@@ -238,9 +267,14 @@ private class OfflineApi : WorkstationApi {
 }
 
 private class MutableApi(var snapshot: RemoteSnapshot?) : WorkstationApi {
+    var onFetch: (() -> Unit)? = null
+
     override fun fetchSaves(): List<RemoteSave>? = null
     override fun putSave(save: RemoteSave): PutResult? = null
     override fun lookupUpdate(): UpdateCheck = UpdateCheck.Unreachable
     override fun download(url: String, destination: File): Boolean = false
-    override fun fetchSnapshot(gameId: String, snapshotId: String): RemoteSnapshot? = snapshot
+    override fun fetchSnapshot(gameId: String, snapshotId: String): RemoteSnapshot? {
+        onFetch?.invoke()
+        return snapshot
+    }
 }

@@ -34,7 +34,7 @@ import com.example.hub.ui.chrome.HubTextButton
 import com.example.hub.ui.chrome.HubTopBar
 import com.example.hub.vault.IhubArchive
 import com.example.hub.vault.IhubExportResult
-import com.example.hub.vault.IhubReadResult
+import com.example.hub.vault.IhubOpenResult
 import com.example.hub.vault.VaultArchive
 import com.example.hub.vault.VaultAssessment
 import com.example.hub.vault.VaultAvailability
@@ -98,11 +98,19 @@ fun VaultHost(
         val store = archive
         if (uri == null || store == null) return@rememberLauncherForActivityResult
         scope.launch {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { readLimited(it) }
-            val message = if (bytes == null) {
+            val incoming = java.io.File.createTempFile("ihub-import", ".zip", context.cacheDir)
+            val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                IhubArchive.copyLimited(input, incoming, IhubArchive.MAX_COMPRESSED_BYTES)
+            } ?: false
+            val message = if (!copied) {
+                incoming.delete()
                 "The archive could not be read."
             } else {
-                store.import(bytes).message
+                try {
+                    store.import(incoming).message
+                } finally {
+                    incoming.delete()
+                }
             }
             load(offset, advanceRemote = false)
             notice = message
@@ -587,36 +595,28 @@ private fun writeArchive(
     if (built is IhubExportResult.Refused) return built.message
     if (built !is IhubExportResult.Ready) return "Nothing was exported."
     val wrote = runCatching {
-        context.contentResolver.openOutputStream(uri)?.use { stream -> stream.write(built.bytes) }
-            ?: error("The archive was not written.")
+        context.contentResolver.openOutputStream(uri)?.use { output ->
+            built.file.inputStream().use { input -> input.copyTo(output) }
+        } ?: error("The archive was not written.")
     }
+    built.file.delete()
     if (wrote.isFailure) return "The archive was not written."
+    val check = java.io.File.createTempFile("ihub-verify", ".zip", context.cacheDir)
     val readBack = runCatching {
-        context.contentResolver.openInputStream(uri)?.use { readLimited(it) }
-    }.getOrNull()
-    val verified = readBack?.let { IhubArchive.read(it) }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            IhubArchive.copyLimited(input, check, IhubArchive.MAX_COMPRESSED_BYTES)
+        } ?: false
+    }.getOrDefault(false)
+    val verified = if (readBack) IhubArchive.open(check) else null
+    check.delete()
     return if (
-        verified is IhubReadResult.Ok &&
-        verified.archive.snapshots.size == built.snapshotCount &&
-        !verified.archive.encrypted &&
-        verified.archive.label.contains("Unencrypted")
+        verified is IhubOpenResult.Ready &&
+        verified.source.entries.size == built.snapshotCount &&
+        !verified.source.encrypted &&
+        verified.source.label.contains("Unencrypted")
     ) {
         "Exported ${built.snapshotCount} snapshots and verified the archive. It is unencrypted."
     } else {
         "The provider accepted the archive, but it could not be verified."
     }
-}
-
-private fun readLimited(input: java.io.InputStream): ByteArray? {
-    val output = java.io.ByteArrayOutputStream()
-    val buffer = ByteArray(8192)
-    var total = 0L
-    while (true) {
-        val count = input.read(buffer)
-        if (count < 0) break
-        total += count
-        if (total > IhubArchive.MAX_COMPRESSED_BYTES) return null
-        output.write(buffer, 0, count)
-    }
-    return output.toByteArray()
 }

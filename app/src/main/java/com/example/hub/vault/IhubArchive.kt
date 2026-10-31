@@ -4,9 +4,12 @@ import com.example.hub.games.PayloadDigest
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.InputStream
+import java.io.RandomAccessFile
 import java.time.Instant
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
+import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 data class IhubSnapshotDraft(
@@ -51,8 +54,22 @@ data class IhubContents(
 )
 
 sealed class IhubExportResult {
-    data class Ready(val bytes: ByteArray, val snapshotCount: Int) : IhubExportResult()
+    data class Ready(val file: File, val snapshotCount: Int) : IhubExportResult() {
+        val bytes: ByteArray
+            get() {
+                val length = file.length()
+                if (length > 16L * 1024 * 1024) {
+                    error("Refusing to load an archive larger than 16 MiB into memory.")
+                }
+                return file.readBytes()
+            }
+    }
     data class Refused(val message: String, val omissions: List<String>) : IhubExportResult()
+}
+
+sealed class IhubOpenResult {
+    data class Ready(val source: IhubSource) : IhubOpenResult()
+    data class Rejected(val message: String) : IhubOpenResult()
 }
 
 sealed class IhubReadResult {
@@ -68,6 +85,8 @@ object IhubArchive {
     const val MAX_EXPANDED_BYTES = 1024L * 1024 * 1024
     const val MAX_ENTRIES = 10_000
     const val MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+    private const val MAX_METADATA_BYTES = 1024L * 1024L
+    private const val MAX_CENTRAL_DIRECTORY = 8L * 1024L * 1024L
 
     fun export(
         drafts: List<IhubSnapshotDraft>,
@@ -97,7 +116,6 @@ object IhubArchive {
                 missing,
             )
         }
-        val files = linkedMapOf<String, ByteArray>()
         val snapshots = drafts.filter { it.payload != null }
         val byGame = snapshots.groupBy { it.gameId }
         for (gameId in byGame.keys.sorted()) {
@@ -108,14 +126,8 @@ object IhubArchive {
             if (lineages.any { !safeSegment(it) }) {
                 return IhubExportResult.Refused("A lineage id cannot be stored in an archive path.", lineages)
             }
-            files["games/$gameId/instance.json"] = JSONObject()
-                .put("gameId", gameId)
-                .put("lineageIds", JSONArray(lineages))
-                .toString()
-                .toByteArray(Charsets.UTF_8)
         }
-        val payloadBytes = linkedMapOf<String, ByteArray>()
-        for (draft in snapshots.sortedWith(compareBy({ it.gameId }, { it.sequence }, { it.id }))) {
+        for (draft in snapshots) {
             if (!safeSegment(draft.id)) {
                 return IhubExportResult.Refused("Snapshot id ${draft.id} cannot be stored in an archive path.", listOf(draft.id))
             }
@@ -128,176 +140,279 @@ object IhubArchive {
             if (draft.storedSha256.isNotEmpty() && draft.storedSha256 != sha) {
                 return IhubExportResult.Refused("Snapshot ${draft.id} does not match its stored hash.", listOf(draft.id))
             }
-            payloadBytes.putIfAbsent(sha, bytes)
-            val capturedAt = Instant.ofEpochMilli(draft.capturedAtMillis).toString()
-            files["snapshots/${draft.id}.json"] = JSONObject()
-                .put("formatVersion", FORMAT_VERSION)
-                .put("snapshotId", draft.id)
-                .put("gameId", draft.gameId)
-                .put("lineageId", draft.lineageId)
-                .put("captureSequence", draft.sequence)
-                .put("capturedAt", capturedAt)
-                .put("capturedAtMillis", draft.capturedAtMillis)
-                .put("reason", draft.reason)
-                .put("origin", draft.origin)
-                .put("pinned", draft.pinned)
-                .put("userProtected", draft.userProtected)
-                .put("contentSha256", sha)
-                .put("payloadPath", "payloads/$sha")
-                .toString()
-                .toByteArray(Charsets.UTF_8)
         }
-        for ((sha, bytes) in payloadBytes) {
-            files["payloads/$sha"] = bytes
+        val file = File.createTempFile("ihub-export", ".zip")
+        file.deleteOnExit()
+        try {
+            ZipOutputStream(file.outputStream()).use { zip ->
+                val members = JSONArray()
+                val games = JSONArray()
+                fun put(path: String, body: ByteArray, record: Boolean) {
+                    val entry = ZipEntry(path)
+                    entry.time = 0L
+                    zip.putNextEntry(entry)
+                    zip.write(body)
+                    zip.closeEntry()
+                    if (record) {
+                        members.put(
+                            JSONObject()
+                                .put("path", path)
+                                .put("bytes", body.size)
+                                .put("sha256", sha256(body)),
+                        )
+                    }
+                }
+                for (gameId in byGame.keys.sorted()) {
+                    val lineages = byGame.getValue(gameId).map { it.lineageId }.distinct().sorted()
+                    put(
+                        "games/$gameId/instance.json",
+                        JSONObject()
+                            .put("gameId", gameId)
+                            .put("lineageIds", JSONArray(lineages))
+                            .toString()
+                            .toByteArray(Charsets.UTF_8),
+                        true,
+                    )
+                    games.put(
+                        JSONObject()
+                            .put("gameId", gameId)
+                            .put("lineageIds", JSONArray(lineages))
+                            .put("snapshotIds", JSONArray(byGame.getValue(gameId).map { it.id }.sorted())),
+                    )
+                }
+                val writtenPayloads = mutableSetOf<String>()
+                var expanded = 0L
+                for (draft in snapshots.sortedWith(compareBy({ it.gameId }, { it.sequence }, { it.id }))) {
+                    val payload = draft.payload ?: continue
+                    val bytes = payload.toByteArray(Charsets.UTF_8)
+                    val sha = sha256(bytes)
+                    expanded += bytes.size
+                    if (expanded > MAX_EXPANDED_BYTES) {
+                        throw IhubFormatException("The archive expands past the limit.")
+                    }
+                    if (writtenPayloads.add(sha)) put("payloads/$sha", bytes, true)
+                    val capturedAt = Instant.ofEpochMilli(draft.capturedAtMillis).toString()
+                    put(
+                        "snapshots/${draft.id}.json",
+                        JSONObject()
+                            .put("formatVersion", FORMAT_VERSION)
+                            .put("snapshotId", draft.id)
+                            .put("gameId", draft.gameId)
+                            .put("lineageId", draft.lineageId)
+                            .put("captureSequence", draft.sequence)
+                            .put("capturedAt", capturedAt)
+                            .put("capturedAtMillis", draft.capturedAtMillis)
+                            .put("reason", draft.reason)
+                            .put("origin", draft.origin)
+                            .put("pinned", draft.pinned)
+                            .put("userProtected", draft.userProtected)
+                            .put("contentSha256", sha)
+                            .put("payloadPath", "payloads/$sha")
+                            .toString()
+                            .toByteArray(Charsets.UTF_8),
+                        true,
+                    )
+                }
+                val manifest = JSONObject()
+                    .put("formatVersion", FORMAT_VERSION)
+                    .put("archiveId", archiveId)
+                    .put("createdAt", createdAt)
+                    .put("exporterVersion", exporterVersion)
+                    .put("encrypted", false)
+                    .put("label", LABEL)
+                    .put("complete", complete && omissions.isEmpty() && missing.isEmpty())
+                    .put("omissions", JSONArray(omissions))
+                    .put("games", games)
+                    .put("snapshotIds", JSONArray(snapshots.map { it.id }.sorted()))
+                    .put("members", members)
+                put("manifest.json", manifest.toString().toByteArray(Charsets.UTF_8), false)
+            }
+        } catch (e: IhubFormatException) {
+            file.delete()
+            return IhubExportResult.Refused(e.message ?: "The archive could not be written.", emptyList())
+        } catch (e: Exception) {
+            file.delete()
+            return IhubExportResult.Refused("The archive could not be written.", emptyList())
         }
-        val members = JSONArray()
-        for ((path, bytes) in files) {
-            members.put(
-                JSONObject()
-                    .put("path", path)
-                    .put("bytes", bytes.size)
-                    .put("sha256", sha256(bytes)),
-            )
-        }
-        val games = JSONArray()
-        for (gameId in byGame.keys.sorted()) {
-            val rows = byGame.getValue(gameId)
-            games.put(
-                JSONObject()
-                    .put("gameId", gameId)
-                    .put("lineageIds", JSONArray(rows.map { it.lineageId }.distinct().sorted()))
-                    .put("snapshotIds", JSONArray(rows.map { it.id }.sorted())),
-            )
-        }
-        val manifest = JSONObject()
-            .put("formatVersion", FORMAT_VERSION)
-            .put("archiveId", archiveId)
-            .put("createdAt", createdAt)
-            .put("exporterVersion", exporterVersion)
-            .put("encrypted", false)
-            .put("label", LABEL)
-            .put("complete", complete && omissions.isEmpty() && missing.isEmpty())
-            .put("omissions", JSONArray(omissions))
-            .put("games", games)
-            .put("snapshotIds", JSONArray(snapshots.map { it.id }.sorted()))
-            .put("members", members)
-        files["manifest.json"] = manifest.toString().toByteArray(Charsets.UTF_8)
-        val zip = zip(files)
-        if (zip.size > MAX_COMPRESSED_BYTES) {
+        if (file.length() > MAX_COMPRESSED_BYTES) {
+            file.delete()
             return IhubExportResult.Refused("The archive is larger than the compressed limit.", emptyList())
         }
-        val verified = read(zip)
-        if (verified !is IhubReadResult.Ok) {
-            return IhubExportResult.Refused(
-                verified.message(),
-                emptyList(),
-            )
+        val verified = open(file)
+        if (verified !is IhubOpenResult.Ready) {
+            file.delete()
+            return IhubExportResult.Refused(verified.message(), emptyList())
         }
-        val exported = verified.archive.snapshots.associate { it.id to it.payload }
         for (draft in snapshots) {
-            if (exported[draft.id] != draft.payload) {
+            val exported = verified.source.snapshotById(draft.id)
+            if (exported?.payload != draft.payload) {
+                file.delete()
                 return IhubExportResult.Refused("The archive did not round-trip snapshot ${draft.id}.", listOf(draft.id))
             }
         }
-        return IhubExportResult.Ready(zip, snapshots.size)
+        return IhubExportResult.Ready(file, snapshots.size)
+    }
+
+    fun copyLimited(input: InputStream, destination: File, maxBytes: Long): Boolean {
+        destination.outputStream().use { output ->
+            val buffer = ByteArray(8192)
+            var total = 0L
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) return true
+                if (total + count > maxBytes) return false
+                output.write(buffer, 0, count)
+                total += count
+            }
+        }
     }
 
     fun read(bytes: ByteArray): IhubReadResult {
         if (bytes.size.toLong() > MAX_COMPRESSED_BYTES) {
             return IhubReadResult.Rejected("The archive is larger than the compressed limit.")
         }
-        val listed = try {
-            centralDirectory(bytes)
-        } catch (e: IhubFormatException) {
-            return IhubReadResult.Rejected(e.message ?: "The archive could not be read.")
+        val file = File.createTempFile("ihub-read", ".zip")
+        return try {
+            file.outputStream().use { it.write(bytes) }
+            read(file)
+        } finally {
+            file.delete()
         }
-        val extracted = linkedMapOf<String, ByteArray>()
+    }
+
+    fun read(file: File): IhubReadResult {
+        return when (val opened = open(file)) {
+            is IhubOpenResult.Rejected -> IhubReadResult.Rejected(opened.message)
+            is IhubOpenResult.Ready -> IhubReadResult.Ok(opened.source.toContents())
+        }
+    }
+
+    fun open(file: File): IhubOpenResult {
+        if (!file.isFile) return IhubOpenResult.Rejected("The archive could not be read.")
+        if (file.length() > MAX_COMPRESSED_BYTES) {
+            return IhubOpenResult.Rejected("The archive is larger than the compressed limit.")
+        }
+        val names = try {
+            centralDirectory(file)
+        } catch (e: IhubFormatException) {
+            return IhubOpenResult.Rejected(e.message ?: "The archive could not be read.")
+        }
+        val metadata = linkedMapOf<String, ByteArray>()
+        val payloadHashes = linkedMapOf<String, String>()
+        val payloadSizes = linkedMapOf<String, Int>()
         var expanded = 0L
         try {
-            ZipInputStream(bytes.inputStream()).use { zip ->
-                while (true) {
-                    val entry = zip.nextEntry ?: break
+            ZipFile(file).use { zip ->
+                val seen = mutableSetOf<String>()
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
                     val name = entry.name
-                    if (extracted.containsKey(name)) {
-                        return IhubReadResult.Rejected("The archive repeats $name.")
+                    if (!seen.add(name)) {
+                        return IhubOpenResult.Rejected("The archive repeats $name.")
                     }
+                    if (!safePath(name)) {
+                        return IhubOpenResult.Rejected("The archive contains an unsafe path.")
+                    }
+                    val payloadEntry = name.startsWith("payloads/")
+                    val cap = if (payloadEntry) MAX_PAYLOAD_BYTES.toLong() else MAX_METADATA_BYTES
                     val declared = entry.size
-                    if (declared > MAX_PAYLOAD_BYTES && name.startsWith("payloads/")) {
-                        return IhubReadResult.Rejected("A save payload is larger than the limit.")
+                    if (declared > cap || declared > MAX_EXPANDED_BYTES) {
+                        return IhubOpenResult.Rejected(
+                            if (payloadEntry) {
+                                "A save payload is larger than the limit."
+                            } else {
+                                "The archive expands past the limit."
+                            },
+                        )
                     }
-                    if (declared > MAX_EXPANDED_BYTES) {
-                        return IhubReadResult.Rejected("The archive expands past the limit.")
+                    if (expanded > MAX_EXPANDED_BYTES) {
+                        return IhubOpenResult.Rejected("The archive expands past the limit.")
                     }
-                    val cap = if (name.startsWith("payloads/")) {
-                        MAX_PAYLOAD_BYTES.toLong()
-                    } else {
-                        MAX_EXPANDED_BYTES - expanded
-                    }
-                    val body = readEntry(zip, cap)
+                    val body = readBounded(zip.getInputStream(entry), cap)
                     expanded += body.size
                     if (expanded > MAX_EXPANDED_BYTES) {
-                        return IhubReadResult.Rejected("The archive expands past the limit.")
+                        return IhubOpenResult.Rejected("The archive expands past the limit.")
                     }
-                    extracted[name] = body
-                    zip.closeEntry()
+                    if (payloadEntry) {
+                        val hash = sha256(body)
+                        val text = body.toString(Charsets.UTF_8)
+                        if (PayloadDigest.sha256(text) != hash) {
+                            return IhubOpenResult.Rejected("Snapshot payload bytes are not stable text.")
+                        }
+                        payloadHashes[name] = hash
+                        payloadSizes[name] = body.size
+                    } else if (body.size > MAX_METADATA_BYTES) {
+                        return IhubOpenResult.Rejected("The archive expands past the limit.")
+                    } else {
+                        metadata[name] = body
+                    }
+                }
+                if (seen != names.toSet()) {
+                    return IhubOpenResult.Rejected("The archive members do not match its directory.")
                 }
             }
         } catch (e: IhubFormatException) {
-            return IhubReadResult.Rejected(e.message ?: "The archive could not be read.")
+            return IhubOpenResult.Rejected(e.message ?: "The archive could not be read.")
         } catch (e: Exception) {
-            return IhubReadResult.Rejected("The archive could not be read.")
+            return IhubOpenResult.Rejected("The archive could not be read.")
         }
-        if (extracted.keys != listed.toSet()) {
-            return IhubReadResult.Rejected("The archive members do not match its directory.")
-        }
-        return interpret(extracted)
+        return interpret(file, metadata, payloadHashes, payloadSizes)
     }
 
-    private fun interpret(files: Map<String, ByteArray>): IhubReadResult {
+    private fun interpret(
+        file: File,
+        files: Map<String, ByteArray>,
+        payloadHashes: Map<String, String>,
+        payloadSizes: Map<String, Int>,
+    ): IhubOpenResult {
         val manifestBytes = files["manifest.json"]
-            ?: return IhubReadResult.Rejected("The archive has no manifest.")
+            ?: return IhubOpenResult.Rejected("The archive has no manifest.")
         val manifest = try {
             JSONObject(manifestBytes.toString(Charsets.UTF_8))
         } catch (_: Exception) {
-            return IhubReadResult.Rejected("The manifest is not valid JSON.")
+            return IhubOpenResult.Rejected("The manifest is not valid JSON.")
         }
         val version = manifest.optInt("formatVersion", -1)
         if (version != FORMAT_VERSION) {
-            return IhubReadResult.Rejected("Archive format $version is not supported.")
+            return IhubOpenResult.Rejected("Archive format $version is not supported.")
         }
         if (manifest.optBoolean("encrypted", true)) {
-            return IhubReadResult.Rejected("Encrypted archives are not supported.")
+            return IhubOpenResult.Rejected("Encrypted archives are not supported.")
         }
         val members = manifest.optJSONArray("members")
-            ?: return IhubReadResult.Rejected("The manifest has no member list.")
+            ?: return IhubOpenResult.Rejected("The manifest has no member list.")
         val listed = mutableMapOf<String, Pair<Int, String>>()
         for (index in 0 until members.length()) {
             val member = members.optJSONObject(index)
-                ?: return IhubReadResult.Rejected("A manifest member is not an object.")
+                ?: return IhubOpenResult.Rejected("A manifest member is not an object.")
             val path = member.optString("path")
             if (path.isEmpty() || listed.containsKey(path)) {
-                return IhubReadResult.Rejected("The manifest repeats a member.")
+                return IhubOpenResult.Rejected("The manifest repeats a member.")
             }
             listed[path] = member.optInt("bytes", -1) to member.optString("sha256")
         }
-        val expected = files.keys.filter { it != "manifest.json" }.toSet()
+        val expected = (files.keys + payloadHashes.keys).filter { it != "manifest.json" }.toSet()
         if (listed.keys != expected) {
-            return IhubReadResult.Rejected("The manifest members do not match the archive.")
+            return IhubOpenResult.Rejected("The manifest members do not match the archive.")
         }
         for ((path, expectedMeta) in listed) {
-            val body = files[path] ?: return IhubReadResult.Rejected("Missing $path.")
-            if (body.size != expectedMeta.first || sha256(body) != expectedMeta.second) {
-                return IhubReadResult.Rejected("The hash of $path does not match the manifest.")
+            val hash = payloadHashes[path] ?: files[path]?.let { sha256(it) }
+                ?: return IhubOpenResult.Rejected("Missing $path.")
+            val size = payloadSizes[path] ?: files[path]?.size
+                ?: return IhubOpenResult.Rejected("Missing $path.")
+            if (size != expectedMeta.first || hash != expectedMeta.second) {
+                return IhubOpenResult.Rejected("The hash of $path does not match the manifest.")
             }
         }
-        val snapshots = mutableListOf<IhubSnapshotFile>()
+        val entries = mutableListOf<IhubSnapshotMeta>()
         val seen = mutableMapOf<String, String>()
         for ((path, body) in files) {
             if (!path.startsWith("snapshots/") || !path.endsWith(".json")) continue
             val json = try {
                 JSONObject(body.toString(Charsets.UTF_8))
             } catch (_: Exception) {
-                return IhubReadResult.Rejected("$path is not valid JSON.")
+                return IhubOpenResult.Rejected("$path is not valid JSON.")
             }
             val id = json.optString("snapshotId")
             val gameId = json.optString("gameId")
@@ -305,23 +420,19 @@ object IhubArchive {
             val payloadPath = json.optString("payloadPath")
             val sha = json.optString("contentSha256")
             if (!safeSegment(id) || !safeSegment(gameId) || !safeSegment(lineageId) || !safeSegment(sha)) {
-                return IhubReadResult.Rejected("A snapshot id, game, lineage, or hash is not usable.")
+                return IhubOpenResult.Rejected("A snapshot id, game, lineage, or hash is not usable.")
             }
             if (payloadPath != "payloads/$sha") {
-                return IhubReadResult.Rejected("Snapshot $id points at the wrong payload.")
+                return IhubOpenResult.Rejected("Snapshot $id points at the wrong payload.")
             }
-            val payloadBytes = files[payloadPath]
-                ?: return IhubReadResult.Rejected("Snapshot $id is missing its payload.")
-            if (payloadBytes.size > MAX_PAYLOAD_BYTES || sha256(payloadBytes) != sha) {
-                return IhubReadResult.Rejected("Snapshot $id does not match its payload hash.")
-            }
-            val payload = payloadBytes.toString(Charsets.UTF_8)
-            if (PayloadDigest.sha256(payload) != sha) {
-                return IhubReadResult.Rejected("Snapshot $id payload bytes are not stable text.")
+            val payloadHash = payloadHashes[payloadPath]
+                ?: return IhubOpenResult.Rejected("Snapshot $id is missing its payload.")
+            if (payloadHash != sha) {
+                return IhubOpenResult.Rejected("Snapshot $id does not match its payload hash.")
             }
             val previous = seen.put(id, sha)
             if (previous != null) {
-                return IhubReadResult.Rejected(
+                return IhubOpenResult.Rejected(
                     if (previous == sha) {
                         "Snapshot $id is stored twice."
                     } else {
@@ -329,24 +440,27 @@ object IhubArchive {
                     },
                 )
             }
-            snapshots.add(
-                IhubSnapshotFile(
+            val sequence = json.optLong("captureSequence", -1)
+            val capturedAtMillis = json.optLong("capturedAtMillis", Long.MIN_VALUE)
+            val reason = json.optString("reason")
+            if (sequence < 0 || capturedAtMillis == Long.MIN_VALUE || reason.isEmpty()) {
+                return IhubOpenResult.Rejected("A snapshot is missing its sequence, time, or reason.")
+            }
+            entries.add(
+                IhubSnapshotMeta(
                     id = id,
                     gameId = gameId,
                     lineageId = lineageId,
-                    sequence = json.optLong("captureSequence", -1),
-                    capturedAtMillis = json.optLong("capturedAtMillis", Long.MIN_VALUE),
-                    reason = json.optString("reason"),
+                    sequence = sequence,
+                    capturedAtMillis = capturedAtMillis,
+                    reason = reason,
                     origin = json.optString("origin"),
                     pinned = json.optBoolean("pinned"),
                     userProtected = json.optBoolean("userProtected"),
                     contentSha256 = sha,
-                    payload = payload,
+                    payloadPath = payloadPath,
                 ),
             )
-        }
-        if (snapshots.any { it.sequence < 0 || it.capturedAtMillis == Long.MIN_VALUE || it.reason.isEmpty() }) {
-            return IhubReadResult.Rejected("A snapshot is missing its sequence, time, or reason.")
         }
         val games = mutableListOf<Pair<String, List<String>>>()
         val gameArray = manifest.optJSONArray("games") ?: JSONArray()
@@ -360,8 +474,9 @@ object IhubArchive {
         val omissionList = mutableListOf<String>()
         val omissionArray = manifest.optJSONArray("omissions") ?: JSONArray()
         for (index in 0 until omissionArray.length()) omissionList.add(omissionArray.optString(index))
-        return IhubReadResult.Ok(
-            IhubContents(
+        return IhubOpenResult.Ready(
+            IhubSource(
+                file = file,
                 formatVersion = version,
                 archiveId = manifest.optString("archiveId"),
                 createdAt = manifest.optString("createdAt"),
@@ -371,27 +486,45 @@ object IhubArchive {
                 complete = manifest.optBoolean("complete"),
                 omissions = omissionList,
                 games = games,
-                snapshots = snapshots,
+                entries = entries,
             ),
         )
     }
 
-    private fun centralDirectory(bytes: ByteArray): List<String> {
-        val eocd = findEocd(bytes)
-        if (eocd < 0) throw IhubFormatException("The archive is truncated.")
-        val entries = u16(bytes, eocd + 10)
-        val cdSize = u32(bytes, eocd + 12)
-        val cdOffset = u32(bytes, eocd + 16)
-        if (entries > MAX_ENTRIES || cdSize == 0xFFFFFFFFL || cdOffset == 0xFFFFFFFFL) {
-            throw IhubFormatException("The archive is larger than the entry limit.")
+    private fun centralDirectory(file: File): List<String> {
+        RandomAccessFile(file, "r").use { raf ->
+            val length = raf.length()
+            if (length > MAX_COMPRESSED_BYTES) {
+                throw IhubFormatException("The archive is larger than the compressed limit.")
+            }
+            if (length < 22) throw IhubFormatException("The archive is truncated.")
+            val window = minOf(length, 22L + 65535L).toInt()
+            val tail = ByteArray(window)
+            raf.seek(length - window)
+            raf.readFully(tail)
+            val eocd = findEocd(tail)
+            if (eocd < 0) throw IhubFormatException("The archive is truncated.")
+            val entryCount = u16(tail, eocd + 10)
+            val cdSize = u32(tail, eocd + 12)
+            val cdOffset = u32(tail, eocd + 16)
+            if (entryCount > MAX_ENTRIES || cdSize == 0xFFFFFFFFL || cdOffset == 0xFFFFFFFFL) {
+                throw IhubFormatException("The archive is larger than the entry limit.")
+            }
+            if (cdOffset < 0 || cdSize < 0 || cdOffset + cdSize > length || cdSize > MAX_CENTRAL_DIRECTORY) {
+                throw IhubFormatException("The archive is truncated.")
+            }
+            val directory = ByteArray(cdSize.toInt())
+            raf.seek(cdOffset)
+            raf.readFully(directory)
+            return parseCentral(directory, entryCount)
         }
-        if (cdOffset < 0 || cdSize < 0 || cdOffset + cdSize > bytes.size) {
-            throw IhubFormatException("The archive is truncated.")
-        }
+    }
+
+    private fun parseCentral(bytes: ByteArray, entries: Int): List<String> {
         val names = mutableListOf<String>()
         var expanded = 0L
-        var cursor = cdOffset.toInt()
-        val end = (cdOffset + cdSize).toInt()
+        var cursor = 0
+        val end = bytes.size
         repeat(entries) {
             if (cursor + 46 > end) throw IhubFormatException("The archive is truncated.")
             if (u32(bytes, cursor) != 0x02014b50L) throw IhubFormatException("The archive directory is not a zip directory.")
@@ -435,6 +568,28 @@ object IhubArchive {
         return -1
     }
 
+    private fun readBounded(input: InputStream, cap: Long): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        var total = 0L
+        input.use { stream ->
+            while (true) {
+                val count = stream.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > cap) throw IhubFormatException("The archive expands past the limit.")
+                output.write(buffer, 0, count)
+            }
+        }
+        return output.toByteArray()
+    }
+
+    private fun IhubOpenResult.message(): String = when (this) {
+        is IhubOpenResult.Ready -> "verified"
+        is IhubOpenResult.Rejected -> message
+    }
+
+
     private fun safePath(path: String): Boolean {
         if (path.isEmpty() || path.startsWith("/") || path.startsWith("\\") || path.contains(":")) return false
         if (path.contains('\\') || path.contains('\u0000') || path.endsWith("/")) return false
@@ -449,32 +604,35 @@ object IhubArchive {
         return value.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }
     }
 
-    private fun readEntry(zip: ZipInputStream, cap: Long): ByteArray {
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(8192)
-        var readTotal = 0L
-        while (true) {
-            val count = zip.read(buffer)
-            if (count < 0) break
-            readTotal += count
-            if (readTotal > cap) throw IhubFormatException("The archive expands past the limit.")
-            output.write(buffer, 0, count)
-        }
-        return output.toByteArray()
-    }
-
-    private fun zip(files: Map<String, ByteArray>): ByteArray {
-        val output = ByteArrayOutputStream()
-        ZipOutputStream(output).use { zip ->
-            for ((path, body) in files) {
-                val entry = ZipEntry(path)
-                entry.time = 0L
-                zip.putNextEntry(entry)
-                zip.write(body)
-                zip.closeEntry()
+    internal fun readSnapshot(meta: IhubSnapshotMeta, file: File): IhubSnapshotFile {
+        ZipFile(file).use { zip ->
+            val entry = zip.getEntry(meta.payloadPath)
+                ?: throw IhubFormatException("Snapshot ${meta.id} is missing its payload.")
+            if (entry.size > MAX_PAYLOAD_BYTES) {
+                throw IhubFormatException("A save payload is larger than the limit.")
             }
+            val bytes = readBounded(zip.getInputStream(entry), MAX_PAYLOAD_BYTES.toLong())
+            if (sha256(bytes) != meta.contentSha256) {
+                throw IhubFormatException("Snapshot ${meta.id} does not match its payload hash.")
+            }
+            val payload = bytes.toString(Charsets.UTF_8)
+            if (PayloadDigest.sha256(payload) != meta.contentSha256) {
+                throw IhubFormatException("Snapshot ${meta.id} payload bytes are not stable text.")
+            }
+            return IhubSnapshotFile(
+                id = meta.id,
+                gameId = meta.gameId,
+                lineageId = meta.lineageId,
+                sequence = meta.sequence,
+                capturedAtMillis = meta.capturedAtMillis,
+                reason = meta.reason,
+                origin = meta.origin,
+                pinned = meta.pinned,
+                userProtected = meta.userProtected,
+                contentSha256 = meta.contentSha256,
+                payload = payload,
+            )
         }
-        return output.toByteArray()
     }
 
     private fun sha256(bytes: ByteArray): String {
@@ -502,3 +660,53 @@ object IhubArchive {
 }
 
 private class IhubFormatException(message: String) : IllegalArgumentException(message)
+
+data class IhubSnapshotMeta(
+    val id: String,
+    val gameId: String,
+    val lineageId: String,
+    val sequence: Long,
+    val capturedAtMillis: Long,
+    val reason: String,
+    val origin: String,
+    val pinned: Boolean,
+    val userProtected: Boolean,
+    val contentSha256: String,
+    val payloadPath: String,
+)
+
+class IhubSource(
+    val file: File,
+    val formatVersion: Int,
+    val archiveId: String,
+    val createdAt: String,
+    val exporterVersion: String,
+    val encrypted: Boolean,
+    val label: String,
+    val complete: Boolean,
+    val omissions: List<String>,
+    val games: List<Pair<String, List<String>>>,
+    val entries: List<IhubSnapshotMeta>,
+) {
+    fun snapshot(index: Int): IhubSnapshotFile = IhubArchive.readSnapshot(entries[index], file)
+
+    fun snapshotById(id: String): IhubSnapshotFile? {
+        val meta = entries.firstOrNull { it.id == id } ?: return null
+        return IhubArchive.readSnapshot(meta, file)
+    }
+
+    fun toContents(): IhubContents {
+        return IhubContents(
+            formatVersion = formatVersion,
+            archiveId = archiveId,
+            createdAt = createdAt,
+            exporterVersion = exporterVersion,
+            encrypted = encrypted,
+            label = label,
+            complete = complete,
+            omissions = omissions,
+            games = games,
+            snapshots = entries.indices.map { snapshot(it) },
+        )
+    }
+}

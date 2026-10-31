@@ -3,6 +3,7 @@ package com.example.hub.vault
 import com.example.hub.games.GameAdapter
 import com.example.hub.games.PayloadDigest
 import com.example.hub.games.ProgressionClass
+import com.example.hub.games.combineProgression
 
 /**
  * Decision for one vault restore. Classification comes from
@@ -36,6 +37,7 @@ suspend fun assessVaultRestore(
     payload: String?,
     capturedAtMillis: Long,
     pointerPayload: String?,
+    highWaterPayload: String? = null,
     adapter: GameAdapter,
     confirmed: Boolean,
     branchConfirmed: Boolean,
@@ -90,10 +92,20 @@ suspend fun assessVaultRestore(
             "The snapshot failed validation. Nothing was written.",
         )
     }
-    val classification = try {
+    val againstPointer = try {
         adapter.classifyProgress(payload, pointerPayload)
     } catch (_: Exception) {
         ProgressionClass.INCOMPARABLE
+    }
+    val classification = if (highWaterPayload.isNullOrBlank() || highWaterPayload == pointerPayload) {
+        againstPointer
+    } else {
+        val againstHighWater = try {
+            adapter.classifyProgress(payload, highWaterPayload)
+        } catch (_: Exception) {
+            ProgressionClass.INCOMPARABLE
+        }
+        combineProgression(againstPointer, againstHighWater)
     }
     val requiresBranch = classification == ProgressionClass.REGRESSED ||
         classification == ProgressionClass.INCOMPARABLE

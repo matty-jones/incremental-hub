@@ -233,6 +233,7 @@ class SessionController(
     private var vaultHistorical: Boolean = false
     private var vaultSnapshotId: String? = null
     private var vaultLineageId: String? = null
+    private var vaultBaselinePayload: String? = null
     private val _vaultPlan = MutableStateFlow<VaultAssessment?>(null)
     val vaultPlan: StateFlow<VaultAssessment?> = _vaultPlan.asStateFlow()
     private var peekOutcome: PeekOutcome? = null
@@ -532,7 +533,7 @@ class SessionController(
                     )
                 }
                 when (attempt) {
-                    CaptureAttempt.Saved -> publishManualSave(ManualSaveOutcome.SAVED, null)
+                    is CaptureAttempt.Saved -> publishManualSave(ManualSaveOutcome.SAVED, null)
                     CaptureAttempt.Busy -> publishManualSave(
                         ManualSaveOutcome.BUSY,
                         "Save already in progress.",
@@ -2133,6 +2134,7 @@ class SessionController(
             payload = record.payload,
             capturedAtMillis = record.capturedAtMillis,
             pointerPayload = pointer,
+            highWaterPayload = highWaterPayload(gameId),
             adapter = adapter,
             confirmed = false,
             branchConfirmed = false,
@@ -2166,20 +2168,11 @@ class SessionController(
             _sessionError.value = "Restore can start during play or recovery. Nothing was written."
             return
         }
-        if (peekOutcome == null || peekOutcome is PeekOutcome.Failed) {
-            val view = webView
-            val outcome = when {
-                peekClient != null && view != null -> peekClient?.invoke(view, adapter)
-                view != null -> runCatching { adapter.peekStorage(view) }.getOrDefault(PeekOutcome.Failed)
-                else -> PeekOutcome.Failed
-            }
-            if (outcome == null || outcome is PeekOutcome.Failed) {
-                _sessionError.value =
-                    "Restore refused because storage could not be inspected. Nothing was written."
-                return
-            }
-            peekOutcome = outcome
+        if (state is SessionState.Playing || vaultBaselinePayload == null) {
+            val pinned = pinLiveBaselineLocked(gameId, adapter, state) ?: return
+            vaultBaselinePayload = pinned
         }
+        val instance = instanceDao.get(gameId)
         val plan = assessVaultRestore(
             requestedId = id,
             requestedLineageId = lineage,
@@ -2188,7 +2181,8 @@ class SessionController(
             recordSha256 = record.contentSha256,
             payload = record.payload,
             capturedAtMillis = record.capturedAtMillis,
-            pointerPayload = instanceDao.get(gameId)?.snapshotPayload,
+            pointerPayload = instance?.snapshotPayload,
+            highWaterPayload = highWaterPayload(gameId),
             adapter = adapter,
             confirmed = true,
             branchConfirmed = branch,
@@ -2215,6 +2209,52 @@ class SessionController(
         vaultHistorical = false
         vaultSnapshotId = null
         vaultLineageId = null
+        vaultBaselinePayload = null
+    }
+
+    /**
+     * Saves the running game before a vault restore replaces its WebView.
+     * A launch-time peek is not a baseline. Failure leaves the WebView in place.
+     */
+    private suspend fun pinLiveBaselineLocked(
+        gameId: String,
+        adapter: GameAdapter,
+        state: SessionState,
+    ): String? {
+        if (state is SessionState.Playing) {
+            val attempt = performCaptureLocked(SnapshotReasons.PRE_RESTORE, duringVaultBaseline = true)
+            if (attempt !is CaptureAttempt.Saved) {
+                _sessionError.value =
+                    "Restore stopped. The current game could not be saved, so the live profile was not replaced."
+                return null
+            }
+            val pointer = instanceDao.get(gameId)?.snapshotPayload
+            if (pointer.isNullOrBlank() || !validates(adapter, pointer)) {
+                _sessionError.value =
+                    "Restore stopped. The saved game did not validate, so the live profile was not replaced."
+                return null
+            }
+            pinCopy(gameId, adapter, pointer, SnapshotReasons.PRE_RESTORE)
+            if (!attempt.conclusive) {
+                _sessionError.value =
+                    "Restore stopped. The current save could not be ordered, so the live profile was not replaced."
+                return null
+            }
+            return pointer
+        }
+        val pointer = instanceDao.get(gameId)?.snapshotPayload
+        if (pointer.isNullOrBlank() || !validates(adapter, pointer)) {
+            _sessionError.value =
+                "Restore stopped. The current save is not a validated pointer, so the live profile was not replaced."
+            return null
+        }
+        pinCopy(gameId, adapter, pointer, SnapshotReasons.PRE_RESTORE)
+        return pointer
+    }
+
+    private suspend fun highWaterPayload(gameId: String): String? {
+        val id = instanceDao.get(gameId)?.highWaterSnapshotId ?: return null
+        return snapshotDao?.getById(id)?.payload
     }
 
     private fun clearVaultCommitFlags() {
@@ -2431,7 +2471,13 @@ class SessionController(
         val gameId = _activeGameId.value ?: return
         val adapter = activeAdapter ?: return
         if (_state.value !is SessionState.RecoveryRequired) return
-        if (peekOutcome == null || peekOutcome is PeekOutcome.Failed) {
+        if (vaultSnapshotId != null) {
+            if (vaultBaselinePayload.isNullOrBlank()) {
+                _sessionError.value =
+                    "Restore stopped. The current game was not saved, so the live profile was not replaced."
+                return
+            }
+        } else if (peekOutcome == null || peekOutcome is PeekOutcome.Failed) {
             _sessionError.value = "Restore refused because storage could not be inspected."
             return
         }
@@ -2483,7 +2529,11 @@ class SessionController(
         restoreSessionIdentity = instanceDao.get(gameId)?.sessionIdentity
         restoreProfileName = _activeProfileName.value
         restoreVerifyToken = -1
-        val livePayload = (peekOutcome as? PeekOutcome.Value)?.payload
+        val livePayload = if (vaultSnapshotId != null) {
+            vaultBaselinePayload
+        } else {
+            (peekOutcome as? PeekOutcome.Value)?.payload
+        }
         pinCopy(gameId, adapter, livePayload, SnapshotReasons.PRE_RESTORE)
         val roomPayload = instanceDao.get(gameId)?.snapshotPayload
         if (!roomPayload.isNullOrBlank()) {
@@ -2691,12 +2741,15 @@ class SessionController(
         }
     }
 
-    private suspend fun performCaptureLocked(reason: String): CaptureAttempt {
+    private suspend fun performCaptureLocked(
+        reason: String,
+        duringVaultBaseline: Boolean = false,
+    ): CaptureAttempt {
         if (suppressCapture) {
             Log.d(TAG, "capture suppressed ($reason)")
             return CaptureAttempt.Failed(captureBlockDetail())
         }
-        if (captureRunning || restoreInProgress || vaultOperation) {
+        if (captureRunning || restoreInProgress || (vaultOperation && !duringVaultBaseline)) {
             Log.w(TAG, "capture overlap rejected ($reason)")
             return CaptureAttempt.Busy
         }
@@ -2823,14 +2876,17 @@ class SessionController(
                 transitionTo(SessionState.Playing, gameId)
             }
             Log.d(TAG, "capture succeeded ($reason) bytes=${payload.length}")
-            return CaptureAttempt.Saved
+            val conclusive = commit.classification == ProgressionClass.EQUAL ||
+                commit.classification == ProgressionClass.ADVANCED ||
+                commit.classification == ProgressionClass.RESET_APPROVED
+            return CaptureAttempt.Saved(conclusive)
         } finally {
             captureRunning = false
         }
     }
 
     private sealed interface CaptureAttempt {
-        data object Saved : CaptureAttempt
+        data class Saved(val conclusive: Boolean) : CaptureAttempt
         data object Busy : CaptureAttempt
         data class Deferred(val detail: String) : CaptureAttempt
         data class Quarantined(val detail: String) : CaptureAttempt
