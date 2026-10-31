@@ -1,6 +1,8 @@
 package com.example.hub.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.hub.ui.chrome.HubCard
@@ -29,6 +32,10 @@ import com.example.hub.ui.chrome.HubOutlinedButton
 import com.example.hub.ui.chrome.HubScaffold
 import com.example.hub.ui.chrome.HubTextButton
 import com.example.hub.ui.chrome.HubTopBar
+import com.example.hub.vault.IhubArchive
+import com.example.hub.vault.IhubExportResult
+import com.example.hub.vault.IhubReadResult
+import com.example.hub.vault.VaultArchive
 import com.example.hub.vault.VaultAssessment
 import com.example.hub.vault.VaultAvailability
 import com.example.hub.vault.VaultBrowse
@@ -57,17 +64,49 @@ fun VaultHost(
     plan: VaultAssessment? = null,
     onStageRestore: ((VaultEntry) -> Unit)? = null,
     onConfirmRestore: ((Boolean) -> Unit)? = null,
+    archive: VaultArchive? = null,
 ) {
     val scope = rememberCoroutineScope()
     var offset by rememberSaveable(gameId) { mutableIntStateOf(0) }
     var browse by remember(gameId) { mutableStateOf<VaultBrowse?>(null) }
     var reading by remember(gameId) { mutableStateOf<VaultReading?>(null) }
     var notice by remember(gameId) { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val pendingExport = remember { mutableStateOf<suspend () -> IhubExportResult?>({ null }) }
+    val createArchive = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        val build = pendingExport.value
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val built = build()
+            notice = writeArchive(context, uri, built)
+        }
+    }
+    fun startExport(name: String, build: suspend () -> IhubExportResult) {
+        pendingExport.value = build
+        createArchive.launch(name)
+    }
 
     suspend fun load(nextOffset: Int, advanceRemote: Boolean) {
         offset = nextOffset
         browse = catalog.browse(gameId, nextOffset, advanceRemote)
         notice = null
+    }
+
+    val openArchive = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val store = archive
+        if (uri == null || store == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { readLimited(it) }
+            val message = if (bytes == null) {
+                "The archive could not be read."
+            } else {
+                store.import(bytes).message
+            }
+            load(offset, advanceRemote = false)
+            notice = message
+        }
     }
 
     LaunchedEffect(gameId) {
@@ -136,6 +175,26 @@ fun VaultHost(
         plan = plan,
         onStageRestore = onStageRestore,
         onConfirmRestore = onConfirmRestore,
+        onExportGame = archive?.let { store ->
+            {
+                startExport("$gameId.ihub") { store.exportGame(gameId) }
+            }
+        },
+        onExportAll = archive?.let { store ->
+            {
+                startExport("incremental-hub.ihub") { store.exportAll() }
+            }
+        },
+        onImport = archive?.let {
+            {
+                openArchive.launch(arrayOf("application/zip", "application/octet-stream"))
+            }
+        },
+        onExportSnapshot = archive?.let { store ->
+            { entry ->
+                startExport("${entry.id}.ihub") { store.exportSnapshot(entry.id) }
+            }
+        },
         modifier = modifier,
     )
 }
@@ -157,6 +216,10 @@ fun VaultScreen(
     plan: VaultAssessment? = null,
     onStageRestore: ((VaultEntry) -> Unit)? = null,
     onConfirmRestore: ((Boolean) -> Unit)? = null,
+    onExportGame: (() -> Unit)? = null,
+    onExportAll: (() -> Unit)? = null,
+    onImport: (() -> Unit)? = null,
+    onExportSnapshot: ((VaultEntry) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val detail = reading
@@ -183,6 +246,7 @@ fun VaultScreen(
                 plan = plan,
                 onStageRestore = onStageRestore,
                 onConfirmRestore = onConfirmRestore,
+                onExportSnapshot = onExportSnapshot,
                 modifier = Modifier.padding(padding),
             )
         } else {
@@ -193,6 +257,9 @@ fun VaultScreen(
                 onNewer = onNewer,
                 onMoreRemote = onMoreRemote,
                 onSelect = onSelect,
+                onExportGame = onExportGame,
+                onExportAll = onExportAll,
+                onImport = onImport,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -207,6 +274,9 @@ private fun VaultTimeline(
     onNewer: () -> Unit,
     onMoreRemote: () -> Unit,
     onSelect: (VaultEntry) -> Unit,
+    onExportGame: (() -> Unit)? = null,
+    onExportAll: (() -> Unit)? = null,
+    onImport: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -236,6 +306,19 @@ private fun VaultTimeline(
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+            }
+            if (onExportGame != null && onExportAll != null && onImport != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    HubTextButton(onClick = onExportGame, modifier = Modifier.testTag("vault-export-game")) {
+                        Text("Export game")
+                    }
+                    HubTextButton(onClick = onExportAll, modifier = Modifier.testTag("vault-export-all")) {
+                        Text("Export everything")
+                    }
+                    HubTextButton(onClick = onImport, modifier = Modifier.testTag("vault-import")) {
+                        Text("Import")
+                    }
+                }
             }
             if (browse != null) {
                 Text(
@@ -363,6 +446,7 @@ private fun VaultDetail(
     plan: VaultAssessment?,
     onStageRestore: ((VaultEntry) -> Unit)?,
     onConfirmRestore: ((Boolean) -> Unit)?,
+    onExportSnapshot: ((VaultEntry) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val entry = reading.entry
@@ -418,6 +502,16 @@ private fun VaultDetail(
             entry.availability == VaultAvailability.PRESENT &&
             entry.residence != VaultResidence.REMOTE_ONLY &&
             !entry.active
+        if (onExportSnapshot != null && entry.residence != VaultResidence.REMOTE_ONLY) {
+            HubOutlinedButton(
+                onClick = { onExportSnapshot(entry) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("vault-export-snapshot"),
+            ) {
+                Text("Export this snapshot")
+            }
+        }
         if (stageRestore != null && canRestore) {
             HubOutlinedButton(
                 onClick = { stageRestore(entry) },
@@ -483,4 +577,46 @@ private fun VaultDetail(
             }
         }
     }
+}
+
+private fun writeArchive(
+    context: android.content.Context,
+    uri: android.net.Uri,
+    built: IhubExportResult?,
+): String {
+    if (built is IhubExportResult.Refused) return built.message
+    if (built !is IhubExportResult.Ready) return "Nothing was exported."
+    val wrote = runCatching {
+        context.contentResolver.openOutputStream(uri)?.use { stream -> stream.write(built.bytes) }
+            ?: error("The archive was not written.")
+    }
+    if (wrote.isFailure) return "The archive was not written."
+    val readBack = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { readLimited(it) }
+    }.getOrNull()
+    val verified = readBack?.let { IhubArchive.read(it) }
+    return if (
+        verified is IhubReadResult.Ok &&
+        verified.archive.snapshots.size == built.snapshotCount &&
+        !verified.archive.encrypted &&
+        verified.archive.label.contains("Unencrypted")
+    ) {
+        "Exported ${built.snapshotCount} snapshots and verified the archive. It is unencrypted."
+    } else {
+        "The provider accepted the archive, but it could not be verified."
+    }
+}
+
+private fun readLimited(input: java.io.InputStream): ByteArray? {
+    val output = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(8192)
+    var total = 0L
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        total += count
+        if (total > IhubArchive.MAX_COMPRESSED_BYTES) return null
+        output.write(buffer, 0, count)
+    }
+    return output.toByteArray()
 }

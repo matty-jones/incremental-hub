@@ -7,6 +7,7 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.hub.BuildConfig
 import com.example.hub.database.HubDatabase
 import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
@@ -19,7 +20,9 @@ import com.example.hub.sync.SaveSync
 import com.example.hub.sync.SyncBootstrap
 import com.example.hub.sync.WorkstationApi
 import com.example.hub.sync.WorkstationClient
+import com.example.hub.vault.IhubPublisher
 import com.example.hub.vault.RoomVaultIndex
+import com.example.hub.vault.VaultArchive
 import com.example.hub.vault.VaultCatalog
 import com.example.hub.vault.VaultProtection
 import kotlinx.coroutines.launch
@@ -39,6 +42,12 @@ class HubSessionViewModel(
     val vaultCatalog: VaultCatalog = VaultCatalog(
         local = RoomVaultIndex(database.snapshotDao(), database.gameInstanceDao()),
         api = workstation,
+    )
+    val vaultArchive: VaultArchive = VaultArchive(
+        snapshots = database.snapshotDao(),
+        api = workstation,
+        publisher = IhubPublisher(database, database.snapshotDao(), database.gameInstanceDao()),
+        exporterVersion = BuildConfig.VERSION_NAME,
     )
     val vaultProtection: VaultProtection = VaultProtection(
         snapshots = database.snapshotDao(),

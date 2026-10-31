@@ -29,6 +29,9 @@ interface SnapshotDao {
     @Query("SELECT COUNT(*) FROM snapshots WHERE game_id = :gameId")
     suspend fun countForGame(gameId: String): Int
 
+    @Query("SELECT DISTINCT game_id FROM snapshots ORDER BY game_id ASC")
+    suspend fun gameIds(): List<String>
+
     @Query("SELECT id FROM snapshots WHERE id IN (:ids)")
     suspend fun existingIds(ids: List<String>): List<String>
 

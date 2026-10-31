@@ -50,6 +50,7 @@ fun PlaySurface(
     modifier: Modifier = Modifier,
     vaultCatalog: com.example.hub.vault.VaultCatalog? = null,
     vaultProtection: com.example.hub.vault.VaultProtection? = null,
+    vaultArchive: com.example.hub.vault.VaultArchive? = null,
 ) {
     val state by controller.state.collectAsState()
     val profile by controller.activeProfile.collectAsState()
@@ -253,6 +254,7 @@ fun PlaySurface(
                             gameId = gameId,
                             catalog = vaultCatalog,
                             protection = vaultProtection,
+                            archive = vaultArchive,
                             plan = vaultPlan,
                             onStageRestore = { entry ->
                                 controller.stageVaultRestore(entry.id, entry.lineageId)

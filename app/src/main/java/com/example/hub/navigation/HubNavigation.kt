@@ -102,6 +102,7 @@ fun HubNavigation(
                 gameId = gameId,
                 catalog = sessionModel.vaultCatalog,
                 protection = sessionModel.vaultProtection,
+                archive = sessionModel.vaultArchive,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -129,6 +130,7 @@ fun HubNavigation(
                 controller = controller,
                 vaultCatalog = sessionModel.vaultCatalog,
                 vaultProtection = sessionModel.vaultProtection,
+                vaultArchive = sessionModel.vaultArchive,
                 onExit = {
                     Log.d(TAG, "return to launcher from $gameId")
                     navController.popBackStack()

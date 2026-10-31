@@ -3686,6 +3686,9 @@ class SessionControllerTest {
 
         override suspend fun countForGame(gameId: String): Int = rows.count { it.gameId == gameId }
 
+        override suspend fun gameIds(): List<String> =
+            rows.map { it.gameId }.distinct().sorted()
+
         override suspend fun existingIds(ids: List<String>): List<String> {
             if (ids.isEmpty()) return emptyList()
             val wanted = ids.toSet()
