@@ -205,12 +205,22 @@ object DocumentLayout {
             "window.addEventListener('resize', schedule);" +
             "if (window.visualViewport) window.visualViewport.addEventListener('resize', schedule);" +
             "document.addEventListener('click', schedule, true);" +
-            "var tabObs = new MutationObserver(schedule);" +
+            "var tabObs = new MutationObserver(function(records){" +
+            " var changed = false;" +
+            " for (var i = 0; i < records.length; i++) {" +
+            " var tab = records[i].target;" +
+            " var showing = getComputedStyle(tab).display !== 'none';" +
+            " if (tab.__hubShowing !== showing) {" +
+            " tab.__hubShowing = showing; changed = true; }" +
+            " }" +
+            " if (changed) schedule();" +
+            "});" +
             "function watchTabs() {" +
             " var tabs = document.querySelectorAll('[id' + '$=' + '\"-tab\"]');" +
             " for (var t = 0; t < tabs.length; t++) {" +
             " if (tabs[t].__hubWatch) continue;" +
             " tabs[t].__hubWatch = true;" +
+            " tabs[t].__hubShowing = getComputedStyle(tabs[t]).display !== 'none';" +
             " tabObs.observe(tabs[t], {attributes:true, attributeFilter:['style','class']});" +
             " }" +
             "}" +
