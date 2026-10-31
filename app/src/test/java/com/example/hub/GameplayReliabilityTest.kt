@@ -155,6 +155,19 @@ class GameplayReliabilityTest {
     }
 
     @Test
+    fun documentFitterDoesNotRescaleTheEvolutionTreeOnEveryGameTick() {
+        val script = DocumentLayout.injectionScript(411)
+        assertTrue(script.contains("data-hub-room"))
+        assertTrue(script.contains("el.getAttribute('data-hub-room') === signature"))
+        assertTrue(script.contains("tab.__hubShowing !== showing"))
+        assertTrue(script.contains("if (changed) schedule()"))
+        assertTrue(script.contains("node.matches('table,section"))
+        assertFalse(script.contains("new MutationObserver(function(){ watchTabs(); schedule(); })"))
+        assertFalse(script.contains("localStorage"))
+        assertFalse(script.contains("location.reload"))
+    }
+
+    @Test
     fun openSessionRejectsARegressedWorkstationSave() {
         assertFalse(replacesStoredPointer(sessionOpen = true, decision = MergeDecision.Pull))
         assertFalse(replacesStoredPointer(sessionOpen = false, decision = MergeDecision.Push))
