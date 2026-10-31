@@ -50,6 +50,7 @@ fun VaultHost(
     catalog: VaultCatalog,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    protection: com.example.hub.vault.VaultProtection? = null,
 ) {
     val scope = rememberCoroutineScope()
     var offset by rememberSaveable(gameId) { mutableIntStateOf(0) }
@@ -93,6 +94,39 @@ fun VaultHost(
             }
         },
         onCloseDetail = { reading = null },
+        onProtect = protection?.let { guard ->
+            { entry ->
+                scope.launch {
+                    val outcome = runCatching { guard.protect(entry) }.getOrElse { error ->
+                        com.example.hub.vault.ProtectionOutcome(
+                            false,
+                            error.message ?: "Protection was not stored.",
+                        )
+                    }
+                    load(offset, advanceRemote = false)
+                    notice = outcome.message
+                    val current = browse?.entries?.firstOrNull { it.id == entry.id } ?: entry
+                    val payload = catalog.readPayload(current)
+                    reading = readSnapshot(gameId, current, payload)
+                }
+            }
+        },
+        onUnprotect = protection?.let { guard ->
+            { entry ->
+                scope.launch {
+                    val outcome = runCatching { guard.unprotect(entry) }.getOrElse { error ->
+                        com.example.hub.vault.ProtectionOutcome(
+                            false,
+                            error.message ?: "User protection was not changed.",
+                        )
+                    }
+                    load(offset, advanceRemote = false)
+                    notice = outcome.message
+                    val current = browse?.entries?.firstOrNull { it.id == entry.id } ?: entry.copy(userProtected = false)
+                    reading = readSnapshot(gameId, current, catalog.readPayload(current))
+                }
+            }
+        },
         modifier = modifier,
     )
 }
@@ -109,6 +143,8 @@ fun VaultScreen(
     onMoreRemote: () -> Unit,
     onSelect: (VaultEntry) -> Unit,
     onCloseDetail: () -> Unit,
+    onProtect: ((VaultEntry) -> Unit)? = null,
+    onUnprotect: ((VaultEntry) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val detail = reading
@@ -127,7 +163,13 @@ fun VaultScreen(
         },
     ) { padding ->
         if (detail != null) {
-            VaultDetail(detail, Modifier.padding(padding))
+            VaultDetail(
+                reading = detail,
+                notice = notice,
+                onProtect = onProtect,
+                onUnprotect = onUnprotect,
+                modifier = Modifier.padding(padding),
+            )
         } else {
             VaultTimeline(
                 browse = browse,
@@ -298,7 +340,13 @@ private fun VaultRow(entry: VaultEntry, onSelect: (VaultEntry) -> Unit) {
 }
 
 @Composable
-private fun VaultDetail(reading: VaultReading, modifier: Modifier = Modifier) {
+private fun VaultDetail(
+    reading: VaultReading,
+    notice: String?,
+    onProtect: ((VaultEntry) -> Unit)?,
+    onUnprotect: ((VaultEntry) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
     val entry = reading.entry
     Column(
         modifier = modifier
@@ -343,6 +391,30 @@ private fun VaultDetail(reading: VaultReading, modifier: Modifier = Modifier) {
         val missing = reading.unavailableReason
         if (!missing.isNullOrBlank()) {
             Text(missing, color = MaterialTheme.colorScheme.error)
+        }
+        if (!notice.isNullOrBlank()) {
+            Text(notice, color = MaterialTheme.colorScheme.onSurface)
+        }
+        if (onProtect != null && onUnprotect != null) {
+            if (entry.userProtected) {
+                HubOutlinedButton(
+                    onClick = { onUnprotect(entry) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("vault-unprotect"),
+                ) {
+                    Text("Remove user protection")
+                }
+            } else {
+                HubOutlinedButton(
+                    onClick = { onProtect(entry) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("vault-protect"),
+                ) {
+                    Text("Protect")
+                }
+            }
         }
     }
 }

@@ -112,7 +112,7 @@ class VaultCatalog(
             reason = meta.reason,
             origin = meta.origin,
             pinned = meta.pinned,
-            userProtected = false,
+            userProtected = meta.userProtected,
             sha256 = meta.contentSha256,
             payloadBytes = meta.payloadBytes,
             integrity = if (meta.contentSha256.isBlank()) "hash not recorded" else "hash recorded",

@@ -19,7 +19,7 @@ import androidx.room.migration.Migration
         SyncOutboxEntry::class,
         SyncHistoryCursor::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class HubDatabase : RoomDatabase() {
@@ -195,6 +195,14 @@ abstract class HubDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE snapshots ADD COLUMN user_protected INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         private fun buildDatabase(context: Context) = Room.databaseBuilder(
             context.applicationContext,
             HubDatabase::class.java,
@@ -207,6 +215,7 @@ abstract class HubDatabase : RoomDatabase() {
             MIGRATION_5_6,
             MIGRATION_6_7,
             MIGRATION_7_8,
+            MIGRATION_8_9,
         )
             .build()
     }

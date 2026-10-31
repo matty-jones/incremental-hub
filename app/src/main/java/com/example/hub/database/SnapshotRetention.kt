@@ -8,7 +8,7 @@ import java.time.temporal.WeekFields
 /**
  * Minimum coverage for accepted automatic snapshots, per game and lineage.
  * Buckets use UTC. Weeks are ISO weeks. Empty buckets are left empty.
- * Pinned rows, recovery reasons, and the active high-water id are not pruned.
+ * Pinned rows, user-protected rows, recovery reasons, and the active high-water id are not pruned.
  * An open capture incident skips pruning.
  */
 object SnapshotRetention {
@@ -75,7 +75,7 @@ object SnapshotRetention {
     }
 
     private fun isProtected(row: SnapshotRecord, protectedIds: Set<String>): Boolean {
-        return row.pinned || row.id in protectedIds || row.reason in PERMANENT_REASONS
+        return row.pinned || row.userProtected || row.id in protectedIds || row.reason in PERMANENT_REASONS
     }
 
     private fun isAcceptedAutomatic(row: SnapshotRecord): Boolean {

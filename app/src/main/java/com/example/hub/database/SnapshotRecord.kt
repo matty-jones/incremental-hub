@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 
 /**
  * Append-only snapshot. Accepted automatic rows are kept by UTC time tier.
- * Pinned rows and recovery reasons stay.
+ * Pinned rows, user-protected rows, and recovery reasons stay.
  */
 @Entity(tableName = "snapshots")
 data class SnapshotRecord(
@@ -24,6 +24,8 @@ data class SnapshotRecord(
     val lineageId: String = "legacy",
     @ColumnInfo(name = "content_sha256", defaultValue = "")
     val contentSha256: String = "",
+    @ColumnInfo(name = "user_protected", defaultValue = "0")
+    val userProtected: Boolean = false,
 )
 
 object SnapshotReasons {

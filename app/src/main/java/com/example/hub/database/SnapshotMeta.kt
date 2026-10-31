@@ -18,4 +18,5 @@ data class SnapshotMeta(
     @ColumnInfo(name = "lineage_id") val lineageId: String,
     @ColumnInfo(name = "content_sha256") val contentSha256: String,
     @ColumnInfo(name = "payload_bytes") val payloadBytes: Int,
+    @ColumnInfo(name = "user_protected") val userProtected: Boolean = false,
 )

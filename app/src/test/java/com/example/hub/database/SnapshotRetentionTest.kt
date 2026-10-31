@@ -78,6 +78,19 @@ class SnapshotRetentionTest {
         assertTrue("wednesday" in keep)
         assertTrue("week-in" in keep)
         assertFalse("week-out" in keep)
+        val protectedOld = automatic(
+            id = "user-kept",
+            at = Instant.parse("2020-01-01T00:00:00Z").toEpochMilli(),
+            payload = "user-kept",
+            sequence = 1,
+        ).copy(userProtected = true)
+        val withUser = rows + protectedOld
+        val userKeep = SnapshotRetention.keepIds(withUser, now, protectedIds = setOf("anchor"))
+        assertTrue("user-kept" in userKeep)
+        val cleared = withUser.map { if (it.id == "user-kept") it.copy(userProtected = false) else it }
+        assertFalse("user-kept" in SnapshotRetention.keepIds(cleared, now, protectedIds = setOf("anchor")))
+        val checkpoint = withUser.single { it.id == "checkpoint" }.copy(userProtected = false)
+        assertTrue(checkpoint.id in SnapshotRetention.keepIds(withUser, now, protectedIds = setOf("anchor")))
         assertTrue("hour-in" in keep)
         assertFalse("hour-out" in keep)
         assertEquals(1, rows.count { it.payload == "same-payload" && it.id in keep })

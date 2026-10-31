@@ -49,6 +49,7 @@ fun PlaySurface(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
     vaultCatalog: com.example.hub.vault.VaultCatalog? = null,
+    vaultProtection: com.example.hub.vault.VaultProtection? = null,
 ) {
     val state by controller.state.collectAsState()
     val profile by controller.activeProfile.collectAsState()
@@ -250,6 +251,7 @@ fun PlaySurface(
                         VaultHost(
                             gameId = gameId,
                             catalog = vaultCatalog,
+                            protection = vaultProtection,
                             onBack = { vaultOpen = false },
                             modifier = Modifier.fillMaxSize(),
                         )

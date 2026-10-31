@@ -458,7 +458,7 @@ class SyncOutboxTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val inline = Executor { it.run() }
         return Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
+            .addMigrations(HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8, HubDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .setQueryExecutor(inline)
             .setTransactionExecutor(inline)

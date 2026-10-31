@@ -3585,6 +3585,7 @@ class SessionControllerTest {
                         lineageId = row.lineageId,
                         contentSha256 = row.contentSha256,
                         payloadBytes = row.payload.length,
+                        userProtected = row.userProtected,
                     )
                 }
         }
@@ -3598,6 +3599,11 @@ class SessionControllerTest {
         }
 
         override suspend fun payloadById(id: String): String? = rows.firstOrNull { it.id == id }?.payload
+
+        override suspend fun setUserProtected(id: String, userProtected: Boolean) {
+            val index = rows.indexOfFirst { it.id == id }
+            if (index >= 0) rows[index] = rows[index].copy(userProtected = userProtected)
+        }
 
         override suspend fun maxSequence(gameId: String): Long =
             rows.filter { it.gameId == gameId }.maxOfOrNull { it.sequence } ?: 0L

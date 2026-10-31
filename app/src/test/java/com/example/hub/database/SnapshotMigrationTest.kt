@@ -69,7 +69,7 @@ class SnapshotMigrationTest {
                 HubDatabase.MIGRATION_3_4,
                 HubDatabase.MIGRATION_4_5,
                 HubDatabase.MIGRATION_5_6,
-                HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8,
+                HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8, HubDatabase.MIGRATION_8_9,
             )
             .allowMainThreadQueries()
             .build()
@@ -152,7 +152,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
+            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8, HubDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
         val history = db.snapshotDao().history("shark-incremental")
@@ -233,7 +233,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
+            .addMigrations(HubDatabase.MIGRATION_4_5, HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8, HubDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
         val snapshots = db.snapshotDao()
@@ -339,7 +339,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
+            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8, HubDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
         val instance = db.gameInstanceDao().get("shark-incremental")
@@ -470,7 +470,7 @@ class SnapshotMigrationTest {
         sqlite.close()
 
         val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
-            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8)
+            .addMigrations(HubDatabase.MIGRATION_5_6, HubDatabase.MIGRATION_6_7, HubDatabase.MIGRATION_7_8, HubDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
         repeat(40) { index ->
@@ -506,6 +506,7 @@ class SnapshotMigrationTest {
         assertEquals("remote-\u0000", db.snapshotDao().getById("remote")!!.payload)
         assertEquals("workstation-sync", db.snapshotDao().getById("remote")!!.origin)
         assertFalse(db.snapshotDao().getById("remote")!!.pinned)
+        assertFalse(db.snapshotDao().getById("base")!!.userProtected)
         assertEquals("cadence-0", db.snapshotDao().getById("cadence-0")!!.payload)
         assertEquals("cadence-39", db.snapshotDao().getById("cadence-39")!!.payload)
         assertNull(db.snapshotDao().getById("cadence-1"))

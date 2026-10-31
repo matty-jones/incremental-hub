@@ -16,7 +16,8 @@ interface SnapshotDao {
     @Query(
         """
         SELECT id, game_id, sequence, captured_at_millis, reason, pinned, progress_json,
-               origin, lineage_id, content_sha256, length(payload) AS payload_bytes
+               origin, lineage_id, content_sha256, length(payload) AS payload_bytes,
+               user_protected
         FROM snapshots
         WHERE game_id = :gameId
         ORDER BY sequence DESC, id ASC
@@ -33,6 +34,9 @@ interface SnapshotDao {
 
     @Query("SELECT payload FROM snapshots WHERE id = :id LIMIT 1")
     suspend fun payloadById(id: String): String?
+
+    @Query("UPDATE snapshots SET user_protected = :userProtected WHERE id = :id")
+    suspend fun setUserProtected(id: String, userProtected: Boolean)
 
     @Query("SELECT COALESCE(MAX(sequence), 0) FROM snapshots WHERE game_id = :gameId")
     suspend fun maxSequence(gameId: String): Long
