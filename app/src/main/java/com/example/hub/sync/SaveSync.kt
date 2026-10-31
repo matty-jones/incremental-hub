@@ -36,6 +36,9 @@ class SaveSync(
     var activeGameId: () -> String? = { null }
     var onDecision: (String) -> Unit = {}
 
+    /** When true, pointer proposals and empty-slot pulls wait. Snapshot appends still run. */
+    var pointerChangesBlocked: () -> Boolean = { false }
+
     /**
      * Compares [candidate] with [reference] using the game adapter.
      * [ProgressionClass.UNORDERED] is the safe default when the caller has
@@ -125,6 +128,10 @@ class SaveSync(
     }
 
     private suspend fun proposePointer(entry: SyncOutboxEntry, remoteSnapshotId: String): Boolean {
+        if (pointerChangesBlocked()) {
+            onDecision("Workstation pointer was left unchanged while a restore is in progress.")
+            return false
+        }
         val local = dao.get(entry.gameId)
         if (local == null || local.lineageId != entry.lineageId) {
             onDecision("Workstation sync kept ${entry.gameId} on its current lineage.")
@@ -192,6 +199,10 @@ class SaveSync(
         remoteSnapshotId: String,
         current: RemotePointer,
     ): Boolean {
+        if (pointerChangesBlocked()) {
+            onDecision("Workstation pointer was left unchanged while a restore is in progress.")
+            return false
+        }
         if (current.lineageId != entry.lineageId) {
             onDecision("Workstation sync kept ${entry.gameId} on its current lineage.")
             return true
@@ -250,6 +261,10 @@ class SaveSync(
     }
 
     private suspend fun considerRemote(pointer: RemotePointer) {
+        if (pointerChangesBlocked()) {
+            onDecision("Workstation pointer was left unchanged while a restore is in progress.")
+            return
+        }
         val existing = dao.get(pointer.gameId)
         val localPayload = existing?.snapshotPayload?.takeIf { it.isNotBlank() }
         if (localPayload != null) {

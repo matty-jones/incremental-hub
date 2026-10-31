@@ -38,6 +38,8 @@ import com.example.hub.games.SaveEnvelope
 import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
 import com.example.hub.games.StorageSlot
+import com.example.hub.vault.VaultAssessment
+import com.example.hub.vault.assessVaultRestore
 import com.example.hub.BuildConfig
 import com.example.hub.ui.armSharkViewportUnlock
 import com.example.hub.games.unwrapJsResult
@@ -196,7 +198,7 @@ class SessionController(
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private val mutex = Mutex()
     private var captureJob: Job? = null
-    private var captureRunning = false
+    @Volatile private var captureRunning = false
     private var pendingDocumentUrl: String? = null
     private var activeAdapter: GameAdapter? = null
 
@@ -224,7 +226,15 @@ class SessionController(
     /** Throws inside a capture write. Stages: before-write, after-pointer, after-quarantine. */
     internal var captureWriteFault: (suspend (String) -> Unit)? = null
     private var openStep: OpenStep = OpenStep.DECIDE
-    private var restoreInProgress: Boolean = false
+    @Volatile private var restoreInProgress: Boolean = false
+    @Volatile private var vaultOperation: Boolean = false
+    private var vaultBranchRequested: Boolean = false
+    private var vaultBranchConfirmed: Boolean = false
+    private var vaultHistorical: Boolean = false
+    private var vaultSnapshotId: String? = null
+    private var vaultLineageId: String? = null
+    private val _vaultPlan = MutableStateFlow<VaultAssessment?>(null)
+    val vaultPlan: StateFlow<VaultAssessment?> = _vaultPlan.asStateFlow()
     private var peekOutcome: PeekOutcome? = null
     private var chosenPayload: String? = null
     private var liveBeforeRestore: String? = null
@@ -402,6 +412,8 @@ class SessionController(
                 }
             }
             launchMode = mode
+            clearVaultIntent()
+            _vaultPlan.value = null
             restoreGeneration += 1
             restoreVerifyToken = -1
             setCaptureSuppressed(mode == LaunchMode.SAFE || mode == LaunchMode.INSPECT || mode == LaunchMode.RECOVER)
@@ -673,6 +685,31 @@ class SessionController(
     fun inspectSnapshot(sequence: Long) {
         scope.launch {
             mutex.withLock { inspectSnapshotLocked(sequence) }
+        }
+    }
+
+    /** True while capture, restore, or a staged vault restore must keep the workstation pointer still. */
+    fun blocksExternalPointerMove(): Boolean = captureRunning || restoreInProgress || vaultOperation
+
+    fun stageVaultRestore(snapshotId: String, lineageId: String) {
+        scope.launch {
+            mutex.withLock { stageVaultLocked(snapshotId, lineageId) }
+        }
+    }
+
+    fun confirmVaultRestore(branch: Boolean) {
+        scope.launch {
+            mutex.withLock { confirmVaultLocked(branch) }
+        }
+    }
+
+    fun cancelVaultRestore() {
+        scope.launch {
+            mutex.withLock {
+                if (restoreInProgress || _state.value is SessionState.Opening) return@withLock
+                clearVaultIntent()
+                _vaultPlan.value = null
+            }
         }
     }
 
@@ -1542,6 +1579,7 @@ class SessionController(
         if (!valid) {
             _sessionError.value =
                 "invalid. The restored save failed validation. Both restore candidates were kept."
+            clearVaultCommitFlags()
             setCaptureSuppressed(true)
             transitionTo(SessionState.RecoveryRequired, work.gameId)
             return
@@ -1559,25 +1597,33 @@ class SessionController(
             relation == ProgressionClass.INCOMPARABLE ||
             relation == ProgressionClass.INVALID ||
             liveRelation == ProgressionClass.REGRESSED
-        if (!explicitRestore && behindProtected) {
+        if (behindProtected && !explicitRestore && !vaultBranchConfirmed) {
             _sessionError.value =
                 "Restore refused because the loaded save is behind the protected pointer. Both saves were kept."
+            clearVaultCommitFlags()
             setCaptureSuppressed(true)
             transitionTo(SessionState.RecoveryRequired, work.gameId)
             return
         }
-        val propose = !ambiguousLive &&
+        if (vaultBranchConfirmed) {
+            finishVaultBranch(work, payload)
+            return
+        }
+        val forward = !ambiguousLive &&
             relation != ProgressionClass.REGRESSED &&
             relation != ProgressionClass.INCOMPARABLE &&
             relation != ProgressionClass.INVALID &&
             liveRelation != ProgressionClass.REGRESSED
+        val propose = if (vaultHistorical) false else forward
+        val moveHighWater = if (vaultHistorical) false else propose && payload != previous
+        val historical = vaultHistorical
         val committed = try {
             commitRestoredBaseline(
                 work.gameId,
                 payload,
                 summaryJson(work.adapter.summarize(payload)),
                 proposePointer = propose,
-                moveHighWater = propose && payload != previous,
+                moveHighWater = moveHighWater,
             )
         } catch (e: CancellationException) {
             throw e
@@ -1585,6 +1631,7 @@ class SessionController(
             Log.e(TAG, "post-restore commit failed", e)
             _sessionError.value =
                 "storage error. ${e.message ?: "The restored save was not committed."} Both restore candidates were kept."
+            clearVaultCommitFlags()
             setCaptureSuppressed(true)
             if (_state.value is SessionState.Opening) {
                 transitionTo(SessionState.RecoveryRequired, work.gameId)
@@ -1606,10 +1653,84 @@ class SessionController(
         transitionTo(SessionState.Playing, work.gameId)
         explicitRestore = false
         ambiguousLive = false
+        if (historical) {
+            _vaultPlan.value = _vaultPlan.value?.copy(
+                message = "Restored the selected snapshot. The workstation pointer and the high-water snapshot were not moved.",
+                proposeWorkstationPointer = false,
+                moveHighWater = false,
+                localBranch = false,
+                allowed = true,
+                committed = true,
+            )
+            vaultOperation = false
+            vaultSnapshotId = null
+            vaultLineageId = null
+        }
+        clearVaultCommitFlags()
         if (_state.value is SessionState.Playing && propose) {
             onSnapshotSaved?.invoke(committed)
             Log.d(TAG, "restore verified ${work.gameId}")
         }
+    }
+
+    private suspend fun finishVaultBranch(work: ReadyWork, payload: String) {
+        val id = vaultSnapshotId
+        val lineage = vaultLineageId
+        val branched = if (id == null || lineage == null) {
+            null
+        } else {
+            try {
+                captureRepository().branchToSnapshot(
+                    gameId = work.gameId,
+                    snapshotId = id,
+                    lineageId = lineage,
+                    confirmed = true,
+                    adapter = work.adapter,
+                    sessionId = restoreSessionIdentity,
+                    stillCurrent = { _activeGameId.value == work.gameId },
+                    activatedPayload = payload,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "vault branch commit failed", e)
+                null
+            }
+        }
+        if (branched == null || branched.disposition != CaptureDisposition.STORED) {
+            _sessionError.value = branched?.message
+                ?: "The restore was not committed. Both saves were kept."
+            clearVaultCommitFlags()
+            beginRollbackLocked()
+            return
+        }
+        if (work.adapter.usesSaveEnvelope) {
+            _activeProfileName.value?.let { journalStore.delete(it) }
+        }
+        incidentDetail = null
+        launchMode = LaunchMode.RESUME
+        setCaptureSuppressed(false)
+        restoreInProgress = false
+        preparedPayload = null
+        liveBeforeRestore = null
+        openStep = OpenStep.DECIDE
+        documentGate.phase = DocumentPhase.GAME
+        documentGate.payload = null
+        val message = branched.message
+            ?: "Restored on a new local lineage. The workstation pointer was not moved."
+        _vaultPlan.value = _vaultPlan.value?.copy(
+            message = message,
+            localBranch = true,
+            allowed = true,
+            proposeWorkstationPointer = false,
+            moveHighWater = false,
+            committed = true,
+        )
+        _sessionError.value = message
+        clearVaultIntent()
+        explicitRestore = false
+        ambiguousLive = false
+        transitionTo(SessionState.Playing, work.gameId)
     }
 
     private suspend fun finishDeferredRestore(work: ReadyWork, intended: String?) {
@@ -1974,10 +2095,173 @@ class SessionController(
         transitionTo(SessionState.Opening, gameId)
     }
 
-    private suspend fun inspectSnapshotLocked(sequence: Long) {
+    private suspend fun stageVaultLocked(snapshotId: String, lineageId: String) {
+        val gameId = _activeGameId.value
+        val adapter = activeAdapter
+        if (gameId == null || adapter == null) {
+            _vaultPlan.value = null
+            _sessionError.value = "Open the game before restoring. Nothing was written."
+            return
+        }
+        val record = snapshotDao?.getById(snapshotId)
+        if (record == null || record.gameId != gameId) {
+            vaultOperation = false
+            vaultSnapshotId = null
+            vaultLineageId = null
+            _vaultPlan.value = assessVaultRestore(
+                requestedId = snapshotId,
+                requestedLineageId = lineageId,
+                recordId = "",
+                recordLineageId = "",
+                recordSha256 = "",
+                payload = null,
+                capturedAtMillis = 0L,
+                pointerPayload = instanceDao.get(gameId)?.snapshotPayload,
+                adapter = adapter,
+                confirmed = false,
+                branchConfirmed = false,
+            )
+            return
+        }
+        val pointer = instanceDao.get(gameId)?.snapshotPayload
+        val plan = assessVaultRestore(
+            requestedId = snapshotId,
+            requestedLineageId = lineageId,
+            recordId = record.id,
+            recordLineageId = record.lineageId,
+            recordSha256 = record.contentSha256,
+            payload = record.payload,
+            capturedAtMillis = record.capturedAtMillis,
+            pointerPayload = pointer,
+            adapter = adapter,
+            confirmed = false,
+            branchConfirmed = false,
+        )
+        _vaultPlan.value = plan
+        vaultOperation = plan.ready
+        vaultSnapshotId = if (plan.ready) record.id else null
+        vaultLineageId = if (plan.ready) record.lineageId else null
+    }
+
+    private suspend fun confirmVaultLocked(branch: Boolean) {
+        if (captureRunning || restoreInProgress) {
+            _sessionError.value = "Restore is waiting. A capture or restore is still running."
+            return
+        }
         val gameId = _activeGameId.value ?: return
-        if (_state.value !is SessionState.RecoveryRequired) return
-        val record = snapshotDao?.history(gameId)?.firstOrNull { it.sequence == sequence } ?: run {
+        val adapter = activeAdapter ?: return
+        val id = vaultSnapshotId
+        val lineage = vaultLineageId
+        if (id == null || lineage == null) {
+            _sessionError.value = "Choose a snapshot before restoring. Nothing was written."
+            return
+        }
+        val record = snapshotDao?.getById(id)
+        if (record == null || record.gameId != gameId || record.lineageId != lineage) {
+            _sessionError.value = "That snapshot id and lineage were not found. Nothing was written."
+            return
+        }
+        val state = _state.value
+        if (state !is SessionState.Playing && state !is SessionState.RecoveryRequired) {
+            _sessionError.value = "Restore can start during play or recovery. Nothing was written."
+            return
+        }
+        if (peekOutcome == null || peekOutcome is PeekOutcome.Failed) {
+            val view = webView
+            val outcome = when {
+                peekClient != null && view != null -> peekClient?.invoke(view, adapter)
+                view != null -> runCatching { adapter.peekStorage(view) }.getOrDefault(PeekOutcome.Failed)
+                else -> PeekOutcome.Failed
+            }
+            if (outcome == null || outcome is PeekOutcome.Failed) {
+                _sessionError.value =
+                    "Restore refused because storage could not be inspected. Nothing was written."
+                return
+            }
+            peekOutcome = outcome
+        }
+        val plan = assessVaultRestore(
+            requestedId = id,
+            requestedLineageId = lineage,
+            recordId = record.id,
+            recordLineageId = record.lineageId,
+            recordSha256 = record.contentSha256,
+            payload = record.payload,
+            capturedAtMillis = record.capturedAtMillis,
+            pointerPayload = instanceDao.get(gameId)?.snapshotPayload,
+            adapter = adapter,
+            confirmed = true,
+            branchConfirmed = branch,
+        )
+        _vaultPlan.value = plan
+        if (!plan.ready || !plan.allowed) {
+            _sessionError.value = plan.message
+            return
+        }
+        vaultOperation = true
+        if (_inspectedSequence.value != record.sequence) {
+            inspectSnapshotLocked(record.sequence, fromVault = true)
+            return
+        }
+        vaultBranchRequested = plan.requiresBranch
+        vaultHistorical = !plan.requiresBranch && !plan.proposeWorkstationPointer
+        confirmRecoverLocked(record.sequence)
+    }
+
+    private fun clearVaultIntent() {
+        vaultOperation = false
+        vaultBranchRequested = false
+        vaultBranchConfirmed = false
+        vaultHistorical = false
+        vaultSnapshotId = null
+        vaultLineageId = null
+    }
+
+    private fun clearVaultCommitFlags() {
+        vaultBranchRequested = false
+        vaultBranchConfirmed = false
+        vaultHistorical = false
+    }
+
+    private suspend fun inspectSnapshotLocked(sequence: Long, fromVault: Boolean = false) {
+        val gameId = _activeGameId.value ?: return
+        val state = _state.value
+        if (fromVault) {
+            if (state !is SessionState.Playing && state !is SessionState.RecoveryRequired) {
+                _sessionError.value = "Restore can start during play or recovery. Nothing was written."
+                return
+            }
+            if (captureRunning || restoreInProgress) {
+                _sessionError.value = "Restore is waiting. A capture or restore is still running."
+                return
+            }
+        } else if (state !is SessionState.RecoveryRequired) {
+            return
+        }
+        val record = if (fromVault) {
+            val loaded = vaultSnapshotId?.let { snapshotDao?.getById(it) }
+            if (loaded == null || loaded.gameId != gameId || loaded.sequence != sequence ||
+                loaded.lineageId != vaultLineageId
+            ) {
+                _sessionError.value = "That snapshot id and lineage were not found. Nothing was written."
+                return
+            }
+            val digest = PayloadDigest.sha256(loaded.payload)
+            if (loaded.contentSha256.isNotEmpty() && loaded.contentSha256 != digest) {
+                _sessionError.value = "The stored hash does not match the payload. Nothing was written."
+                return
+            }
+            val adapter = activeAdapter
+            if (adapter == null || !validates(adapter, loaded.payload)) {
+                _sessionError.value = "Restore refused because the snapshot failed validation. Nothing was written."
+                return
+            }
+            vaultOperation = true
+            loaded
+        } else {
+            snapshotDao?.history(gameId)?.firstOrNull { it.sequence == sequence }
+        }
+        if (record == null) {
             _sessionError.value = "Snapshot #$sequence was not found. Nothing was written."
             return
         }
@@ -2005,6 +2289,12 @@ class SessionController(
                 "The live profile, Room, and the workstation were not changed."
         _sessionError.value = message
         _diagnostic.value = _diagnostic.value?.copy(note = message)
+        if (_state.value is SessionState.Playing) {
+            transitionTo(SessionState.Degraded, gameId)
+        }
+        if (_state.value is SessionState.Degraded) {
+            transitionTo(SessionState.RecoveryRequired, gameId)
+        }
         transitionTo(SessionState.Opening, gameId)
     }
 
@@ -2117,6 +2407,8 @@ class SessionController(
         _inspectedSequence.value = null
         inspectSequence = null
         inspectPayload = null
+        if (!restoreInProgress) vaultOperation = false
+        clearVaultCommitFlags()
         val inspectName = inspectionProfileName
         inspectionProfileName = null
         bindLiveProfile(gameId)
@@ -2134,6 +2426,8 @@ class SessionController(
     }
 
     private suspend fun confirmRecoverLocked(sequence: Long? = null) {
+        var started = false
+        try {
         val gameId = _activeGameId.value ?: return
         val adapter = activeAdapter ?: return
         if (_state.value !is SessionState.RecoveryRequired) return
@@ -2153,6 +2447,9 @@ class SessionController(
         }
         val stored = if (sequence == null) {
             chosenPayload
+        } else if ((vaultBranchRequested || vaultHistorical) && vaultSnapshotId != null) {
+            val row = snapshotDao?.getById(vaultSnapshotId!!)
+            if (row?.sequence == sequence && row.lineageId == vaultLineageId) row.payload else null
         } else {
             snapshotDao?.history(gameId)?.firstOrNull { it.sequence == sequence }?.payload
         }
@@ -2166,14 +2463,17 @@ class SessionController(
         } else {
             classifyQuiet(adapter, stored, previous)
         }
-        if (chosenRelation == ProgressionClass.REGRESSED ||
-            chosenRelation == ProgressionClass.INCOMPARABLE ||
-            chosenRelation == ProgressionClass.INVALID
+        val branchThis = vaultBranchRequested &&
+            (chosenRelation == ProgressionClass.REGRESSED || chosenRelation == ProgressionClass.INCOMPARABLE)
+        if (chosenRelation == ProgressionClass.INVALID ||
+            ((chosenRelation == ProgressionClass.REGRESSED || chosenRelation == ProgressionClass.INCOMPARABLE) &&
+                !branchThis)
         ) {
             _sessionError.value =
                 "Restore refused. The chosen snapshot is not ahead of the protected pointer. Both saves were kept."
             return
         }
+        vaultBranchConfirmed = branchThis
         explicitRestore = sequence != null
         val inspectName = inspectionProfileName
         inspectionProfileName = null
@@ -2199,12 +2499,16 @@ class SessionController(
         documentGate.phase = DocumentPhase.WRITE
         documentGate.payload = prepared
         restoreInProgress = true
+        started = true
         _sessionError.value = null
         val dead = webView
         webView = null
         dead?.let { runCatching { it.destroy() } }
         _webViewGeneration.value = _webViewGeneration.value + 1
         transitionTo(SessionState.Opening, gameId)
+        } finally {
+            if (!started) clearVaultCommitFlags()
+        }
     }
 
     private suspend fun pinCopy(gameId: String, adapter: GameAdapter, payload: String?, reason: String) {
@@ -2317,6 +2621,10 @@ class SessionController(
     }
 
     private suspend fun closeLocked() {
+        if (!restoreInProgress && _state.value !is SessionState.Opening) {
+            clearVaultIntent()
+            _vaultPlan.value = null
+        }
         when (val current = _state.value) {
             is SessionState.Closed -> {
                 _activeProfile.value = null
@@ -2388,7 +2696,7 @@ class SessionController(
             Log.d(TAG, "capture suppressed ($reason)")
             return CaptureAttempt.Failed(captureBlockDetail())
         }
-        if (captureRunning) {
+        if (captureRunning || restoreInProgress || vaultOperation) {
             Log.w(TAG, "capture overlap rejected ($reason)")
             return CaptureAttempt.Busy
         }

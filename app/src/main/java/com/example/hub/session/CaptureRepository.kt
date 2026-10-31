@@ -82,6 +82,42 @@ class CaptureRepository(
         return if (database != null) database.withTransaction { apply() } else apply()
     }
 
+    /**
+     * Activates [snapshotId] on a new lineage. The selected row is not rewritten.
+     * The previous pointer is copied onto its old lineage, and the previous
+     * high-water row is pinned. Nothing is added to the sync outbox.
+     */
+    suspend fun branchToSnapshot(
+        gameId: String,
+        snapshotId: String,
+        lineageId: String,
+        confirmed: Boolean,
+        adapter: GameAdapter,
+        sessionId: String?,
+        stillCurrent: () -> Boolean,
+        activatedPayload: String? = null,
+    ): CaptureCommit {
+        if (!confirmed) {
+            return rejected(
+                ProgressionClass.INVALID,
+                "A new lineage needs confirmation. The active save was kept.",
+            )
+        }
+        val apply = suspend {
+            branchLocked(
+                gameId,
+                snapshotId,
+                lineageId,
+                adapter,
+                sessionId,
+                stillCurrent,
+                activatedPayload,
+            )
+        }
+        val database = roomDatabase
+        return if (database != null) database.withTransaction { apply() } else apply()
+    }
+
     private suspend fun commitLocked(
         gameId: String,
         candidate: String,
@@ -568,6 +604,136 @@ class CaptureRepository(
         val candidateSha = PayloadDigest.sha256(candidate)
         return "New lineage is active. Previous $previousSha ${adapter.summarize(previous).detail}. " +
             "Active $candidateSha ${adapter.summarize(candidate).detail}. The previous save remains in history."
+    }
+
+    private suspend fun branchLocked(
+        gameId: String,
+        snapshotId: String,
+        lineageId: String,
+        adapter: GameAdapter,
+        sessionId: String?,
+        stillCurrent: () -> Boolean,
+        activatedPayload: String?,
+    ): CaptureCommit {
+        val instance = instanceDao.get(gameId)
+            ?: return rejected(ProgressionClass.INVALID, "The game row is missing. The active save was kept.")
+        if (!stillCurrent() || (sessionId != null && instance.sessionIdentity != sessionId)) {
+            return rejected(ProgressionClass.INVALID, "The restore session changed. The active save was kept.")
+        }
+        val dao = snapshotDao
+            ?: return rejected(ProgressionClass.INVALID, "Snapshot storage is unavailable. The active save was kept.")
+        val row = dao.getById(snapshotId)
+            ?: return rejected(ProgressionClass.INVALID, "That snapshot was not found. The active save was kept.")
+        if (row.gameId != gameId || row.lineageId != lineageId) {
+            return rejected(
+                ProgressionClass.INVALID,
+                "The snapshot id and lineage do not match. The active save was kept.",
+            )
+        }
+        val digest = PayloadDigest.sha256(row.payload)
+        if (row.contentSha256.isNotEmpty() && row.contentSha256 != digest) {
+            return rejected(
+                ProgressionClass.INVALID,
+                "The stored hash does not match the payload. The active save was kept.",
+            )
+        }
+        val valid = try {
+            adapter.validate(row.payload)
+        } catch (_: Exception) {
+            false
+        }
+        if (!valid) {
+            return rejected(
+                ProgressionClass.INVALID,
+                "The snapshot failed validation. The active save was kept.",
+            )
+        }
+        val verdict = safeClassify(adapter, row.payload, instance.snapshotPayload)
+        if (verdict == ProgressionClass.INVALID) {
+            return rejected(verdict, "The snapshot could not be classified. The active save was kept.")
+        }
+        val pointerPayload = activatedPointer(adapter, row.payload, activatedPayload)
+            ?: return rejected(
+                ProgressionClass.INCOMPARABLE,
+                "The running game did not hold the selected snapshot. The active save was kept.",
+            )
+        fault?.invoke("branch-before-write")
+        val now = clock()
+        val anchor = instance.highWaterSnapshotId
+        if (anchor != null) dao.pinById(anchor)
+        val previous = instance.snapshotPayload?.takeIf { it.isNotBlank() }
+        if (previous != null) {
+            insertLineageBase(instance, instance.lineageId, previous, adapter, now)
+        }
+        val newLineage = UUID.randomUUID().toString()
+        val newId = insertLineageBase(instance, newLineage, pointerPayload, adapter, now)
+            ?: error("The new lineage was not stored.")
+        fault?.invoke("branch-before-pointer")
+        val updated = instance.copy(
+            lineageId = newLineage,
+            snapshotPayload = pointerPayload,
+            highWaterSnapshotId = newId,
+            lastCaptureAttemptAtMillis = now,
+            lastCaptureSuccessAtMillis = now,
+            lastCaptureAtMillis = now,
+            lastCaptureError = null,
+            lastSeenAtMillis = now,
+            recoveryState = null,
+            captureIncident = null,
+            captureIncidentSha = null,
+            captureIncidentCount = 0,
+        )
+        instanceDao.upsert(updated)
+        val message = "Restored on a new local lineage. The workstation pointer was not moved. " +
+            "The previous high-water snapshot was kept."
+        return CaptureCommit(CaptureDisposition.STORED, verdict, updated, message, sync = false)
+    }
+
+    private suspend fun activatedPointer(
+        adapter: GameAdapter,
+        source: String,
+        activated: String?,
+    ): String? {
+        if (activated.isNullOrBlank() || activated == source) return source
+        val valid = try {
+            adapter.validate(activated)
+        } catch (_: Exception) {
+            false
+        }
+        if (!valid) return null
+        val relation = safeClassify(adapter, activated, source)
+        return if (relation == ProgressionClass.EQUAL || relation == ProgressionClass.ADVANCED) {
+            activated
+        } else {
+            null
+        }
+    }
+
+    private suspend fun insertLineageBase(
+        instance: GameInstance,
+        lineageId: String,
+        payload: String,
+        adapter: GameAdapter,
+        now: Long,
+    ): String? {
+        val dao = snapshotDao ?: return null
+        val id = UUID.randomUUID().toString()
+        dao.insert(
+            SnapshotRecord(
+                id = id,
+                gameId = instance.gameId,
+                sequence = dao.maxSequence(instance.gameId) + 1,
+                capturedAtMillis = now,
+                reason = SnapshotReasons.LINEAGE_BASE,
+                pinned = true,
+                payload = payload,
+                progressJson = progressJson(adapter, payload),
+                origin = originForReason(SnapshotReasons.LINEAGE_BASE),
+                lineageId = lineageId,
+                contentSha256 = PayloadDigest.sha256(payload),
+            ),
+        )
+        return id
     }
 
     private fun rejected(classification: ProgressionClass, message: String): CaptureCommit {

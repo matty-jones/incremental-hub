@@ -29,10 +29,13 @@ import com.example.hub.ui.chrome.HubOutlinedButton
 import com.example.hub.ui.chrome.HubScaffold
 import com.example.hub.ui.chrome.HubTextButton
 import com.example.hub.ui.chrome.HubTopBar
+import com.example.hub.vault.VaultAssessment
+import com.example.hub.vault.VaultAvailability
 import com.example.hub.vault.VaultBrowse
 import com.example.hub.vault.VaultCatalog
 import com.example.hub.vault.VaultEntry
 import com.example.hub.vault.VaultReading
+import com.example.hub.vault.VaultResidence
 import com.example.hub.vault.formatCaptureTime
 import com.example.hub.vault.readSnapshot
 import com.example.hub.vault.shaPrefix
@@ -51,6 +54,9 @@ fun VaultHost(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     protection: com.example.hub.vault.VaultProtection? = null,
+    plan: VaultAssessment? = null,
+    onStageRestore: ((VaultEntry) -> Unit)? = null,
+    onConfirmRestore: ((Boolean) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var offset by rememberSaveable(gameId) { mutableIntStateOf(0) }
@@ -127,6 +133,9 @@ fun VaultHost(
                 }
             }
         },
+        plan = plan,
+        onStageRestore = onStageRestore,
+        onConfirmRestore = onConfirmRestore,
         modifier = modifier,
     )
 }
@@ -145,6 +154,9 @@ fun VaultScreen(
     onCloseDetail: () -> Unit,
     onProtect: ((VaultEntry) -> Unit)? = null,
     onUnprotect: ((VaultEntry) -> Unit)? = null,
+    plan: VaultAssessment? = null,
+    onStageRestore: ((VaultEntry) -> Unit)? = null,
+    onConfirmRestore: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val detail = reading
@@ -168,6 +180,9 @@ fun VaultScreen(
                 notice = notice,
                 onProtect = onProtect,
                 onUnprotect = onUnprotect,
+                plan = plan,
+                onStageRestore = onStageRestore,
+                onConfirmRestore = onConfirmRestore,
                 modifier = Modifier.padding(padding),
             )
         } else {
@@ -345,6 +360,9 @@ private fun VaultDetail(
     notice: String?,
     onProtect: ((VaultEntry) -> Unit)?,
     onUnprotect: ((VaultEntry) -> Unit)?,
+    plan: VaultAssessment?,
+    onStageRestore: ((VaultEntry) -> Unit)?,
+    onConfirmRestore: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val entry = reading.entry
@@ -394,6 +412,54 @@ private fun VaultDetail(
         }
         if (!notice.isNullOrBlank()) {
             Text(notice, color = MaterialTheme.colorScheme.onSurface)
+        }
+        val stageRestore = onStageRestore
+        val canRestore = stageRestore != null &&
+            entry.availability == VaultAvailability.PRESENT &&
+            entry.residence != VaultResidence.REMOTE_ONLY &&
+            !entry.active
+        if (stageRestore != null && canRestore) {
+            HubOutlinedButton(
+                onClick = { stageRestore(entry) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("vault-restore"),
+            ) {
+                Text("Restore")
+            }
+        }
+        val shown = plan?.takeIf { it.snapshotId == entry.id }
+        if (shown != null) {
+            Text("Source ${formatCaptureTime(shown.capturedAtMillis)}")
+            Text("Current save ${shown.currentDetail}")
+            Text("Selected save ${shown.sourceDetail}")
+            val unordered = shown.unorderedNote
+            if (!unordered.isNullOrBlank()) Text(unordered)
+            Text(shown.message)
+            if (shown.localBranch) {
+                Text("This phone is on a local lineage. The workstation pointer was not moved.")
+            }
+            if (shown.ready && onConfirmRestore != null && !shown.committed) {
+                if (shown.requiresBranch) {
+                    HubOutlinedButton(
+                        onClick = { onConfirmRestore(true) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("vault-restore-branch"),
+                    ) {
+                        Text("Restore on a new lineage")
+                    }
+                } else {
+                    HubOutlinedButton(
+                        onClick = { onConfirmRestore(false) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("vault-restore-confirm"),
+                    ) {
+                        Text("Confirm restore")
+                    }
+                }
+            }
         }
         if (onProtect != null && onUnprotect != null) {
             if (entry.userProtected) {

@@ -81,6 +81,7 @@ class HubSessionViewModel(
     )
 
     init {
+        saveSync.pointerChangesBlocked = { controller.blocksExternalPointerMove() }
         saveSync.activeGameId = {
             val state = controller.state.value
             if (state is SessionState.Closed || state is SessionState.Closing) {

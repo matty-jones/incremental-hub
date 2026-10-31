@@ -2958,6 +2958,100 @@ class SessionControllerTest {
     }
 
     @Test
+    fun vaultBranchRequiresConfirmationAndLeavesTheWorkstationPointer() = runTest {
+        val current = sharkPayload(feature = 9, fishExponent = "40", played = "100", prestige = 2639)
+        val older = sharkPayload(feature = 4, fishExponent = "15", played = "10", prestige = 2)
+        val snapshots = StubSnapshotDao()
+        val synced = mutableListOf<String?>()
+        var storage = current
+        val session = controllerWithoutDocumentHook(
+            documentReady = { true },
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(storage) },
+            runtime = { _, _, _ -> true },
+            onWrite = { storage = it.orEmpty() },
+            snapshots = snapshots,
+            onSnapshotSaved = { synced.add(it.snapshotPayload) },
+        )
+        snapshots.insert(
+            SnapshotRecord(
+                id = "older",
+                gameId = "shark-incremental",
+                sequence = 1,
+                capturedAtMillis = 10L,
+                reason = "cadence",
+                pinned = false,
+                payload = older,
+                progressJson = null,
+                lineageId = "legacy",
+                contentSha256 = PayloadDigest.sha256(older),
+            ),
+        )
+        snapshots.insert(
+            SnapshotRecord(
+                id = "current",
+                gameId = "shark-incremental",
+                sequence = 2,
+                capturedAtMillis = 20L,
+                reason = "cadence",
+                pinned = false,
+                payload = current,
+                progressJson = null,
+                lineageId = "legacy",
+                contentSha256 = PayloadDigest.sha256(current),
+            ),
+        )
+        dao.upsert(
+            progressedInstance(current, playedAt = 20L).copy(
+                highWaterSnapshotId = "current",
+                lineageId = "legacy",
+            ),
+        )
+        session.open("shark-incremental")
+        assertEquals(SessionState.Playing, session.state.value)
+        val view = WebView(ApplicationProvider.getApplicationContext())
+        session.registerWebView(view)
+        session.stageVaultRestore("older", "legacy")
+        val staged = session.vaultPlan.value
+        assertNotNull(staged)
+        assertEquals(ProgressionClass.REGRESSED, staged!!.classification)
+        assertTrue(staged.requiresBranch)
+        assertFalse(staged.allowed)
+        assertTrue(session.blocksExternalPointerMove())
+        session.requestCheckpoint()
+        assertEquals(ManualSaveOutcome.BUSY, session.manualSaveNotice.value?.outcome)
+        assertEquals(current, dao.get("shark-incremental")!!.snapshotPayload)
+
+        session.confirmVaultRestore(branch = false)
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(current, dao.get("shark-incremental")!!.snapshotPayload)
+        assertEquals("legacy", dao.get("shark-incremental")!!.lineageId)
+        assertTrue(synced.isEmpty())
+
+        session.confirmVaultRestore(branch = true)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertEquals(current, dao.get("shark-incremental")!!.snapshotPayload)
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(1L, session.inspectedSequence.value)
+        session.confirmVaultRestore(branch = true)
+        session.registerWebView(view)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertEquals(older, dao.get("shark-incremental")!!.snapshotPayload)
+        assertTrue(dao.get("shark-incremental")!!.lineageId != "legacy")
+        assertEquals(current, snapshots.getById("current")!!.payload)
+        assertTrue(snapshots.getById("current")!!.pinned)
+        assertEquals(older, snapshots.getById("older")!!.payload)
+        assertTrue(synced.isEmpty())
+        assertFalse(session.blocksExternalPointerMove())
+        assertTrue(session.vaultPlan.value!!.localBranch)
+        session.forceCloseForTest()
+    }
+
+    @Test
     fun restoreVerificationRejectsALexicallyAheadRegression() = runTest {
         val intended = sharkPayload(feature = 9, fishExponent = "40", played = "100", prestige = 2639)
         val live = freshSharkPayload()

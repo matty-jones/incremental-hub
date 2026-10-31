@@ -61,6 +61,7 @@ fun PlaySurface(
     val presentationEpoch by controller.presentationEpoch.collectAsState()
     val diagnostic by controller.diagnostic.collectAsState()
     val inspectedSequence by controller.inspectedSequence.collectAsState()
+    val vaultPlan by controller.vaultPlan.collectAsState()
     val exportedSnapshot by controller.exportedSnapshot.collectAsState()
     val snapshotShare by controller.snapshotShare.collectAsState()
     val consoleLines by controller.consoleLines.collectAsState()
@@ -252,7 +253,17 @@ fun PlaySurface(
                             gameId = gameId,
                             catalog = vaultCatalog,
                             protection = vaultProtection,
-                            onBack = { vaultOpen = false },
+                            plan = vaultPlan,
+                            onStageRestore = { entry ->
+                                controller.stageVaultRestore(entry.id, entry.lineageId)
+                            },
+                            onConfirmRestore = { branch ->
+                                controller.confirmVaultRestore(branch)
+                            },
+                            onBack = {
+                                controller.cancelVaultRestore()
+                                vaultOpen = false
+                            },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
