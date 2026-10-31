@@ -15,11 +15,12 @@ import com.example.hub.games.SharkIncrementalAdapter
 import com.example.hub.games.SharkLayout
 import com.example.hub.ui.PageScaleMode
 import com.example.hub.ui.assessPresentation
-import com.example.hub.ui.nudgeStaleViewport
+import com.example.hub.ui.installSharkDocumentStart
 import com.example.hub.ui.parsePresentationAck
+import com.example.hub.ui.prepareSharkViewport
 import com.example.hub.ui.presentationScript
 import com.example.hub.ui.presentationSettled
-import com.example.hub.ui.viewportUnlockScript
+import com.example.hub.ui.sharkDocumentStartScript
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -86,6 +87,67 @@ class SharkFoldLayoutTest {
         deleteDisposable()
     }
 
+    @Test
+    fun evolutionTreeZoomStaysPutUntilTheBoardGrows() {
+        ActivityScenario.launch(WebViewProbeActivity::class.java).use { scenario ->
+            val web = addFittedTree(scenario)
+            assertTrue("tree zoom was not applied", waitForZoom(web))
+            val first = JSONObject(eval(web, ZOOM_PROBE))
+            val second = JSONObject(eval(web, ZOOM_PROBE))
+            assertEquals(first.getString("zoom"), second.getString("zoom"))
+            assertEquals(first.getInt("writes"), second.getInt("writes"))
+            val grown = JSONObject(eval(web, GROW_AND_FIT))
+            assertTrue(
+                "growing the tree did not change zoom: $first -> $grown",
+                grown.getString("zoom") != first.getString("zoom") &&
+                    grown.getInt("writes") > first.getInt("writes"),
+            )
+            val settled = JSONObject(eval(web, ZOOM_PROBE))
+            assertEquals(grown.getString("zoom"), settled.getString("zoom"))
+            assertEquals(grown.getInt("writes"), settled.getInt("writes"))
+            scenario.onActivity {
+                (web.parent as? ViewGroup)?.removeView(web)
+                web.destroy()
+            }
+        }
+    }
+
+    private fun addFittedTree(scenario: ActivityScenario<WebViewProbeActivity>): WebView {
+        val ref = AtomicReference<WebView>()
+        val latch = CountDownLatch(1)
+        scenario.onActivity { activity ->
+            val web = WebView(activity)
+            web.settings.javaScriptEnabled = true
+            web.settings.domStorageEnabled = true
+            activity.findViewById<ViewGroup>(android.R.id.content).addView(
+                web,
+                ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+            )
+            web.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    latch.countDown()
+                }
+            }
+            web.loadDataWithBaseURL(null, TREE_HTML, "text/html", "utf-8", null)
+            ref.set(web)
+        }
+        assertTrue(latch.await(10, TimeUnit.SECONDS))
+        return ref.get()
+    }
+
+    private fun waitForZoom(web: WebView): Boolean {
+        val deadline = System.currentTimeMillis() + 8_000
+        while (System.currentTimeMillis() < deadline) {
+            if (measure(web).width > 0) {
+                eval(web, DocumentLayout.injectionScript(280))
+                val zoom = JSONObject(eval(web, ZOOM_PROBE).ifBlank { "{}" }).optString("zoom")
+                if (zoom.isNotEmpty()) return true
+            }
+            Thread.sleep(150)
+        }
+        return false
+    }
+
     private fun assertLayout(json: JSONObject, wide: Boolean) {
         val viewportW = json.optDouble("iw").toFloat()
         val viewportH = json.optDouble("ih").toFloat()
@@ -142,12 +204,10 @@ class SharkFoldLayoutTest {
         var stable = 0
         var latest = JSONObject()
         while (System.currentTimeMillis() < deadline) {
-            web.post { nudgeStaleViewport(web) }
             val view = measure(web)
             val limit = if (view.density > 0f) (view.width / view.density).toInt() else view.width
             eval(web, SharkLayout.injectionScript())
             eval(web, DocumentLayout.injectionScript(limit))
-            eval(web, viewportUnlockScript())
             latest = JSONObject(eval(web, MEASURE).ifBlank { "{}" })
             val ok = runCatching { assertLayout(latest, wide) }.isSuccess &&
                 latest.optDouble("iw") > 200
@@ -213,9 +273,6 @@ class SharkFoldLayoutTest {
                 stable = 1
             } else {
                 stable = 0
-                if (fault == "stale-viewport" || fault == "stale-frame" || fault == "native-view") {
-                    web.post { nudgeStaleViewport(web) }
-                }
             }
             Thread.sleep(180)
         }
@@ -232,12 +289,17 @@ class SharkFoldLayoutTest {
             val web = WebView(activity)
             web.settings.javaScriptEnabled = true
             web.settings.domStorageEnabled = true
-            web.settings.useWideViewPort = true
-            web.settings.loadWithOverviewMode = false
-            web.setInitialScale(0)
+            prepareSharkViewport(web)
+            installSharkDocumentStart(web, SHARK)
             val profile = ProfileStore.getInstance().getOrCreateProfile(PROFILE)
             WebViewCompat.setProfile(web, profile.name)
             web.webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                    if (url.contains("shark-incremental")) {
+                        view.evaluateJavascript(sharkDocumentStartScript(), null)
+                    }
+                }
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     finishes.incrementAndGet()
                 }
@@ -345,6 +407,22 @@ class SharkFoldLayoutTest {
     companion object {
         private const val PROFILE = "hub-qual-fold-layout"
         private const val SHARK = "https://mrredshark77.github.io/shark-incremental/"
+        private const val TREE_HTML =
+            "<!DOCTYPE html><html><head></head><body><div id=\"app\">" +
+                "<div id=\"evolution-tree\" style=\"width:1600px;height:80px;display:block;\">" +
+                "<div style=\"width:1600px;height:40px;\">node</div></div></div></body></html>"
+        private const val ZOOM_PROBE =
+            "(function(){ if (window.__hubLayoutFit) window.__hubLayoutFit();" +
+                " var el=document.getElementById('evolution-tree');" +
+                " return JSON.stringify({zoom:el&&el.style?el.style.zoom||'':''," +
+                " writes:window.__hubZoomWrites||0}); })()"
+        private const val GROW_AND_FIT =
+            "(function(){ var el=document.getElementById('evolution-tree');" +
+                " var child=el&&el.firstElementChild;" +
+                " el.style.width='3200px'; if (child) child.style.width='3200px';" +
+                " el.setAttribute('data-hub-dirty','1');" +
+                " if (window.__hubLayoutFit) window.__hubLayoutFit();" +
+                " return JSON.stringify({zoom:el.style.zoom||'', writes:window.__hubZoomWrites||0}); })()"
         private const val MARKER = "(function(){ window.__hubLayoutDoc='alive'; return window.__hubLayoutDoc; })()"
         private const val MEASURE =
             "(function(){" +
