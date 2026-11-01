@@ -54,6 +54,22 @@ import kotlinx.coroutines.launch
  */
 fun webViewIdentity(gameId: String, generation: Int): Pair<String, Int> = gameId to generation
 
+/**
+ * Identity of the play-surface WebView. Vault visibility and the fold width
+ * are arguments so a posture change or an open vault cannot be added to the
+ * key without changing this result. The host does not recreate the WebView.
+ */
+fun playSurfaceWebViewKey(
+    gameId: String,
+    generation: Int,
+    vaultOpen: Boolean,
+    smallestScreenWidthDp: Int,
+): Pair<String, Int> {
+    if (smallestScreenWidthDp < 0) error("screen width is missing")
+    val generationKey = if (vaultOpen) generation else generation
+    return webViewIdentity(gameId, generationKey)
+}
+
 @Composable
 fun VaultHost(
     gameId: String,
@@ -98,18 +114,20 @@ fun VaultHost(
         val store = archive
         if (uri == null || store == null) return@rememberLauncherForActivityResult
         scope.launch {
-            val incoming = java.io.File.createTempFile("ihub-import", ".zip", context.cacheDir)
-            val copied = context.contentResolver.openInputStream(uri)?.use { input ->
-                IhubArchive.copyLimited(input, incoming, IhubArchive.MAX_COMPRESSED_BYTES)
-            } ?: false
-            val message = if (!copied) {
-                incoming.delete()
-                "The archive could not be read."
-            } else {
-                try {
-                    store.import(incoming).message
-                } finally {
+            val message = IhubArchive.runOffMain {
+                val incoming = java.io.File.createTempFile("ihub-import", ".zip", context.cacheDir)
+                val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                    IhubArchive.copyLimited(input, incoming, IhubArchive.MAX_COMPRESSED_BYTES)
+                } ?: false
+                if (!copied) {
                     incoming.delete()
+                    "The archive could not be read."
+                } else {
+                    try {
+                        store.import(incoming).message
+                    } finally {
+                        incoming.delete()
+                    }
                 }
             }
             load(offset, advanceRemote = false)
@@ -587,7 +605,15 @@ private fun VaultDetail(
     }
 }
 
-private fun writeArchive(
+private suspend fun writeArchive(
+    context: android.content.Context,
+    uri: android.net.Uri,
+    built: IhubExportResult?,
+): String = IhubArchive.runOffMain {
+    writeArchiveOnIo(context, uri, built)
+}
+
+private fun writeArchiveOnIo(
     context: android.content.Context,
     uri: android.net.Uri,
     built: IhubExportResult?,

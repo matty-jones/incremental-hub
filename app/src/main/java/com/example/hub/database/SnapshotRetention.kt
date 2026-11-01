@@ -9,6 +9,7 @@ import java.time.temporal.WeekFields
  * Minimum coverage for accepted automatic snapshots, per game and lineage.
  * Buckets use UTC. Weeks are ISO weeks. Empty buckets are left empty.
  * Pinned rows, user-protected rows, recovery reasons, and the active high-water id are not pruned.
+ * An unpinned retained-pointer is kept when no other kept row has the same payload.
  * An open capture incident skips pruning.
  */
 object SnapshotRetention {
@@ -52,7 +53,29 @@ object SnapshotRetention {
                 keep += latest(lineageRows).id
             }
         }
+        keep += soleRetainedPointers(rows, keep)
         return keep
+    }
+
+    /**
+     * An outgoing pointer is stored as an unpinned retained-pointer only when
+     * history has no other copy. That row stays until some other kept row
+     * holds the same bytes. A duplicate can still age out with the tiers.
+     * Pinned retained-pointers are already in [keep].
+     */
+    private fun soleRetainedPointers(rows: List<SnapshotRecord>, keep: Set<String>): Set<String> {
+        val extra = mutableSetOf<String>()
+        for (row in rows) {
+            if (row.reason != SnapshotReasons.RETAINED_POINTER) continue
+            if (row.id in keep || row.id in extra) continue
+            val durable = rows.any { other ->
+                other.id != row.id &&
+                    (other.id in keep || other.id in extra) &&
+                    sameContent(other, row)
+            }
+            if (!durable) extra += row.id
+        }
+        return extra
     }
 
     suspend fun prune(

@@ -2,6 +2,9 @@ package com.example.hub.vault
 
 import com.example.hub.database.SnapshotMeta
 import com.example.hub.games.PayloadDigest
+import com.example.hub.session.SessionState
+import com.example.hub.ui.playSurfaceWebViewKey
+import com.example.hub.ui.shouldCreateWebView
 import com.example.hub.ui.webViewIdentity
 import com.example.hub.sync.HistoryPage
 import com.example.hub.sync.PutResult
@@ -89,10 +92,28 @@ class VaultTimelineTest {
     @Test
     fun webViewIdentityIgnoresVaultAndPosture() {
         assertEquals("shark-incremental" to 7, webViewIdentity("shark-incremental", 7))
-        assertEquals(
-            webViewIdentity("shark-incremental", 7),
-            webViewIdentity("shark-incremental", 7),
+        val folded = playSurfaceWebViewKey(
+            "shark-incremental",
+            4,
+            vaultOpen = true,
+            smallestScreenWidthDp = 360,
         )
+        val unfolded = playSurfaceWebViewKey(
+            "shark-incremental",
+            4,
+            vaultOpen = true,
+            smallestScreenWidthDp = 841,
+        )
+        val closed = playSurfaceWebViewKey(
+            "shark-incremental",
+            4,
+            vaultOpen = false,
+            smallestScreenWidthDp = 841,
+        )
+        assertEquals("shark-incremental" to 4, folded)
+        assertEquals(folded, unfolded)
+        assertEquals(folded, closed)
+        assertTrue(shouldCreateWebView(SessionState.Playing))
     }
 
     private fun entry(

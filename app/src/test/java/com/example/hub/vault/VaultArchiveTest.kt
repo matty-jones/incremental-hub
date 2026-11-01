@@ -16,6 +16,7 @@ import com.example.hub.sync.UpdateCheck
 import com.example.hub.sync.WorkstationApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -182,6 +183,113 @@ class VaultArchiveTest {
             assertEquals(payload, archive.snapshots.single().payload)
             assertTrue(archive.complete)
             ready.file.delete()
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun exportRunsOffTheCallerAndDoesNotHoldEveryPayload() = runTest {
+        val caller = Thread.currentThread().name
+        val source = open()
+        val destination = open()
+        try {
+            val body = "p".repeat(80_000)
+            repeat(12) { index ->
+                source.snapshotDao().insert(
+                    row("snap-$index", body + index).copy(sequence = index.toLong()),
+                )
+            }
+            source.gameInstanceDao().upsert(instance("live-pointer"))
+            destination.gameInstanceDao().upsert(instance("live-pointer"))
+            val archive = VaultArchive(
+                source.snapshotDao(),
+                emptyApi(),
+                IhubPublisher(source, source.snapshotDao(), source.gameInstanceDao()),
+                "0.1.24",
+            )
+            val exported = archive.exportGame("shark-incremental")
+            assertTrue(exported is IhubExportResult.Ready)
+            assertTrue(archive.archiveThread!!.contains("DefaultDispatcher-worker"))
+            assertTrue(archive.archiveThread != caller)
+            assertTrue(IhubArchive.exportPeakPayloadBytes in 80_000L..90_000L)
+            assertTrue(IhubArchive.exportPeakPayloadBytes < 80_000L * 4)
+            val ready = exported as IhubExportResult.Ready
+            val publisher = IhubPublisher(destination, destination.snapshotDao(), destination.gameInstanceDao())
+            val importer = VaultArchive(destination.snapshotDao(), emptyApi(), publisher, "0.1.24")
+            val imported = importer.import(ready.file)
+            assertEquals(12, imported.imported)
+            assertTrue(importer.archiveThread!!.contains("DefaultDispatcher-worker"))
+            val again = VaultArchive(destination.snapshotDao(), emptyApi(), publisher, "0.1.24")
+                .import(ready.file)
+            assertEquals(0, again.imported)
+            assertEquals(12, again.duplicates)
+            assertEquals("live-pointer", destination.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            assertEquals(body + "7", destination.snapshotDao().getById("snap-7")!!.payload)
+            assertEquals("live-pointer", source.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            ready.file.delete()
+        } finally {
+            source.close()
+            destination.close()
+        }
+    }
+
+    @Test
+    fun networkLossDuringExportOrFetchWritesNoArchive() = runTest {
+        val db = open()
+        try {
+            db.snapshotDao().insert(row("local", "kept-\u0000"))
+            db.gameInstanceDao().upsert(instance("live-pointer"))
+            val down = object : WorkstationApi {
+                override fun fetchSaves(): List<RemoteSave>? = throw java.io.IOException("network down")
+                override fun putSave(save: RemoteSave): PutResult? = null
+                override fun lookupUpdate(): UpdateCheck = UpdateCheck.Unreachable
+                override fun download(url: String, destination: File): Boolean = false
+                override fun fetchHistoryIndex(
+                    gameId: String,
+                    afterReceivedAt: Long,
+                    afterSnapshotId: String,
+                    limit: Int,
+                ): HistoryPage = throw java.io.IOException("network down")
+                override fun fetchSnapshot(gameId: String, snapshotId: String): RemoteSnapshot? =
+                    throw java.io.IOException("network down")
+            }
+            val publisher = IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao())
+            val archive = VaultArchive(db.snapshotDao(), down, publisher, "0.1.24")
+            val game = archive.exportGame("shark-incremental")
+            assertTrue(game is IhubExportResult.Refused)
+            assertTrue((game as IhubExportResult.Refused).omissions.contains("shark-incremental workstation history"))
+            val everything = archive.exportAll()
+            assertTrue(everything is IhubExportResult.Refused)
+            assertTrue((everything as IhubExportResult.Refused).message.contains("workstation game list"))
+            assertEquals("kept-\u0000", db.snapshotDao().getById("local")!!.payload)
+            assertEquals("live-pointer", db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun interruptedImportPublishesNothing() = runTest {
+        val db = open()
+        try {
+            db.gameInstanceDao().upsert(instance("live-pointer"))
+            val exported = IhubArchive.export(
+                drafts = listOf(draft("snap-a", "alpha-\u0000"), draft("snap-b", "beta")),
+                archiveId = "archive",
+                createdAt = "2026-10-31T17:00:00Z",
+                exporterVersion = "test",
+                complete = true,
+            ) as IhubExportResult.Ready
+            val opened = IhubArchive.open(exported.file) as IhubOpenResult.Ready
+            opened.source.interruptAt = 1
+            val result = IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao()).import(opened.source)
+            assertEquals(0, result.imported)
+            assertTrue(result.message.contains("Nothing was published"))
+            assertNull(db.snapshotDao().getById("snap-a"))
+            assertNull(db.snapshotDao().getById("snap-b"))
+            assertEquals("live-pointer", db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            exported.file.delete()
         } finally {
             db.close()
         }

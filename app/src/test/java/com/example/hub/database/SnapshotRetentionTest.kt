@@ -185,6 +185,96 @@ class SnapshotRetentionTest {
         }
     }
 
+    @Test
+    fun soleRetainedPointerStaysAndADuplicateCanAgeOut() = runTest {
+        val now = Instant.parse("2026-06-15T12:00:00Z").toEpochMilli()
+        val old = Instant.parse("2020-01-01T00:00:00Z").toEpochMilli()
+        val rows = mutableListOf<SnapshotRecord>()
+        repeat(15) { index ->
+            rows += automatic("recent-$index", now + index, "recent-$index", 100L + index)
+        }
+        rows += automatic("recent-shared", now + 20, "shared-recent", 200)
+        rows += retained("only-copy", old, "only-copy-\u0000", pinned = false)
+        rows += retained("dup-recent", old, "shared-recent", pinned = false)
+        rows += retained("pinned-old", old, "pinned-old", pinned = true)
+        rows += retained("sole-a", old, "same-sole", pinned = false)
+        rows += retained("sole-b", old, "same-sole", pinned = false)
+        rows += permanent("checkpoint", SnapshotReasons.CHECKPOINT, "checkpoint-\u0000", pinned = true)
+        rows += permanent("pre", SnapshotReasons.PRE_RESTORE, "pre", pinned = true)
+        rows += permanent("post", SnapshotReasons.POST_RESTORE, "post", pinned = true)
+        rows += permanent("diag", SnapshotReasons.DIAGNOSTIC_BACKUP, "diag", pinned = true)
+        rows += permanent("remote", SnapshotReasons.WORKSTATION, "remote", pinned = false)
+        rows += permanent("quarantine", SnapshotReasons.QUARANTINE, "quarantine", pinned = true)
+        rows += permanent("lineage", SnapshotReasons.LINEAGE_BASE, "lineage", pinned = true)
+        val user = automatic("user-kept", old, "user-kept", 1).copy(userProtected = true)
+        rows += user
+        rows += automatic("anchor", old, "anchor-payload", 2)
+        val keep = SnapshotRetention.keepIds(rows, now, protectedIds = setOf("anchor"))
+        assertTrue("only-copy" in keep)
+        assertEquals("only-copy-\u0000", rows.single { it.id == "only-copy" }.payload)
+        assertFalse("dup-recent" in keep)
+        assertTrue("pinned-old" in keep)
+        assertEquals(1, listOf("sole-a", "sole-b").count { it in keep })
+        assertTrue("checkpoint" in keep)
+        assertTrue("pre" in keep)
+        assertTrue("post" in keep)
+        assertTrue("diag" in keep)
+        assertTrue("remote" in keep)
+        assertTrue("quarantine" in keep)
+        assertTrue("lineage" in keep)
+        assertTrue("user-kept" in keep)
+        assertTrue("anchor" in keep)
+        assertTrue("recent-14" in keep)
+        assertTrue("recent-shared" in keep)
+        assertFalse("recent-0" in keep)
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val inline = Executor { it.run() }
+        val db = Room.inMemoryDatabaseBuilder(context, HubDatabase::class.java)
+            .allowMainThreadQueries()
+            .setQueryExecutor(inline)
+            .setTransactionExecutor(inline)
+            .build()
+        try {
+            db.gameInstanceDao().upsert(
+                GameInstance(
+                    gameId = "shark-incremental",
+                    profileName = "hub",
+                    sessionIdentity = "session",
+                    lastPlayedAtMillis = 1L,
+                    lastCaptureAtMillis = 1L,
+                    highWaterSnapshotId = "anchor",
+                ),
+            )
+            rows.forEach { db.snapshotDao().insert(it) }
+            SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), "shark-incremental", now)
+            val history = db.snapshotDao().history("shark-incremental")
+            assertEquals("only-copy-\u0000", history.single { it.id == "only-copy" }.payload)
+            assertTrue(history.none { it.id == "dup-recent" })
+            assertEquals("pinned-old", history.single { it.id == "pinned-old" }.payload)
+            assertTrue(history.single { it.id == "pinned-old" }.pinned)
+            assertEquals("checkpoint-\u0000", history.single { it.id == "checkpoint" }.payload)
+            assertEquals("anchor-payload", history.single { it.id == "anchor" }.payload)
+            assertEquals("user-kept", history.single { it.id == "user-kept" }.payload)
+            assertEquals(1, history.count { it.payload == "same-sole" && it.reason == SnapshotReasons.RETAINED_POINTER })
+        } finally {
+            db.close()
+        }
+    }
+
+    private fun retained(
+        id: String,
+        at: Long,
+        payload: String,
+        pinned: Boolean,
+    ): SnapshotRecord {
+        return automatic(id, at, payload, 50_000).copy(
+            reason = SnapshotReasons.RETAINED_POINTER,
+            pinned = pinned,
+            contentSha256 = "",
+        )
+    }
+
     private fun automatic(
         id: String,
         at: Long,

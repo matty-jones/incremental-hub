@@ -10,6 +10,8 @@ Shark rows show feature, prestige, core, humanoid, and singularity. Currencies a
 
 User protection is the `snapshots.user_protected` column, added by HubDatabase v9 `MIGRATION_8_9`. The migration is `ALTER TABLE snapshots ADD COLUMN user_protected INTEGER NOT NULL DEFAULT 0`. It does not rewrite payloads. Retention still keeps the ten latest distinct automatic saves, 48 hours of hourly saves, 30 days of daily saves, and 12 ISO weeks. A user-protected row is kept in addition to those tiers. Pins, migrated baselines, high-water anchors, diagnostic backups, quarantine, restore checkpoints, and workstation rows stay protected by their existing reasons. Removing user protection does not unpin a system row.
 
+An outgoing pointer with no other kept copy is stored as an unpinned `retained-pointer`. That row is kept until another kept snapshot has the same bytes. A duplicate retained-pointer can still age out with the tiers. Rows that were already pinned, including older retained-pointers, stay pinned.
+
 Protecting a snapshot that exists only on the workstation downloads that one payload and checks its SHA-256 before any Room transaction. The transaction only writes the local row.
 
 ## Restore
@@ -29,5 +31,9 @@ Export game, Export everything, and Export this snapshot write an `.ihub` ZIP th
 A game or everything export is written only when every selected snapshot is in the file. Export everything reads the workstation game list. A game that exists only on the workstation is included. If that list or a selected payload cannot be read, the export stops and names the omission. It does not write an archive marked complete.
 
 The archive is written and read as a file. Size limits are applied before a body is allocated. Import checks paths, hashes, ids, format version, and size limits before it inserts anything. The limits are 512 MiB compressed, 1 GiB expanded, 10,000 entries, and 8 MiB for one save payload. The same id and the same bytes are skipped. The same id with different bytes rejects the whole import. New rows are historical snapshots. The live WebView, the Room pointer, and the workstation pointer stay as they were. Restoring an imported snapshot uses the restore steps above.
+
+Export, import, and zip checks run off the main thread. One payload is held while it is written. Zip validation holds the manifest and one other metadata file, then drops that file. Size limits are unchanged: 512 MiB compressed, 1 GiB expanded, 10,000 entries, and 8 MiB for one save.
+
+Android Auto Backup and device transfer include display preferences only. The Room database, restore journals, and WebView profile directories are excluded, so a transfer cannot restore a native pointer without its profile or a profile without its pointer. The `.ihub` archive remains the portable recovery copy.
 
 Deletion and bulk cleanup are not in this vault. Those stay for a later safety check.

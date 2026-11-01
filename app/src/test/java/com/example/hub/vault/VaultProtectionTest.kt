@@ -174,6 +174,39 @@ class VaultProtectionTest {
         }
     }
 
+    @Test
+    fun protectAndUnprotectSurviveProcessRestart() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "protect-restart-s5a"
+        context.deleteDatabase(name)
+        val gameId = SHARK_GAME_ID
+        val payload = "restart-\u0000-payload"
+        val sha = PayloadDigest.sha256(payload)
+        val first = open(context, name)
+        first.gameInstanceDao().upsert(instance(gameId, highWater = "anchor"))
+        first.snapshotDao().insert(row("kept", gameId, 1, 10, payload))
+        val protected = VaultProtection(first.snapshotDao(), first.gameInstanceDao(), OfflineApi(), first)
+            .protect(localEntry("kept", gameId, sha))
+        assertTrue(protected.applied)
+        first.close()
+
+        val second = open(context, name)
+        assertTrue(second.snapshotDao().getById("kept")!!.userProtected)
+        assertEquals(payload, second.snapshotDao().getById("kept")!!.payload)
+        val removed = VaultProtection(second.snapshotDao(), second.gameInstanceDao(), OfflineApi(), second)
+            .unprotect(localEntry("kept", gameId, sha))
+        assertTrue(removed.applied)
+        second.close()
+
+        val third = open(context, name)
+        val stored = third.snapshotDao().getById("kept")!!
+        assertFalse(stored.userProtected)
+        assertEquals(payload, stored.payload)
+        assertEquals("cadence", stored.reason)
+        assertFalse(stored.pinned)
+        third.close()
+    }
+
     private fun open(context: Context, name: String): HubDatabase {
         return Room.databaseBuilder(context, HubDatabase::class.java, name)
             .allowMainThreadQueries()

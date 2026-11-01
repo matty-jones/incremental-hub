@@ -137,7 +137,9 @@ fun PlaySurface(
                         .fillMaxWidth()
                         .padding(bottom = trimpsInset),
                 ) {
-                    androidx.compose.runtime.key(webViewIdentity(gameId, generation)) {
+                    androidx.compose.runtime.key(
+                        playSurfaceWebViewKey(gameId, generation, vaultOpen, smallestWidth),
+                    ) {
                         WebViewHost(
                             gameId = gameId,
                             launchUrl = launchUrl,

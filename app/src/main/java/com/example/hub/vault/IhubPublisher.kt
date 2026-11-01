@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import com.example.hub.database.GameInstanceDao
 import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotRecord
+import kotlinx.coroutines.CancellationException
 
 data class IhubImportResult(
     val imported: Int,
@@ -74,8 +75,12 @@ class IhubPublisher(
                     imported += 1
                 }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: IhubConflict) {
             return IhubImportResult(0, 0, e.message ?: "The archive conflicts with a stored snapshot.")
+        } catch (_: Exception) {
+            return IhubImportResult(0, 0, "The import was interrupted. Nothing was published.")
         }
         val after = instances.getAll().associate { it.gameId to it.snapshotPayload }
         if (before != after) {

@@ -513,4 +513,118 @@ class SnapshotMigrationTest {
         assertTrue(db.snapshotDao().history("shark-incremental").count { it.reason == "cadence" } <= 11)
         db.close()
     }
+
+    @Test
+    fun migrationV8ToV9KeepsPayloadBytes() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "snapshot-v8-user-protect"
+        context.deleteDatabase(name)
+        val path = context.getDatabasePath(name)
+        path.parentFile?.mkdirs()
+        val payload = "feature-9-\u0000-unchanged"
+        val sqlite = SQLiteDatabase.openOrCreateDatabase(path, null)
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `game_instances` (
+              `gameId` TEXT NOT NULL,
+              `profile_name` TEXT NOT NULL,
+              `session_identity` TEXT NOT NULL,
+              `last_played_at_millis` INTEGER NOT NULL,
+              `resume_token` TEXT,
+              `recovery_state` TEXT,
+              `last_capture_at_millis` INTEGER NOT NULL,
+              `snapshot_payload` TEXT,
+              `last_capture_attempt_at_millis` INTEGER NOT NULL,
+              `last_capture_success_at_millis` INTEGER NOT NULL,
+              `last_capture_failure_at_millis` INTEGER NOT NULL,
+              `last_capture_error` TEXT,
+              `lineage_id` TEXT NOT NULL DEFAULT 'legacy',
+              `high_water_snapshot_id` TEXT,
+              `capture_incident` TEXT,
+              `capture_incident_sha` TEXT,
+              `capture_incident_count` INTEGER NOT NULL DEFAULT 0,
+              `last_seen_at_millis` INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY(`gameId`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `snapshots` (
+              `id` TEXT NOT NULL,
+              `game_id` TEXT NOT NULL,
+              `sequence` INTEGER NOT NULL,
+              `captured_at_millis` INTEGER NOT NULL,
+              `reason` TEXT NOT NULL,
+              `pinned` INTEGER NOT NULL,
+              `payload` TEXT NOT NULL,
+              `progress_json` TEXT,
+              `origin` TEXT NOT NULL DEFAULT 'local-capture',
+              `lineage_id` TEXT NOT NULL DEFAULT 'legacy',
+              `content_sha256` TEXT NOT NULL DEFAULT '',
+              PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `sync_outbox` (
+              `idempotency_key` TEXT NOT NULL,
+              `game_id` TEXT NOT NULL,
+              `lineage_id` TEXT NOT NULL,
+              `snapshot_id` TEXT NOT NULL,
+              `payload` TEXT NOT NULL,
+              `content_sha256` TEXT NOT NULL,
+              `captured_at_millis` INTEGER NOT NULL,
+              `reason` TEXT NOT NULL,
+              `integrity` TEXT NOT NULL,
+              `profile_name` TEXT NOT NULL,
+              `session_identity` TEXT NOT NULL,
+              `last_played_at_millis` INTEGER NOT NULL,
+              `resume_token` TEXT,
+              `propose_pointer` INTEGER NOT NULL,
+              `enqueued_at_millis` INTEGER NOT NULL,
+              `attempt_count` INTEGER NOT NULL,
+              `state` TEXT NOT NULL,
+              `remote_snapshot_id` TEXT,
+              PRIMARY KEY(`idempotency_key`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `sync_history_cursor` (
+              `game_id` TEXT NOT NULL,
+              `received_at_millis` INTEGER NOT NULL,
+              `snapshot_id` TEXT NOT NULL,
+              `seen_count` INTEGER NOT NULL,
+              PRIMARY KEY(`game_id`)
+            )
+            """.trimIndent(),
+        )
+        sqlite.execSQL(
+            "INSERT INTO game_instances (gameId, profile_name, session_identity, last_played_at_millis, resume_token, recovery_state, last_capture_at_millis, snapshot_payload, last_capture_attempt_at_millis, last_capture_success_at_millis, last_capture_failure_at_millis, last_capture_error, lineage_id, high_water_snapshot_id, capture_incident, capture_incident_sha, capture_incident_count, last_seen_at_millis) VALUES ('shark-incremental', 'hub-game-shark-incremental', 'kept', 50, NULL, NULL, 50, ?, 50, 50, 0, NULL, 'legacy', 'pre', NULL, NULL, 0, 50)",
+            arrayOf(payload),
+        )
+        sqlite.execSQL(
+            "INSERT INTO snapshots (id, game_id, sequence, captured_at_millis, reason, pinned, payload, progress_json, origin, lineage_id, content_sha256) VALUES ('pre', 'shark-incremental', 8, 50, 'retained-pointer', 1, ?, NULL, 'local-capture', 'legacy', 'abc')",
+            arrayOf(payload),
+        )
+        sqlite.version = 8
+        sqlite.close()
+
+        val db = Room.databaseBuilder(context, HubDatabase::class.java, name)
+            .addMigrations(HubDatabase.MIGRATION_8_9)
+            .allowMainThreadQueries()
+            .build()
+        val stored = db.snapshotDao().getById("pre")!!
+        assertEquals(payload, stored.payload)
+        assertEquals(payload, db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+        assertFalse(stored.userProtected)
+        assertTrue(stored.pinned)
+        assertEquals("retained-pointer", stored.reason)
+        assertEquals("abc", stored.contentSha256)
+        assertEquals(8L, stored.sequence)
+        db.close()
+    }
 }

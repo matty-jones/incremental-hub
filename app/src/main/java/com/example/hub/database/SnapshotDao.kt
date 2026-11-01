@@ -32,6 +32,9 @@ interface SnapshotDao {
     @Query("SELECT DISTINCT game_id FROM snapshots ORDER BY game_id ASC")
     suspend fun gameIds(): List<String>
 
+    @Query("SELECT id FROM snapshots WHERE game_id = :gameId ORDER BY sequence ASC")
+    suspend fun idsForGame(gameId: String): List<String>
+
     @Query("SELECT id FROM snapshots WHERE id IN (:ids)")
     suspend fun existingIds(ids: List<String>): List<String>
 

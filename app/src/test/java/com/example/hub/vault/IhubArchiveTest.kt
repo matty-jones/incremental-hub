@@ -174,6 +174,50 @@ class IhubArchiveTest {
         assertTrue((read as IhubReadResult.Rejected).message.contains("different payloads"))
     }
 
+    @Test
+    fun metadataBytesAreReleasedWhileALargeArchiveIsChecked() {
+        val manifest = manifest().toString().toByteArray()
+        val files = linkedMapOf<String, ByteArray>()
+        files["manifest.json"] = manifest
+        var metadata = manifest.size
+        repeat(30) { index ->
+            val body = ByteArray(100_000) { (index + 1).toByte() }
+            files["notes/note-$index.txt"] = body
+            metadata += body.size
+        }
+        val read = IhubArchive.read(zipOf(files))
+        assertTrue(read is IhubReadResult.Rejected)
+        assertTrue(IhubArchive.validationPeakMetadataBytes < 512L * 1024)
+        assertTrue(IhubArchive.validationPeakMetadataBytes < metadata / 4)
+    }
+
+    @Test
+    fun declaredEntryCountAboveTheCapIsRejectedBeforeTheDirectoryIsUsed() {
+        val exported = IhubArchive.export(
+            drafts = listOf(draft("snap-1", "payload")),
+            archiveId = "archive-1",
+            createdAt = "2026-10-31T17:00:00Z",
+            exporterVersion = "0.1.24",
+            complete = true,
+        ) as IhubExportResult.Ready
+        val zip = exported.bytes
+        var eocd = -1
+        var index = zip.size - 22
+        while (index >= 0) {
+            if (u32at(zip, index) == 0x06054b50L) {
+                eocd = index
+                break
+            }
+            index -= 1
+        }
+        assertTrue(eocd >= 0)
+        zip[eocd + 10] = (10_001 and 0xff).toByte()
+        zip[eocd + 11] = ((10_001 ushr 8) and 0xff).toByte()
+        val read = IhubArchive.read(zip)
+        assertTrue(read is IhubReadResult.Rejected)
+        assertTrue((read as IhubReadResult.Rejected).message.contains("entry"))
+    }
+
     private fun draft(id: String, payload: String?, userProtected: Boolean = false, pinned: Boolean = false) =
         IhubSnapshotDraft(
             id = id,
