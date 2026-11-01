@@ -14,6 +14,8 @@ import com.example.hub.sync.RemoteSnapshot
 import com.example.hub.sync.SnapshotMetadata
 import com.example.hub.sync.UpdateCheck
 import com.example.hub.sync.WorkstationApi
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -381,7 +383,68 @@ class VaultArchiveTest {
             assertEquals("keep", db.snapshotDao().getById("snap-keep")!!.payload)
             assertNull(db.snapshotDao().getById("snap-drop"))
             assertEquals("live-pointer", db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
-            assertTrue(com.example.hub.vault.ExportHold.protectedIds().isEmpty())
+            assertTrue(ExportHold.protectedIds().isEmpty())
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun largeHistoryExportKeepsOnePayloadResident() = runTest {
+        val db = open()
+        try {
+            val body = "p".repeat(8_000)
+            repeat(24) { index ->
+                db.snapshotDao().insert(row("bulk-$index", body + index))
+            }
+            db.gameInstanceDao().upsert(instance("live-pointer"))
+            val exported = VaultArchive(
+                db.snapshotDao(),
+                emptyApi(),
+                IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao()),
+                "test",
+            ).exportGame("shark-incremental")
+            assertTrue(exported is IhubExportResult.Ready)
+            val ready = exported as IhubExportResult.Ready
+            assertEquals(24, ready.snapshotCount)
+            assertTrue(IhubArchive.exportPeakPayloadBytes in 8_000L..20_000L)
+            assertTrue(IhubArchive.exportPeakPayloadBytes < 8_000L * 4)
+            assertEquals("live-pointer", db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            ready.file.delete()
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun overlappingExportsDoNotReleaseEachOthersHold() = runTest {
+        val db = open()
+        try {
+            db.snapshotDao().insert(row("snap-1", "held-bytes"))
+            db.gameInstanceDao().upsert(instance("live-pointer"))
+            val publisher = IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao())
+            val first = VaultArchive(db.snapshotDao(), emptyApi(), publisher, "test")
+            val second = VaultArchive(db.snapshotDao(), emptyApi(), publisher, "test")
+            val firstSelected = CompletableDeferred<Unit>()
+            val releaseFirst = CompletableDeferred<Unit>()
+            var seenBySecond = emptySet<String>()
+            first.afterSelection = {
+                firstSelected.complete(Unit)
+                releaseFirst.await()
+            }
+            second.afterSelection = {
+                seenBySecond = ExportHold.protectedIds()
+            }
+            val running = async { first.exportGame("shark-incremental") }
+            firstSelected.await()
+            val finishedSecond = second.exportGame("shark-incremental")
+            assertTrue(finishedSecond is IhubExportResult.Ready)
+            assertTrue(seenBySecond.contains("snap-1"))
+            assertTrue(ExportHold.protectedIds().contains("snap-1"))
+            releaseFirst.complete(Unit)
+            assertTrue(running.await() is IhubExportResult.Ready)
+            assertTrue(ExportHold.protectedIds().isEmpty())
+            (finishedSecond as IhubExportResult.Ready).file.delete()
         } finally {
             db.close()
         }

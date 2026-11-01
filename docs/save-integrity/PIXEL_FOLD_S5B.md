@@ -11,3 +11,11 @@ Do not run these steps on the production Shark profile. Use a disposable profile
 | Restart and workstation pointer | Force-stop, reopen, and confirm the Room pointer. Confirm the workstation pointer did not move to an older or incomparable save. | NOT RUN |
 
 No Pixel Fold was attached for S5b. The attached devices were not used for this checklist.
+
+These physical steps are not the same as the automated checks:
+
+- A repository unit test calls `restoreImportedPointer` on an in-memory database.
+- `VaultRecoveryDrillTest` is a WebView storage test. It writes and reads localStorage, then imports into a disposable Room file.
+- `VaultImportActivationTest` is the Android restore drill. It imports a Shark fixture, presses **Use this save**, reopens the database, and resumes through `SessionController`.
+
+A pass on one of those does not mark a physical step above as run.

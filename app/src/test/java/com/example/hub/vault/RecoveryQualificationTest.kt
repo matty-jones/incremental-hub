@@ -164,6 +164,32 @@ class RecoveryQualificationTest {
         }
     }
 
+    @Test
+    fun invalidPayloadAndOccupiedSlotAreNotActivated() = runTest {
+        val db = memory()
+        try {
+            val adapter = SharkIncrementalAdapter()
+            db.snapshotDao().insert(sharkRow("bad", 1, "not-a-shark-save", "lineage-shark"))
+            val invalid = repository(db).restoreImportedPointer("shark-incremental", "bad", adapter)
+            assertEquals(CaptureDisposition.REJECTED, invalid.disposition)
+            assertNull(db.gameInstanceDao().get("shark-incremental")?.snapshotPayload)
+            assertEquals("not-a-shark-save", db.snapshotDao().getById("bad")!!.payload)
+            val payload = shark(feature = 9, prestige = 10)
+            db.snapshotDao().insert(sharkRow("good", 2, payload, "lineage-shark"))
+            val adopted = repository(db).restoreImportedPointer("shark-incremental", "good", adapter)
+            assertEquals(CaptureDisposition.STORED, adopted.disposition)
+            val occupied = repository(db).restoreImportedPointer("shark-incremental", "good", adapter)
+            assertEquals(CaptureDisposition.REJECTED, occupied.disposition)
+            val saved = db.gameInstanceDao().get("shark-incremental")!!
+            assertEquals(payload, saved.snapshotPayload)
+            assertEquals("lineage-shark", saved.lineageId)
+            assertEquals("good", saved.highWaterSnapshotId)
+            assertEquals(payload, db.snapshotDao().getById("good")!!.payload)
+        } finally {
+            db.close()
+        }
+    }
+
     private fun repository(db: HubDatabase): CaptureRepository {
         return CaptureRepository(
             instanceDao = db.gameInstanceDao(),

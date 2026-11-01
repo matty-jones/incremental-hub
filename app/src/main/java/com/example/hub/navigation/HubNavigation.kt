@@ -6,6 +6,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -98,11 +102,21 @@ fun HubNavigation(
         ) { backStackEntry ->
             val gameId = backStackEntry.arguments?.getString("gameId")
                 ?: throw IllegalArgumentException("gameId is required for vault route")
+            var slotEmpty by remember(gameId) { mutableStateOf(false) }
+            LaunchedEffect(gameId) {
+                slotEmpty = dao.get(gameId)?.snapshotPayload.isNullOrBlank()
+            }
             VaultHost(
                 gameId = gameId,
                 catalog = sessionModel.vaultCatalog,
                 protection = sessionModel.vaultProtection,
                 archive = sessionModel.vaultArchive,
+                slotEmpty = slotEmpty,
+                onActivateImported = { entry ->
+                    val message = sessionModel.activateImported(gameId, entry.id)
+                    slotEmpty = dao.get(gameId)?.snapshotPayload.isNullOrBlank()
+                    message
+                },
                 onBack = { navController.popBackStack() },
             )
         }

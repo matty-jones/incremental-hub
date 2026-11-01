@@ -75,6 +75,17 @@ data class VaultBrowse(
         get() = !remoteComplete
 }
 
+/**
+ * A clean device may adopt one local snapshot. An occupied slot has no
+ * activation action; the repository also refuses that write.
+ */
+fun canActivateImported(slotEmpty: Boolean, entry: VaultEntry): Boolean {
+    return slotEmpty &&
+        entry.availability == VaultAvailability.PRESENT &&
+        entry.residence != VaultResidence.REMOTE_ONLY &&
+        !entry.active
+}
+
 fun vaultLabels(entry: VaultEntry): List<String> {
     val labels = mutableListOf<String>()
     when (entry.residence) {

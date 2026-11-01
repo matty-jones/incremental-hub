@@ -12,6 +12,7 @@ import com.example.hub.database.HubDatabase
 import com.example.hub.games.GameAdapters
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.ProgressionClass
+import com.example.hub.session.CaptureRepository
 import com.example.hub.session.DiagnosticSeverity
 import com.example.hub.session.SessionController
 import com.example.hub.session.SessionRuntime
@@ -34,8 +35,8 @@ import kotlinx.coroutines.launch
  */
 class HubSessionViewModel(
     context: Context,
-    gameRegistry: GameRegistry,
-    database: HubDatabase,
+    private val gameRegistry: GameRegistry,
+    private val database: HubDatabase,
 ) : ViewModel() {
     private val workstation = WorkstationClient()
     val workstationApi: WorkstationApi = workstation
@@ -76,6 +77,23 @@ class HubSessionViewModel(
             adapter.classifyProgress(candidate, reference)
         }
     }
+    /**
+     * Adopts [snapshotId] only when this game has no live save and the
+     * installed adapter accepts the bytes. The snapshot row is not rewritten.
+     */
+    suspend fun activateImported(gameId: String, snapshotId: String): String {
+        val game = gameRegistry.getGame(gameId)
+        val adapter = game?.let { GameAdapters.create(it.adapterId) }
+            ?: return "This game cannot be activated. The active save was kept."
+        val commit = CaptureRepository(
+            instanceDao = database.gameInstanceDao(),
+            snapshotDao = database.snapshotDao(),
+            roomDatabase = database,
+            outboxDao = database.syncOutboxDao(),
+        ).restoreImportedPointer(gameId, snapshotId, adapter)
+        return commit.message ?: "The save was not activated."
+    }
+
     val controller: SessionController = SessionController(
         context = context.applicationContext,
         gameRegistry = gameRegistry,

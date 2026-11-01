@@ -36,6 +36,7 @@ import com.example.hub.vault.IhubArchive
 import com.example.hub.vault.IhubExportResult
 import com.example.hub.vault.IhubOpenResult
 import com.example.hub.vault.VaultArchive
+import com.example.hub.vault.canActivateImported
 import com.example.hub.vault.VaultAssessment
 import com.example.hub.vault.VaultAvailability
 import com.example.hub.vault.VaultBrowse
@@ -80,6 +81,8 @@ fun VaultHost(
     plan: VaultAssessment? = null,
     onStageRestore: ((VaultEntry) -> Unit)? = null,
     onConfirmRestore: ((Boolean) -> Unit)? = null,
+    slotEmpty: Boolean = false,
+    onActivateImported: (suspend (VaultEntry) -> String)? = null,
     archive: VaultArchive? = null,
 ) {
     val scope = rememberCoroutineScope()
@@ -201,6 +204,21 @@ fun VaultHost(
         plan = plan,
         onStageRestore = onStageRestore,
         onConfirmRestore = onConfirmRestore,
+        slotEmpty = slotEmpty,
+        onActivateImported = onActivateImported?.let { activate ->
+            { entry ->
+                scope.launch {
+                    notice = runCatching { activate(entry) }.getOrElse { error ->
+                        error.message ?: "The save was not activated."
+                    }
+                    load(offset, advanceRemote = false)
+                    val current = browse?.entries?.firstOrNull { it.id == entry.id }
+                    if (current != null) {
+                        reading = readSnapshot(gameId, current, catalog.readPayload(current))
+                    }
+                }
+            }
+        },
         onExportGame = archive?.let { store ->
             {
                 startExport("$gameId.ihub") { store.exportGame(gameId) }
@@ -242,6 +260,8 @@ fun VaultScreen(
     plan: VaultAssessment? = null,
     onStageRestore: ((VaultEntry) -> Unit)? = null,
     onConfirmRestore: ((Boolean) -> Unit)? = null,
+    slotEmpty: Boolean = false,
+    onActivateImported: ((VaultEntry) -> Unit)? = null,
     onExportGame: (() -> Unit)? = null,
     onExportAll: (() -> Unit)? = null,
     onImport: (() -> Unit)? = null,
@@ -272,6 +292,8 @@ fun VaultScreen(
                 plan = plan,
                 onStageRestore = onStageRestore,
                 onConfirmRestore = onConfirmRestore,
+                slotEmpty = slotEmpty,
+                onActivateImported = onActivateImported,
                 onExportSnapshot = onExportSnapshot,
                 modifier = Modifier.padding(padding),
             )
@@ -472,6 +494,8 @@ private fun VaultDetail(
     plan: VaultAssessment?,
     onStageRestore: ((VaultEntry) -> Unit)?,
     onConfirmRestore: ((Boolean) -> Unit)?,
+    slotEmpty: Boolean,
+    onActivateImported: ((VaultEntry) -> Unit)?,
     onExportSnapshot: ((VaultEntry) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
@@ -546,6 +570,17 @@ private fun VaultDetail(
                     .testTag("vault-restore"),
             ) {
                 Text("Restore")
+            }
+        }
+        val activate = onActivateImported
+        if (activate != null && canActivateImported(slotEmpty, entry)) {
+            HubOutlinedButton(
+                onClick = { activate(entry) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("vault-activate-imported"),
+            ) {
+                Text("Use this save")
             }
         }
         val shown = plan?.takeIf { it.snapshotId == entry.id }

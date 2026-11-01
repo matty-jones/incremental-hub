@@ -2,22 +2,31 @@ package com.example.hub.vault
 
 /**
  * Snapshot ids selected for an in-progress export. Retention must not delete
- * them until the export finishes or is refused. The hold is process-local:
- * a cancelled export releases it, and a missing row is a refusal rather than
- * a silent omission.
+ * them until every export that selected them has finished or been refused.
+ * Overlapping exports each hold a reference. One finishing does not drop a
+ * row another export still needs.
  */
 object ExportHold {
-    private val held = LinkedHashSet<String>()
+    private val counts = HashMap<String, Int>()
 
     fun hold(ids: Collection<String>) {
         if (ids.isEmpty()) return
-        synchronized(held) { held.addAll(ids) }
+        synchronized(counts) {
+            for (id in ids.distinct()) {
+                counts[id] = (counts[id] ?: 0) + 1
+            }
+        }
     }
 
     fun release(ids: Collection<String>) {
         if (ids.isEmpty()) return
-        synchronized(held) { held.removeAll(ids.toSet()) }
+        synchronized(counts) {
+            for (id in ids.distinct()) {
+                val next = (counts[id] ?: 0) - 1
+                if (next <= 0) counts.remove(id) else counts[id] = next
+            }
+        }
     }
 
-    fun protectedIds(): Set<String> = synchronized(held) { held.toSet() }
+    fun protectedIds(): Set<String> = synchronized(counts) { counts.keys.toSet() }
 }

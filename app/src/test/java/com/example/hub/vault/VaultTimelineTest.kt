@@ -147,6 +147,15 @@ class VaultTimelineTest {
         )
     }
 
+    @Test
+    fun cleanSlotCanActivateAndAnOccupiedSlotCannot() {
+        val local = entry("snap", sequence = 1, capturedAt = 1L)
+        assertTrue(canActivateImported(slotEmpty = true, local))
+        assertFalse(canActivateImported(slotEmpty = false, local))
+        assertFalse(canActivateImported(slotEmpty = true, local.copy(active = true)))
+        assertFalse(canActivateImported(slotEmpty = true, remote("remote", 2L, 1L)))
+    }
+
     private fun remote(id: String, receivedAt: Long, capturedAt: Long): VaultEntry {
         return entry(id, sequence = 0, capturedAt = capturedAt).copy(
             residence = VaultResidence.REMOTE_ONLY,

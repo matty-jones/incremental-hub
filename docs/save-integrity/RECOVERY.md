@@ -8,7 +8,7 @@ Use this after a failed restore, a bad archive, or a workstation database that n
 2. Open the vault and choose Import. Select the `.ihub` file through the system document picker.
 3. Import adds historical snapshots only. It does not change the live game, the Room pointer, or the workstation pointer. If the import reports a conflict, different bytes, or an interruption, stop. The existing vault is unchanged.
 4. Confirm the imported row. The snapshot id, game, lineage, and payload bytes must match the archive. A migrated row may have had a blank stored hash; the archive hash is the SHA-256 of the payload bytes.
-5. On a device with no live save for that game, restore the chosen snapshot. The Room pointer becomes those exact bytes, on the same lineage, and the snapshot row is not rewritten.
+5. On a device with no live save for that game, open the snapshot and press **Use this save**. The Room pointer becomes those exact bytes, on the same lineage, and the high-water id is that snapshot. The snapshot row is not rewritten. The action is not shown when a live save already exists.
 6. If the device already has a live save, the restore does not replace it. A save that is behind the protected pointer needs an explicit new-lineage confirmation. That confirmation pins the previous high-water snapshot and leaves workstation history in place. It does not move the workstation pointer.
 7. Force-stop the app and open it again. The pointer, lineage, and snapshot bytes must be the same. An unfinished restore journal stops the game until the journal reconciles or recovery is shown. A journal that already committed keeps that pointer even when the storage read-back does not match.
 

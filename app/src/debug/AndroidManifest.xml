@@ -8,6 +8,9 @@
             android:exported="true"
             tools:replace="android:exported" />
         <activity
+            android:name=".VaultProbeActivity"
+            android:exported="false" />
+        <activity
             android:name=".WebViewProbeActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|uiMode|fontScale|keyboard|keyboardHidden|navigation"
             android:exported="false" />

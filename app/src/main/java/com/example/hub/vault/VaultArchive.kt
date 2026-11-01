@@ -28,7 +28,7 @@ class VaultArchive(
 
     suspend fun exportSnapshot(snapshotId: String): IhubExportResult = IhubArchive.runOffMain {
         noteThread()
-        val selected = snapshots.getById(snapshotId)
+        val selected = selectOne(snapshotId)
             ?: return@runOffMain IhubExportResult.Refused(
                 "Snapshot $snapshotId is not on this phone.",
                 listOf(snapshotId),
@@ -42,13 +42,13 @@ class VaultArchive(
         try {
             afterSelection?.invoke()
             val row = snapshots.getById(snapshotId)
-            if (row == null || row.payload != selected.payload || row.contentSha256 != selected.contentSha256) {
+            if (!selected.matches(row)) {
                 return@runOffMain writer.refuse(
                     "This is not a complete archive. Missing: $snapshotId",
                     listOf(snapshotId),
                 )
             }
-            val failure = writer.add(row.toDraft())
+            val failure = writer.add(row!!.toDraft())
             if (failure != null) return@runOffMain failure
             writer.finish(complete = true, omissions = emptyList())
         } catch (cancelled: CancellationException) {
@@ -134,11 +134,11 @@ class VaultArchive(
             for (gameId in gameIds) {
                 val selected = ArrayList<SelectedSnapshot>()
                 for (id in snapshots.idsForGame(gameId)) {
-                    val row = snapshots.getById(id)
-                    if (row == null) {
+                    val selectedRow = selectOne(id)
+                    if (selectedRow == null) {
                         omissions.add(id)
                     } else {
-                        selected += SelectedSnapshot(id, row.payload, row.contentSha256)
+                        selected += selectedRow
                     }
                 }
                 selectedByGame[gameId] = selected
@@ -151,7 +151,7 @@ class VaultArchive(
                 val localIds = mutableSetOf<String>()
                 for (selected in selectedByGame.getValue(gameId)) {
                     val row = snapshots.getById(selected.id)
-                    if (row == null || row.payload != selected.payload || row.contentSha256 != selected.contentSha256) {
+                    if (row == null || !selected.matches(row)) {
                         omissions.add(selected.id)
                         continue
                     }
@@ -235,6 +235,17 @@ class VaultArchive(
         return page.complete || page.entries.isEmpty() || page.entries.size < pageSize
     }
 
+    private suspend fun selectOne(id: String): SelectedSnapshot? {
+        val row = snapshots.getById(id) ?: return null
+        val digest = PayloadDigest.sha256(row.payload)
+        return SelectedSnapshot(
+            id = row.id,
+            payloadSha256 = digest,
+            storedSha256 = row.contentSha256,
+            payloadBytes = row.payload.length,
+        )
+    }
+
     private fun noteThread() {
         archiveThread = IhubArchive.lastIoThread
     }
@@ -242,9 +253,16 @@ class VaultArchive(
 
 private data class SelectedSnapshot(
     val id: String,
-    val payload: String,
-    val contentSha256: String,
-)
+    val payloadSha256: String,
+    val storedSha256: String,
+    val payloadBytes: Int,
+) {
+    fun matches(row: SnapshotRecord?): Boolean {
+        if (row == null || row.id != id) return false
+        if (row.contentSha256 != storedSha256 || row.payload.length != payloadBytes) return false
+        return PayloadDigest.sha256(row.payload) == payloadSha256
+    }
+}
 
 private fun SnapshotRecord.toDraft(): IhubSnapshotDraft {
     return IhubSnapshotDraft(

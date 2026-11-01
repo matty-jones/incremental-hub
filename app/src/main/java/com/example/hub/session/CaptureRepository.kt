@@ -86,8 +86,12 @@ class CaptureRepository(
      * Points a blank local slot at an imported snapshot. The snapshot row is
      * not rewritten. A non-blank live save is left where it is.
      */
-    suspend fun restoreImportedPointer(gameId: String, snapshotId: String): CaptureCommit {
-        val apply = suspend { restoreImportedLocked(gameId, snapshotId) }
+    suspend fun restoreImportedPointer(
+        gameId: String,
+        snapshotId: String,
+        adapter: GameAdapter? = null,
+    ): CaptureCommit {
+        val apply = suspend { restoreImportedLocked(gameId, snapshotId, adapter) }
         val database = roomDatabase
         return if (database != null) database.withTransaction { apply() } else apply()
     }
@@ -616,7 +620,11 @@ class CaptureRepository(
             "Active $candidateSha ${adapter.summarize(candidate).detail}. The previous save remains in history."
     }
 
-    private suspend fun restoreImportedLocked(gameId: String, snapshotId: String): CaptureCommit {
+    private suspend fun restoreImportedLocked(
+        gameId: String,
+        snapshotId: String,
+        adapter: GameAdapter?,
+    ): CaptureCommit {
         val dao = snapshotDao
             ?: return rejected(ProgressionClass.INVALID, "Snapshot storage is unavailable. The active save was kept.")
         val row = dao.getById(snapshotId)
@@ -627,6 +635,16 @@ class CaptureRepository(
         val digest = PayloadDigest.sha256(row.payload)
         if (row.contentSha256.isNotEmpty() && row.contentSha256 != digest) {
             return rejected(ProgressionClass.INVALID, "The stored hash does not match the payload. The active save was kept.")
+        }
+        if (adapter != null) {
+            val valid = try {
+                adapter.validate(row.payload)
+            } catch (_: Exception) {
+                false
+            }
+            if (!valid) {
+                return rejected(ProgressionClass.INVALID, "The snapshot failed validation. The active save was kept.")
+            }
         }
         val existing = instanceDao.get(gameId)
         if (!existing?.snapshotPayload.isNullOrBlank()) {
