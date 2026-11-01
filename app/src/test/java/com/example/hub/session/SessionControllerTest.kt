@@ -1591,6 +1591,151 @@ class SessionControllerTest {
     }
 
     @Test
+    fun launchStopsOrReconcilesAtEachJournalPhase() = runTest {
+        registry.injectGame(StubGame("envelope-probe", "https://example.test/envelope/"))
+        val intendedSlots = listOf(
+            com.example.hub.games.StorageSlot("progress", "kept-secret-value"),
+            com.example.hub.games.StorageSlot("backup", null),
+            com.example.hub.games.StorageSlot("notes", ""),
+        )
+        val previousSlots = listOf(
+            com.example.hub.games.StorageSlot("progress", "old"),
+            com.example.hub.games.StorageSlot("backup", "daily"),
+            com.example.hub.games.StorageSlot("notes", "pref"),
+        )
+        val intended = com.example.hub.games.SaveEnvelope.encode(intendedSlots)
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val store = com.example.hub.session.RestoreJournalStore(context)
+        val phases = listOf(
+            com.example.hub.session.JournalPhase.PREPARED,
+            com.example.hub.session.JournalPhase.APPLYING,
+            com.example.hub.session.JournalPhase.APPLIED,
+            com.example.hub.session.JournalPhase.VERIFIED,
+            com.example.hub.session.JournalPhase.POINTER_COMMITTED,
+        )
+        for (phase in phases) {
+            store.write(
+                com.example.hub.session.RestoreJournal(
+                    profileName = "hub-game-envelope-probe",
+                    gameId = "envelope-probe",
+                    phase = phase,
+                    appliedKeys = 0,
+                    previousSlots = previousSlots,
+                    intendedSlots = intendedSlots,
+                    previousPointer = "old-pointer",
+                    intendedPointer = intended,
+                    direction = com.example.hub.session.RestoreDirection.INTENDED,
+                ),
+            )
+            dao.upsert(
+                GameInstance(
+                    gameId = "envelope-probe",
+                    profileName = "hub-game-envelope-probe",
+                    sessionIdentity = "envelope",
+                    lastPlayedAtMillis = 1L,
+                    lastCaptureAtMillis = 1L,
+                    snapshotPayload = "old-pointer",
+                ),
+            )
+            val session = controllerWithoutDocumentHook(
+                readiness = { _, _ -> true },
+                peek = { _, _ -> PeekOutcome.Value(intended) },
+                adapterForTest = { adapterId ->
+                    if (adapterId == "envelope-probe-adapter") EnvelopeProbeAdapter() else null
+                },
+            )
+            session.open("envelope-probe")
+            session.registerWebView(WebView(context))
+            session.onMainFrameFinished("https://example.test/envelope/")
+            advanceUntilIdle()
+            if (phase == com.example.hub.session.JournalPhase.POINTER_COMMITTED) {
+                assertEquals(intended, dao.get("envelope-probe")!!.snapshotPayload)
+                assertFalse(store.unfinished("hub-game-envelope-probe"))
+                assertEquals(null, session.sessionError.value)
+                assertEquals(0, session.gameDocumentLoads)
+            } else {
+                assertEquals(phase.name, "old-pointer", dao.get("envelope-probe")!!.snapshotPayload)
+                assertEquals(phase.name, SessionState.RecoveryRequired, session.state.value)
+                assertEquals(phase.name, 0, session.gameDocumentLoads)
+                assertTrue(phase.name, store.unfinished("hub-game-envelope-probe"))
+            }
+            store.delete("hub-game-envelope-probe")
+        }
+    }
+
+    @Test
+    fun committedJournalKeepsThePointerWhenStorageDoesNotMatch() = runTest {
+        registry.injectGame(StubGame("envelope-probe", "https://example.test/envelope/"))
+        val intended = com.example.hub.games.SaveEnvelope.encode(
+            listOf(
+                com.example.hub.games.StorageSlot("progress", "kept-secret-value"),
+                com.example.hub.games.StorageSlot("backup", null),
+                com.example.hub.games.StorageSlot("notes", ""),
+            ),
+        )
+        val previous = com.example.hub.games.SaveEnvelope.encode(
+            listOf(
+                com.example.hub.games.StorageSlot("progress", "old"),
+                com.example.hub.games.StorageSlot("backup", "daily"),
+                com.example.hub.games.StorageSlot("notes", "pref"),
+            ),
+        )
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val store = com.example.hub.session.RestoreJournalStore(context)
+        store.write(
+            com.example.hub.session.RestoreJournal(
+                profileName = "hub-game-envelope-probe",
+                gameId = "envelope-probe",
+                phase = com.example.hub.session.JournalPhase.POINTER_COMMITTED,
+                appliedKeys = 3,
+                previousSlots = listOf(
+                    com.example.hub.games.StorageSlot("progress", "old"),
+                    com.example.hub.games.StorageSlot("backup", "daily"),
+                    com.example.hub.games.StorageSlot("notes", "pref"),
+                ),
+                intendedSlots = listOf(
+                    com.example.hub.games.StorageSlot("progress", "kept-secret-value"),
+                    com.example.hub.games.StorageSlot("backup", null),
+                    com.example.hub.games.StorageSlot("notes", ""),
+                ),
+                previousPointer = "old-pointer",
+                intendedPointer = intended,
+                direction = com.example.hub.session.RestoreDirection.INTENDED,
+            ),
+        )
+        dao.upsert(
+            GameInstance(
+                gameId = "envelope-probe",
+                profileName = "hub-game-envelope-probe",
+                sessionIdentity = "envelope",
+                lastPlayedAtMillis = 1L,
+                lastCaptureAtMillis = 1L,
+                snapshotPayload = "old-pointer",
+            ),
+        )
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(previous) },
+            adapterForTest = { adapterId ->
+                if (adapterId == "envelope-probe-adapter") EnvelopeProbeAdapter() else null
+            },
+        )
+        session.open("envelope-probe")
+        session.registerWebView(WebView(context))
+        session.onMainFrameFinished("https://example.test/envelope/")
+        advanceUntilIdle()
+        assertEquals(intended, dao.get("envelope-probe")!!.snapshotPayload)
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(0, session.gameDocumentLoads)
+        assertTrue(store.unfinished("hub-game-envelope-probe"))
+        assertEquals(
+            com.example.hub.session.RestoreDirection.INTENDED,
+            store.read("hub-game-envelope-probe")?.direction,
+        )
+        store.delete("hub-game-envelope-probe")
+    }
+
+    @Test
     fun failedEnvelopeCaptureDoesNotAdvanceThePointer() = runTest {
         registry.injectGame(StubGame("envelope-probe", "https://example.test/envelope/"))
         dao.upsert(

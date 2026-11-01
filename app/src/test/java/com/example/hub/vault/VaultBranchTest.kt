@@ -36,6 +36,13 @@ class VaultBranchTest {
             val older = shark(feature = 4, prestige = 2)
             db.snapshotDao().insert(row("current", 2, current))
             db.snapshotDao().insert(row("older", 1, older))
+            db.snapshotDao().insert(
+                row("workstation-history", 3, current).copy(
+                    reason = SnapshotReasons.WORKSTATION,
+                    pinned = true,
+                    origin = com.example.hub.database.SnapshotOrigins.WORKSTATION,
+                ),
+            )
             db.gameInstanceDao().upsert(instance(current, "current"))
             val commit = repository(db).branchToSnapshot(
                 gameId = "shark-incremental",
@@ -58,6 +65,10 @@ class VaultBranchTest {
             val original = db.snapshotDao().getById("older")!!
             assertEquals(older, original.payload)
             assertEquals("legacy", original.lineageId)
+            val workstation = db.snapshotDao().getById("workstation-history")!!
+            assertEquals(current, workstation.payload)
+            assertEquals(SnapshotReasons.WORKSTATION, workstation.reason)
+            assertTrue(workstation.pinned)
             assertTrue(db.syncOutboxDao().pending().isEmpty())
             assertTrue(
                 db.snapshotDao().history("shark-incremental").any {

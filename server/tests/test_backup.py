@@ -294,3 +294,39 @@ def test_pre_migration_copy_failure_does_not_migrate(tmp_path, monkeypatch):
     assert list((tmp_path / "backups").glob("hub-*.db")) == []
     assert "save_snapshots" not in _tables(database)
     assert _saved_payload(database, "shark-incremental") == payload
+
+
+def test_disposable_directory_restore_matches_pointers_history_and_health(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    shark = "feature-9-" + ("S" * 120) + "\nkept"
+    trimps = "trimps-pointer-\nkept"
+    assert client.put("/saves/shark-incremental", json=_body(shark)).status_code == 200
+    assert client.put("/saves/trimps", json=_body(trimps)).status_code == 200
+    copied = create_backup(datetime(2026, 11, 1, 18, tzinfo=timezone.utc))
+    restored_dir = tmp_path / "restored-server"
+    restored_dir.mkdir()
+    restored = restored_dir / "saves.db"
+    restored.write_bytes(copied.read_bytes())
+    raw = sqlite3.connect(restored)
+    raw.row_factory = sqlite3.Row
+    assert raw.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    history = raw.execute("SELECT payload, sha256 FROM save_snapshots").fetchall()
+    pointers = {
+        row["game_id"]: row["snapshot_payload"]
+        for row in raw.execute("SELECT game_id, snapshot_payload FROM saves")
+    }
+    raw.close()
+    assert pointers["shark-incremental"] == shark
+    assert pointers["trimps"] == trimps
+    assert len(history) >= 2
+    for row in history:
+        assert row["sha256"] == payload_sha256(row["payload"])
+    monkeypatch.setenv("HUB_DB_PATH", str(restored))
+    monkeypatch.setenv("HUB_BACKUP_DIR", str(restored_dir / "backups"))
+    opened = TestClient(app)
+    health = opened.get("/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+    listed = {item["game_id"]: item["snapshot_payload"] for item in opened.get("/saves").json()}
+    assert listed["shark-incremental"] == shark
+    assert listed["trimps"] == trimps

@@ -48,7 +48,14 @@ class IhubPublisher(
                     val file = load(index)
                     val existing = snapshots.getById(file.id)
                     if (existing != null) {
-                        if (existing.payload != file.payload || existing.contentSha256 != file.contentSha256) {
+                        val sameIdentity = existing.gameId == file.gameId && existing.lineageId == file.lineageId
+                        val sameBytes = existing.payload == file.payload
+                        if (!sameIdentity) {
+                            throw IhubConflict(
+                                "Snapshot ${file.id} conflicts with a stored snapshot for a different game or lineage. Nothing was imported.",
+                            )
+                        }
+                        if (!sameBytes) {
                             throw IhubConflict(
                                 "Snapshot ${file.id} is already stored with different bytes. Nothing was imported.",
                             )

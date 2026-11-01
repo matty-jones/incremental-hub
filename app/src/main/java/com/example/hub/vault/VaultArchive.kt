@@ -23,9 +23,12 @@ class VaultArchive(
     var archiveThread: String? = null
         private set
 
+    /** Test hook. Runs after the export set is held and before those rows are written. */
+    internal var afterSelection: (suspend () -> Unit)? = null
+
     suspend fun exportSnapshot(snapshotId: String): IhubExportResult = IhubArchive.runOffMain {
         noteThread()
-        val local = snapshots.getById(snapshotId)
+        val selected = snapshots.getById(snapshotId)
             ?: return@runOffMain IhubExportResult.Refused(
                 "Snapshot $snapshotId is not on this phone.",
                 listOf(snapshotId),
@@ -35,13 +38,24 @@ class VaultArchive(
             createdAt = Instant.now().toString(),
             exporterVersion = exporterVersion,
         )
+        ExportHold.hold(listOf(snapshotId))
         try {
-            val failure = writer.add(local.toDraft())
+            afterSelection?.invoke()
+            val row = snapshots.getById(snapshotId)
+            if (row == null || row.payload != selected.payload || row.contentSha256 != selected.contentSha256) {
+                return@runOffMain writer.refuse(
+                    "This is not a complete archive. Missing: $snapshotId",
+                    listOf(snapshotId),
+                )
+            }
+            val failure = writer.add(row.toDraft())
             if (failure != null) return@runOffMain failure
             writer.finish(complete = true, omissions = emptyList())
         } catch (cancelled: CancellationException) {
             writer.abort()
             throw cancelled
+        } finally {
+            ExportHold.release(listOf(snapshotId))
         }
     }
 
@@ -114,12 +128,34 @@ class VaultArchive(
             exporterVersion = exporterVersion,
         )
         val omissions = mutableListOf<String>()
+        val held = mutableListOf<String>()
         try {
+            val selectedByGame = LinkedHashMap<String, List<SelectedSnapshot>>()
             for (gameId in gameIds) {
-                val ids = snapshots.idsForGame(gameId)
-                val localIds = ids.toSet()
-                for (id in ids) {
-                    val row = snapshots.getById(id) ?: continue
+                val selected = ArrayList<SelectedSnapshot>()
+                for (id in snapshots.idsForGame(gameId)) {
+                    val row = snapshots.getById(id)
+                    if (row == null) {
+                        omissions.add(id)
+                    } else {
+                        selected += SelectedSnapshot(id, row.payload, row.contentSha256)
+                    }
+                }
+                selectedByGame[gameId] = selected
+            }
+            val holdIds = selectedByGame.values.flatten().map { it.id }
+            ExportHold.hold(holdIds)
+            held += holdIds
+            afterSelection?.invoke()
+            for (gameId in gameIds) {
+                val localIds = mutableSetOf<String>()
+                for (selected in selectedByGame.getValue(gameId)) {
+                    val row = snapshots.getById(selected.id)
+                    if (row == null || row.payload != selected.payload || row.contentSha256 != selected.contentSha256) {
+                        omissions.add(selected.id)
+                        continue
+                    }
+                    localIds += row.id
                     val failure = writer.add(row.toDraft())
                     if (failure != null) return failure
                 }
@@ -160,6 +196,8 @@ class VaultArchive(
                 e.message ?: "The archive could not be written.",
                 omissions,
             )
+        } finally {
+            ExportHold.release(held)
         }
     }
 
@@ -201,6 +239,12 @@ class VaultArchive(
         archiveThread = IhubArchive.lastIoThread
     }
 }
+
+private data class SelectedSnapshot(
+    val id: String,
+    val payload: String,
+    val contentSha256: String,
+)
 
 private fun SnapshotRecord.toDraft(): IhubSnapshotDraft {
     return IhubSnapshotDraft(

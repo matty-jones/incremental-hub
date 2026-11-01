@@ -83,6 +83,16 @@ class CaptureRepository(
     }
 
     /**
+     * Points a blank local slot at an imported snapshot. The snapshot row is
+     * not rewritten. A non-blank live save is left where it is.
+     */
+    suspend fun restoreImportedPointer(gameId: String, snapshotId: String): CaptureCommit {
+        val apply = suspend { restoreImportedLocked(gameId, snapshotId) }
+        val database = roomDatabase
+        return if (database != null) database.withTransaction { apply() } else apply()
+    }
+
+    /**
      * Activates [snapshotId] on a new lineage. The selected row is not rewritten.
      * The previous pointer is copied onto its old lineage, and the previous
      * high-water row is pinned. Nothing is added to the sync outbox.
@@ -604,6 +614,50 @@ class CaptureRepository(
         val candidateSha = PayloadDigest.sha256(candidate)
         return "New lineage is active. Previous $previousSha ${adapter.summarize(previous).detail}. " +
             "Active $candidateSha ${adapter.summarize(candidate).detail}. The previous save remains in history."
+    }
+
+    private suspend fun restoreImportedLocked(gameId: String, snapshotId: String): CaptureCommit {
+        val dao = snapshotDao
+            ?: return rejected(ProgressionClass.INVALID, "Snapshot storage is unavailable. The active save was kept.")
+        val row = dao.getById(snapshotId)
+            ?: return rejected(ProgressionClass.INVALID, "That snapshot was not found. The active save was kept.")
+        if (row.gameId != gameId) {
+            return rejected(ProgressionClass.INVALID, "The snapshot belongs to a different game. The active save was kept.")
+        }
+        val digest = PayloadDigest.sha256(row.payload)
+        if (row.contentSha256.isNotEmpty() && row.contentSha256 != digest) {
+            return rejected(ProgressionClass.INVALID, "The stored hash does not match the payload. The active save was kept.")
+        }
+        val existing = instanceDao.get(gameId)
+        if (!existing?.snapshotPayload.isNullOrBlank()) {
+            return rejected(ProgressionClass.REGRESSED, "A live save is already stored. The active save was kept.")
+        }
+        val now = clock()
+        val base = existing ?: GameInstance(
+            gameId = gameId,
+            profileName = "hub-game-$gameId",
+            sessionIdentity = "imported",
+            lastPlayedAtMillis = now,
+            lastCaptureAtMillis = now,
+        )
+        val updated = base.copy(
+            snapshotPayload = row.payload,
+            lineageId = row.lineageId,
+            highWaterSnapshotId = row.id,
+            lastCaptureAtMillis = now,
+            lastCaptureSuccessAtMillis = now,
+            lastCaptureAttemptAtMillis = now,
+            lastCaptureError = null,
+            captureIncident = null,
+        )
+        instanceDao.upsert(updated)
+        return CaptureCommit(
+            CaptureDisposition.STORED,
+            ProgressionClass.EQUAL,
+            updated,
+            "Restored the imported snapshot. The snapshot bytes were not rewritten.",
+            sync = false,
+        )
     }
 
     private suspend fun branchLocked(

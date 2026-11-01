@@ -1,5 +1,6 @@
 package com.example.hub.database
 
+import com.example.hub.vault.ExportHold
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -87,7 +88,7 @@ object SnapshotRetention {
         val instance = instanceDao.get(gameId) ?: return
         if (!instance.captureIncident.isNullOrBlank()) return
         val rows = snapshotDao.history(gameId)
-        val protectedIds = setOfNotNull(instance.highWaterSnapshotId)
+        val protectedIds = setOfNotNull(instance.highWaterSnapshotId) + ExportHold.protectedIds()
         val keep = keepIds(rows, nowMillis, protectedIds)
         val remove = rows
             .filter { it.id !in keep && !isProtected(it, protectedIds) }

@@ -262,6 +262,46 @@ class SnapshotRetentionTest {
         }
     }
 
+    @Test
+    fun exportHoldKeepsARowThatTheTiersWouldDrop() = runTest {
+        val now = LocalDate.of(2026, 6, 15).atTime(12, 0).toInstant(ZoneOffset.UTC).toEpochMilli()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val inline = Executor { it.run() }
+        val db = Room.inMemoryDatabaseBuilder(context, HubDatabase::class.java)
+            .allowMainThreadQueries()
+            .setQueryExecutor(inline)
+            .setTransactionExecutor(inline)
+            .build()
+        try {
+            db.gameInstanceDao().upsert(
+                GameInstance(
+                    gameId = "shark-incremental",
+                    profileName = "hub",
+                    sessionIdentity = "session",
+                    lastPlayedAtMillis = 1L,
+                    lastCaptureAtMillis = 1L,
+                ),
+            )
+            val old = Instant.parse("2020-01-01T00:00:00Z").toEpochMilli()
+            repeat(12) { index ->
+                db.snapshotDao().insert(
+                    automatic("old-$index", old + index, "payload-$index", index.toLong()),
+                )
+            }
+            com.example.hub.vault.ExportHold.hold(listOf("old-0"))
+            try {
+                SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), "shark-incremental", now)
+                assertEquals("payload-0", db.snapshotDao().getById("old-0")!!.payload)
+            } finally {
+                com.example.hub.vault.ExportHold.release(listOf("old-0"))
+            }
+            SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), "shark-incremental", now)
+            assertEquals(null, db.snapshotDao().getById("old-0"))
+        } finally {
+            db.close()
+        }
+    }
+
     private fun retained(
         id: String,
         at: Long,

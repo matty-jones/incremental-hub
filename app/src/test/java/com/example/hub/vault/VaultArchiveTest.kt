@@ -295,6 +295,98 @@ class VaultArchiveTest {
         }
     }
 
+    @Test
+    fun blankLegacyHashReimportsWhenBytesAndIdentityAgree() = runTest {
+        val db = open()
+        try {
+            val payload = "migrated-legacy-\u0000"
+            db.snapshotDao().insert(row("legacy-row", payload).copy(contentSha256 = ""))
+            db.gameInstanceDao().upsert(instance("live-pointer"))
+            val exported = IhubArchive.export(
+                drafts = listOf(draft("legacy-row", payload), draft("other-row", "second")),
+                archiveId = "legacy",
+                createdAt = "2026-10-31T17:00:00Z",
+                exporterVersion = "test",
+                complete = true,
+            ) as IhubExportResult.Ready
+            val publisher = IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao())
+            val read = (IhubArchive.read(exported.bytes) as IhubReadResult.Ok).archive
+            val result = publisher.import(read)
+            assertEquals(1, result.imported)
+            assertEquals(1, result.duplicates)
+            val stored = db.snapshotDao().getById("legacy-row")!!
+            assertEquals(payload, stored.payload)
+            assertEquals("", stored.contentSha256)
+            assertEquals("legacy", stored.lineageId)
+            assertEquals("live-pointer", db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            exported.file.delete()
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun sameIdWithAnotherGameOrLineageRollsBack() = runTest {
+        val db = open()
+        try {
+            val payload = "shared-bytes"
+            db.snapshotDao().insert(row("shared-id", payload))
+            db.gameInstanceDao().upsert(instance("live-pointer"))
+            val otherGame = draft("shared-id", payload).copy(gameId = "trimps")
+            val otherLineage = draft("shared-id", payload).copy(lineageId = "other-lineage")
+            for (conflict in listOf(otherGame, otherLineage)) {
+                val exported = IhubArchive.export(
+                    drafts = listOf(draft("new-row", "brand-new"), conflict),
+                    archiveId = "conflict",
+                    createdAt = "2026-10-31T17:00:00Z",
+                    exporterVersion = "test",
+                    complete = true,
+                ) as IhubExportResult.Ready
+                val read = (IhubArchive.read(exported.bytes) as IhubReadResult.Ok).archive
+                val result = IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao()).import(read)
+                assertTrue(result.message.contains("Nothing was imported"))
+                assertEquals(0, result.imported)
+                assertNull(db.snapshotDao().getById("new-row"))
+                assertEquals(payload, db.snapshotDao().getById("shared-id")!!.payload)
+                assertEquals("shark-incremental", db.snapshotDao().getById("shared-id")!!.gameId)
+                assertEquals("legacy", db.snapshotDao().getById("shared-id")!!.lineageId)
+                assertEquals("live-pointer", db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+                exported.file.delete()
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun changedSelectionRefusesACompleteExport() = runTest {
+        val db = open()
+        try {
+            db.snapshotDao().insert(row("snap-keep", "keep"))
+            db.snapshotDao().insert(row("snap-drop", "drop"))
+            db.gameInstanceDao().upsert(instance("live-pointer"))
+            val archive = VaultArchive(
+                db.snapshotDao(),
+                emptyApi(),
+                IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao()),
+                "test",
+            )
+            archive.afterSelection = {
+                db.snapshotDao().deleteByIds("shark-incremental", listOf("snap-drop"))
+            }
+            val exported = archive.exportGame("shark-incremental")
+            assertTrue(exported is IhubExportResult.Refused)
+            val refused = exported as IhubExportResult.Refused
+            assertTrue(refused.omissions.contains("snap-drop"))
+            assertEquals("keep", db.snapshotDao().getById("snap-keep")!!.payload)
+            assertNull(db.snapshotDao().getById("snap-drop"))
+            assertEquals("live-pointer", db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            assertTrue(com.example.hub.vault.ExportHold.protectedIds().isEmpty())
+        } finally {
+            db.close()
+        }
+    }
+
     private fun open(): HubDatabase {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val inline = Executor { it.run() }

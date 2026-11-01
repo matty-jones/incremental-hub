@@ -117,6 +117,92 @@ class SaveSyncIncidentTest {
         }
     }
 
+    @Test
+    fun incomparableWorkstationSaveDoesNotBecomeThePointer() = runTest {
+        val db = open()
+        try {
+            val remote = shark(feature = 9, prestige = 1)
+            val api = object : WorkstationApi {
+                override fun fetchSaves(): List<RemoteSave> = listOf(remoteSave(remote, capturedAt = 90_000L))
+                override fun putSave(save: RemoteSave): PutResult = error("legacy put is not used")
+                override fun lookupUpdate(): UpdateCheck = UpdateCheck.Current
+                override fun download(url: String, destination: File): Boolean = false
+                override fun fetchPointer(gameId: String): PointerFetch = PointerFetch.Found(pointer(remote, version = 3))
+                override fun fetchHistory(gameId: String): List<RemoteSnapshot> = listOf(historyRow(remote))
+            }
+            val decisions = mutableListOf<String>()
+            val sync = SaveSync(db.gameInstanceDao(), api, db.snapshotDao(), db.syncOutboxDao())
+            sync.onDecision = { decisions.add(it) }
+            sync.classify = { _, _, _ -> ProgressionClass.INCOMPARABLE }
+            db.gameInstanceDao().upsert(instance("", capturedAt = 10L).copy(snapshotPayload = null))
+            sync.merge()
+            assertEquals(null, db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            assertTrue(db.snapshotDao().history("shark-incremental").none { it.payload == remote })
+            assertTrue(decisions.any { it.contains("stored snapshot was kept") })
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun interruptedUploadRestartsWithoutReplacingTheLocalPointer() = runTest {
+        val db = open()
+        try {
+            val local = shark(feature = 9, prestige = 4)
+            var attempts = 0
+            val api = object : WorkstationApi {
+                override fun fetchSaves(): List<RemoteSave> = emptyList()
+                override fun putSave(save: RemoteSave): PutResult = error("legacy put is not used")
+                override fun lookupUpdate(): UpdateCheck = UpdateCheck.Current
+                override fun download(url: String, destination: File): Boolean = false
+                override fun appendSnapshot(upload: SnapshotUpload): SnapshotUploadResult? {
+                    attempts += 1
+                    if (attempts == 1) return null
+                    return SnapshotUploadResult.Stored(
+                        created = true,
+                        snapshotId = upload.snapshotId,
+                        sha256 = com.example.hub.games.PayloadDigest.sha256(upload.snapshotPayload),
+                    )
+                }
+                override fun fetchPointer(gameId: String): PointerFetch = PointerFetch.Unreachable
+            }
+            val sync = SaveSync(db.gameInstanceDao(), api, db.snapshotDao(), db.syncOutboxDao())
+            db.gameInstanceDao().upsert(instance(local))
+            db.syncOutboxDao().insert(outbox(local, propose = false))
+            sync.merge()
+            assertEquals(1, db.syncOutboxDao().pending().size)
+            assertEquals(local, db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            sync.merge()
+            assertTrue(db.syncOutboxDao().pending().isEmpty())
+            assertEquals(local, db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun offlineFetchLeavesTheLocalPointer() = runTest {
+        val db = open()
+        try {
+            val local = shark(feature = 9, prestige = 8)
+            val api = object : WorkstationApi {
+                override fun fetchSaves(): List<RemoteSave>? = null
+                override fun putSave(save: RemoteSave): PutResult? = null
+                override fun lookupUpdate(): UpdateCheck = UpdateCheck.Unreachable
+                override fun download(url: String, destination: File): Boolean = false
+            }
+            val decisions = mutableListOf<String>()
+            val sync = SaveSync(db.gameInstanceDao(), api, db.snapshotDao(), db.syncOutboxDao())
+            sync.onDecision = { decisions.add(it) }
+            db.gameInstanceDao().upsert(instance(local))
+            sync.merge()
+            assertEquals(local, db.gameInstanceDao().get("shark-incremental")!!.snapshotPayload)
+            assertTrue(decisions.any { it.contains("sync pending") })
+        } finally {
+            db.close()
+        }
+    }
+
     private fun open(): HubDatabase {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val inline = Executor { it.run() }

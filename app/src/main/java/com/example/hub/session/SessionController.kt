@@ -1872,7 +1872,6 @@ class SessionController(
             Log.e(TAG, "restore journal unreadable", e)
             null
         }
-        if (journal?.phase == JournalPhase.VERIFIED) return false
         openStep = OpenStep.JOURNAL_APPLY
         documentGate.storageKey = adapter.storageKey
         if (journal == null) {
@@ -1915,6 +1914,16 @@ class SessionController(
             else -> null
         }
         val matched = storageMatches(work.adapter, readback, expected)
+        if (!matched && journal.phase == JournalPhase.POINTER_COMMITTED) {
+            commitEnvelopePointer(work.gameId, journal.intendedPointer)
+            mutex.withLock {
+                if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+                _sessionError.value =
+                    "Restore committed but storage did not verify. The committed save was kept. The game was not loaded."
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+            }
+            return
+        }
         if (!matched && journal.direction == RestoreDirection.INTENDED) {
             val rolled = journal.copy(
                 direction = RestoreDirection.PREVIOUS,
@@ -1939,6 +1948,7 @@ class SessionController(
                 return
             }
             if (journal.phase == JournalPhase.POINTER_COMMITTED) {
+                commitEnvelopePointer(work.gameId, journal.targetPointer())
                 journalStore.delete(profileName)
                 openStep = OpenStep.DECIDE
                 documentGate.phase = DocumentPhase.PEEK
