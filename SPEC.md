@@ -437,9 +437,11 @@ Never delete the active profile. Maintain a visible Undo restore path while the 
 
 ## 11. Portable vault format and external backup
 
-### 11.1 Archive format v1
+### 11.1 Archive format
 
 Extension: `.ihub`. Container: ZIP with `manifest.json`, game/instance records, snapshot envelopes and immutable payload blobs. Later sections hold notes, capsules, screenshots and user display settings. Include definition metadata and adapter identifiers/hashes, but never auto-execute scripts from an archive.
+
+Format 1 stores snapshot metadata at `snapshots/<snapshot id>.json`. Format 2 stores it at `snapshots/<sha256 of the snapshot id>.json` so a migrated id that contains colons is not a ZIP path. Both formats keep the original id in `snapshotId` and in the manifest. Import accepts both. ZIP paths stay path-safe; the logical id is checked separately.
 
 The manifest specifies format version, archive ID, creation time, exporting app version, every member path/length/hash and included instance/snapshot IDs. It also records exclusions. Preserve snapshot IDs and ancestry. A hash detects accidental corruption; it is not a digital signature or proof of trusted authorship.
 

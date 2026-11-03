@@ -34,6 +34,8 @@ The archive is written and read as a file. Size limits are applied before a body
 
 A complete export records the id, the payload hash, and the stored hash for each selected row, then drops that payload. One payload is loaded again while it is written and checked against that selection. A missing or changed row refuses the archive. Each export holds its own reference, so one export finishing does not release a row another export still has selected.
 
+Format 2 names each snapshot metadata file from the SHA-256 of the snapshot id. The `snapshotId` field and the manifest keep the original id, including a migrated id that contains colons. Room and the workstation are not rewritten. Format 1 archives, whose metadata file is named with the snapshot id itself, still import. A metadata path that does not match its declared id is rejected.
+
 From the launcher, a game with no live save can use **Use this save** on a local snapshot. That adopts the exact bytes, lineage, snapshot id, and high-water id. It does not rewrite the snapshot. A game that already has a save does not show that action, and the write is refused if a save is already stored. Restoring over a running game still uses the in-game restore steps.
 
 Export, import, and zip checks run off the main thread. One payload is held while it is written. Zip validation holds the manifest and one other metadata file, then drops that file. Size limits are unchanged: 512 MiB compressed, 1 GiB expanded, 10,000 entries, and 8 MiB for one save.

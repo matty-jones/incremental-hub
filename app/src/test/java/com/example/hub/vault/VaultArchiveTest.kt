@@ -450,6 +450,78 @@ class VaultArchiveTest {
         }
     }
 
+    @Test
+    fun migratedIdsExportImportAndReimportWithoutChangingPointers() = runTest {
+        val source = open()
+        val destination = open()
+        try {
+            val sharkPayload = "shark-history"
+            val farmPayload = "farm-history"
+            val uuidPayload = "uuid-history"
+            val sharkId = "migrated:shark-incremental:" + PayloadDigest.sha256(sharkPayload)
+            val farmId = "migrated:fe000000:" + PayloadDigest.sha256(farmPayload)
+            val uuid = "123e4567-e89b-12d3-a456-426614174000"
+            source.snapshotDao().insert(row(sharkId, sharkPayload))
+            source.snapshotDao().insert(row(uuid, uuidPayload))
+            source.snapshotDao().insert(row(farmId, farmPayload, gameId = "fe000000"))
+            source.gameInstanceDao().upsert(instance("live-shark").copy(highWaterSnapshotId = sharkId))
+            destination.gameInstanceDao().upsert(instance("live-shark").copy(highWaterSnapshotId = "kept"))
+            val archive = VaultArchive(
+                source.snapshotDao(),
+                emptyApi(),
+                IhubPublisher(source, source.snapshotDao(), source.gameInstanceDao()),
+                "0.1.24",
+            )
+            val game = archive.exportGame("shark-incremental")
+            assertTrue(game is IhubExportResult.Ready)
+            val gameReady = game as IhubExportResult.Ready
+            assertEquals(2, gameReady.snapshotCount)
+            val gameIds = ((IhubArchive.read(gameReady.bytes) as IhubReadResult.Ok).archive.snapshots)
+                .map { it.id }
+                .toSet()
+            assertEquals(setOf(sharkId, uuid), gameIds)
+            val everything = archive.exportAll()
+            assertTrue(everything is IhubExportResult.Ready)
+            val ready = everything as IhubExportResult.Ready
+            assertEquals(3, ready.snapshotCount)
+            val read = (IhubArchive.read(ready.bytes) as IhubReadResult.Ok).archive
+            val byId = read.snapshots.associateBy { it.id }
+            assertEquals(setOf(sharkId, farmId, uuid), byId.keys)
+            assertEquals(sharkPayload, byId.getValue(sharkId).payload)
+            assertEquals(farmPayload, byId.getValue(farmId).payload)
+            assertEquals(uuidPayload, byId.getValue(uuid).payload)
+            assertEquals("fe000000", byId.getValue(farmId).gameId)
+            assertEquals("legacy", byId.getValue(sharkId).lineageId)
+            assertEquals("legacy", byId.getValue(farmId).lineageId)
+            val publisher = IhubPublisher(destination, destination.snapshotDao(), destination.gameInstanceDao())
+            val imported = publisher.import(read)
+            assertEquals(3, imported.imported)
+            assertEquals(0, imported.duplicates)
+            assertEquals(sharkPayload, destination.snapshotDao().getById(sharkId)!!.payload)
+            assertEquals(farmPayload, destination.snapshotDao().getById(farmId)!!.payload)
+            assertEquals(uuidPayload, destination.snapshotDao().getById(uuid)!!.payload)
+            assertEquals(sharkId, destination.snapshotDao().getById(sharkId)!!.id)
+            assertEquals("fe000000", destination.snapshotDao().getById(farmId)!!.gameId)
+            val again = publisher.import(read)
+            assertEquals(0, again.imported)
+            assertEquals(3, again.duplicates)
+            val sourcePointer = source.gameInstanceDao().get("shark-incremental")!!
+            assertEquals("live-shark", sourcePointer.snapshotPayload)
+            assertEquals(sharkId, sourcePointer.highWaterSnapshotId)
+            assertEquals("legacy", sourcePointer.lineageId)
+            val destinationPointer = destination.gameInstanceDao().get("shark-incremental")!!
+            assertEquals("live-shark", destinationPointer.snapshotPayload)
+            assertEquals("kept", destinationPointer.highWaterSnapshotId)
+            assertEquals(sharkPayload, source.snapshotDao().getById(sharkId)!!.payload)
+            assertEquals(farmPayload, source.snapshotDao().getById(farmId)!!.payload)
+            gameReady.file.delete()
+            ready.file.delete()
+        } finally {
+            source.close()
+            destination.close()
+        }
+    }
+
     private fun open(): HubDatabase {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val inline = Executor { it.run() }
@@ -472,10 +544,10 @@ class VaultArchiveTest {
         )
     }
 
-    private fun row(id: String, payload: String): SnapshotRecord {
+    private fun row(id: String, payload: String, gameId: String = "shark-incremental"): SnapshotRecord {
         return SnapshotRecord(
             id = id,
-            gameId = "shark-incremental",
+            gameId = gameId,
             sequence = 4,
             capturedAtMillis = 1_700_000_000_000L,
             reason = "cadence",

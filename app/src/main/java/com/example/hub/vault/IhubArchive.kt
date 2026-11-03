@@ -81,7 +81,15 @@ sealed class IhubReadResult {
 }
 
 object IhubArchive {
-    const val FORMAT_VERSION = 1
+    /** Archives written by this version. Snapshot metadata is named by the id digest. */
+    const val FORMAT_VERSION = 2
+
+    /** Archives whose snapshot metadata file is `snapshots/<snapshot id>.json`. */
+    const val LEGACY_FORMAT_VERSION = 1
+
+    fun accepts(formatVersion: Int): Boolean {
+        return formatVersion == FORMAT_VERSION || formatVersion == LEGACY_FORMAT_VERSION
+    }
     const val LABEL =
         "Unencrypted. Contains save payloads. Does not contain credentials, cookies, or WebView profiles."
     const val MAX_COMPRESSED_BYTES = 512L * 1024 * 1024
@@ -171,6 +179,7 @@ object IhubArchive {
         private val members = JSONArray()
         private val written = mutableListOf<IhubSnapshotMeta>()
         private val writtenPayloads = mutableSetOf<String>()
+        private val writtenMembers = mutableSetOf<String>()
         private val shasByGame = mutableMapOf<String, MutableSet<String>>()
         private var expanded = 0L
         private var closed = false
@@ -189,8 +198,15 @@ object IhubArchive {
             if (!safeSegment(draft.lineageId)) {
                 return refuse("A lineage id cannot be stored in an archive path.", listOf(draft.lineageId))
             }
-            if (!safeSegment(draft.id)) {
-                return refuse("Snapshot id ${draft.id} cannot be stored in an archive path.", listOf(draft.id))
+            val memberPath = snapshotMemberPath(FORMAT_VERSION, draft.id)
+            if (memberPath == null) {
+                return refuse("Snapshot id ${draft.id} is not a usable snapshot id.", listOf(draft.id))
+            }
+            if (!writtenMembers.add(memberPath)) {
+                return refuse(
+                    "Snapshot ${draft.id} collides with another archive member.",
+                    listOf(draft.id),
+                )
             }
             val bytes = payload.toByteArray(Charsets.UTF_8)
             holdExportPayload(bytes.size)
@@ -206,7 +222,16 @@ object IhubArchive {
                 if (expanded > MAX_EXPANDED_BYTES) {
                     return refuse("The archive expands past the limit.", emptyList())
                 }
-                if (writtenPayloads.add(sha)) put("payloads/$sha", bytes, true)
+                val payloadPath = "payloads/$sha"
+                if (writtenPayloads.add(sha)) {
+                    if (!writtenMembers.add(payloadPath)) {
+                        return refuse(
+                            "Snapshot ${draft.id} collides with another archive member.",
+                            listOf(draft.id),
+                        )
+                    }
+                    put(payloadPath, bytes, true)
+                }
                 val capturedAt = Instant.ofEpochMilli(draft.capturedAtMillis).toString()
                 val snapshotJson = JSONObject()
                     .put("formatVersion", FORMAT_VERSION)
@@ -224,7 +249,7 @@ object IhubArchive {
                     .put("payloadPath", "payloads/$sha")
                     .toString()
                     .toByteArray(Charsets.UTF_8)
-                put("snapshots/${draft.id}.json", snapshotJson, true)
+                put(memberPath, snapshotJson, true)
                 written += IhubSnapshotMeta(
                     id = draft.id,
                     gameId = draft.gameId,
@@ -392,7 +417,7 @@ object IhubArchive {
         validationPeakMetadataBytes = 0
         validationResidentMetadataBytes = 0
         val memberFacts = linkedMapOf<String, Pair<Int, String>>()
-        val parsedSnapshots = mutableListOf<IhubSnapshotMeta>()
+        val parsedSnapshots = mutableListOf<ReadSnapshot>()
         val seenSnapshotIds = mutableMapOf<String, String>()
         var snapshotFailure: String? = null
         var manifestBytes: ByteArray? = null
@@ -447,7 +472,9 @@ object IhubArchive {
                         retainMetadata(body.size)
                         if (snapshotFailure == null) {
                             try {
-                                parsedSnapshots.add(parseSnapshotMeta(name, body, seenSnapshotIds))
+                                parsedSnapshots.add(
+                                    ReadSnapshot(name, parseSnapshotMeta(name, body, seenSnapshotIds)),
+                                )
                             } catch (e: IhubFormatException) {
                                 snapshotFailure = e.message ?: "$name is not valid JSON."
                             }
@@ -476,7 +503,7 @@ object IhubArchive {
         file: File,
         manifestBytes: ByteArray?,
         memberFacts: Map<String, Pair<Int, String>>,
-        parsedSnapshots: List<IhubSnapshotMeta>,
+        parsedSnapshots: List<ReadSnapshot>,
         snapshotFailure: String?,
     ): IhubOpenResult {
         if (manifestBytes == null) return IhubOpenResult.Rejected("The archive has no manifest.")
@@ -486,7 +513,7 @@ object IhubArchive {
             return IhubOpenResult.Rejected("The manifest is not valid JSON.")
         }
         val version = manifest.optInt("formatVersion", -1)
-        if (version != FORMAT_VERSION) {
+        if (!accepts(version)) {
             return IhubOpenResult.Rejected("Archive format $version is not supported.")
         }
         if (manifest.optBoolean("encrypted", true)) {
@@ -514,14 +541,19 @@ object IhubArchive {
             }
         }
         if (snapshotFailure != null) return IhubOpenResult.Rejected(snapshotFailure)
-        for (meta in parsedSnapshots) {
+        for (read in parsedSnapshots) {
+            val meta = read.meta
+            val expected = snapshotMemberPath(version, meta.id)
+            if (expected == null || read.path != expected) {
+                return IhubOpenResult.Rejected("Snapshot ${meta.id} is not stored at its archive path.")
+            }
             val fact = memberFacts[meta.payloadPath]
                 ?: return IhubOpenResult.Rejected("Snapshot ${meta.id} is missing its payload.")
             if (fact.second != meta.contentSha256) {
                 return IhubOpenResult.Rejected("Snapshot ${meta.id} does not match its payload hash.")
             }
         }
-        val entries = parsedSnapshots
+        val entries = parsedSnapshots.map { it.meta }
         val games = mutableListOf<Pair<String, List<String>>>()
         val gameArray = manifest.optJSONArray("games") ?: JSONArray()
         for (index in 0 until gameArray.length()) {
@@ -566,7 +598,7 @@ object IhubArchive {
         val lineageId = json.optString("lineageId")
         val payloadPath = json.optString("payloadPath")
         val sha = json.optString("contentSha256")
-        if (!safeSegment(id) || !safeSegment(gameId) || !safeSegment(lineageId) || !safeSegment(sha)) {
+        if (!logicalSnapshotId(id) || !safeSegment(gameId) || !safeSegment(lineageId) || !safeSegment(sha)) {
             throw IhubFormatException("A snapshot id, game, lineage, or hash is not usable.")
         }
         if (payloadPath != "payloads/$sha") {
@@ -729,6 +761,25 @@ object IhubArchive {
     }
 
 
+    /**
+     * Format 2 names the metadata file from the snapshot id digest. Format 1
+     * uses the id itself, which only works when that id is a path segment.
+     */
+    private fun snapshotMemberPath(formatVersion: Int, id: String): String? {
+        if (!logicalSnapshotId(id)) return null
+        return when (formatVersion) {
+            FORMAT_VERSION -> "snapshots/${sha256(id.toByteArray(Charsets.UTF_8))}.json"
+            LEGACY_FORMAT_VERSION -> if (safeSegment(id)) "snapshots/$id.json" else null
+            else -> null
+        }
+    }
+
+    private fun logicalSnapshotId(value: String): Boolean {
+        if (value.isEmpty() || value.length > 200) return false
+        if (value == "." || value == "..") return false
+        return value.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' || it == ':' }
+    }
+
     private fun safePath(path: String): Boolean {
         if (path.isEmpty() || path.startsWith("/") || path.startsWith("\\") || path.contains(":")) return false
         if (path.contains('\\') || path.contains('\u0000') || path.endsWith("/")) return false
@@ -799,6 +850,8 @@ object IhubArchive {
 }
 
 private class IhubFormatException(message: String) : IllegalArgumentException(message)
+
+private data class ReadSnapshot(val path: String, val meta: IhubSnapshotMeta)
 
 data class IhubSnapshotMeta(
     val id: String,

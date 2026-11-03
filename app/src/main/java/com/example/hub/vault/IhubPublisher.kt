@@ -25,14 +25,14 @@ class IhubPublisher(
     private val instances: GameInstanceDao,
 ) {
     suspend fun import(archive: IhubContents): IhubImportResult {
-        if (archive.encrypted || archive.formatVersion != IhubArchive.FORMAT_VERSION) {
+        if (archive.encrypted || !IhubArchive.accepts(archive.formatVersion)) {
             return IhubImportResult(0, 0, "This archive format cannot be imported.")
         }
         return writeSnapshots(archive.snapshots.size) { archive.snapshots[it] }
     }
 
     suspend fun import(source: IhubSource): IhubImportResult {
-        if (source.encrypted || source.formatVersion != IhubArchive.FORMAT_VERSION) {
+        if (source.encrypted || !IhubArchive.accepts(source.formatVersion)) {
             return IhubImportResult(0, 0, "This archive format cannot be imported.")
         }
         return writeSnapshots(source.entries.size) { source.snapshot(it) }
