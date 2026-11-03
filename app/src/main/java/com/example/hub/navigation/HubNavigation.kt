@@ -111,6 +111,7 @@ fun HubNavigation(
                 catalog = sessionModel.vaultCatalog,
                 protection = sessionModel.vaultProtection,
                 archive = sessionModel.vaultArchive,
+                deletion = sessionModel.snapshotDeletion,
                 slotEmpty = slotEmpty,
                 onActivateImported = { entry ->
                     val message = sessionModel.activateImported(gameId, entry.id)
@@ -145,6 +146,7 @@ fun HubNavigation(
                 vaultCatalog = sessionModel.vaultCatalog,
                 vaultProtection = sessionModel.vaultProtection,
                 vaultArchive = sessionModel.vaultArchive,
+                snapshotDeletion = sessionModel.snapshotDeletion,
                 onExit = {
                     Log.d(TAG, "return to launcher from $gameId")
                     navController.popBackStack()

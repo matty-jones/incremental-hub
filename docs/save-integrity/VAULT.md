@@ -42,4 +42,10 @@ Export, import, and zip checks run off the main thread. One payload is held whil
 
 Android Auto Backup and device transfer include display preferences only. The include is the whole rule: Room, restore journals, and WebView profile directories are not listed, because an exclude is valid only inside an included path. A transfer cannot restore a native pointer without its profile or a profile without its pointer. The `.ihub` archive remains the portable recovery copy.
 
-Deletion and bulk cleanup are not in this vault. Those stay for a later safety check.
+## Deletion
+
+**Delete snapshot** is on the snapshot detail screen, below restore and protection. It is shown only when that exact local snapshot id is eligible. There is no override. Confirmation names the game, capture time, snapshot id, reason, and progress summary, and says that only the local historical row is removed. The workstation line is known, unknown, or unavailable. A listed workstation id is not a verified external backup.
+
+The deletion reads the snapshot, the live pointer, the high-water id, pins, user protection, permanent reasons, retained pointers, the sync outbox, export selection, restore reservations, and any open restore journal again inside one Room transaction. A change since the confirmation refuses the delete. The conditional delete must affect one row. Live WebView storage, the GameInstance pointer, workstation records, other snapshots, pending sync rows, and the restore journal are not modified.
+
+A snapshot is refused when it is the high-water id, the only local copy of the current save, pinned, user-protected, a permanent reason, any retained pointer, referenced by an unacked sync row, an export selection or hold, a staged restore, or an open journal, or when the game has an open capture incident. It is also refused when it is the last snapshot in its lineage or when removing it would shrink that lineage's retained distinct saves or its populated hour, day, or week buckets. The retained sets are the ones `SnapshotRetention` already keeps: ten latest distinct accepted saves, hourly coverage for 48 hours, daily coverage for 30 days, weekly coverage for 12 ISO weeks, permanent rows, sole retained pointers, and the active high-water id. Schema stays at v9. Swipe, multi-select, and bulk deletion are not part of this action.

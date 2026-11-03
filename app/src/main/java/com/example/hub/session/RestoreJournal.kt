@@ -123,6 +123,26 @@ class RestoreJournalStore(private val directory: File) {
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
+    /**
+     * An unfinished or unreadable journal blocks manual deletion for its game.
+     * The file is left in place.
+     */
+    fun blocksDeletion(gameId: String): Boolean {
+        val files = directory.listFiles() ?: return false
+        var unreadable = false
+        var matches = false
+        for (file in files) {
+            if (!file.isFile || !file.name.endsWith(".json")) continue
+            val journal = runCatching { decode(file.readText(Charsets.UTF_8)) }.getOrNull()
+            if (journal == null) {
+                unreadable = true
+            } else if (journal.gameId == gameId) {
+                matches = true
+            }
+        }
+        return matches || unreadable
+    }
+
     fun delete(profileName: String) {
         fileFor(profileName).delete()
         File(directory, fileName(profileName) + ".tmp").delete()

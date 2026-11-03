@@ -7,13 +7,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,10 +49,15 @@ import com.example.hub.vault.VaultBrowse
 import com.example.hub.vault.VaultCatalog
 import com.example.hub.vault.VaultEntry
 import com.example.hub.vault.VaultReading
+import com.example.hub.vault.DeletionDecision
+import com.example.hub.vault.SnapshotDeletion
+import com.example.hub.vault.SnapshotFingerprint
 import com.example.hub.vault.VaultResidence
+import com.example.hub.vault.WorkstationCopy
 import com.example.hub.vault.formatCaptureTime
 import com.example.hub.vault.readSnapshot
 import com.example.hub.vault.shaPrefix
+import com.example.hub.vault.workstationCopyStatement
 import kotlinx.coroutines.launch
 
 /**
@@ -84,12 +95,16 @@ fun VaultHost(
     slotEmpty: Boolean = false,
     onActivateImported: (suspend (VaultEntry) -> String)? = null,
     archive: VaultArchive? = null,
+    deletion: SnapshotDeletion? = null,
 ) {
     val scope = rememberCoroutineScope()
     var offset by rememberSaveable(gameId) { mutableIntStateOf(0) }
     var browse by remember(gameId) { mutableStateOf<VaultBrowse?>(null) }
     var reading by remember(gameId) { mutableStateOf<VaultReading?>(null) }
     var notice by remember(gameId) { mutableStateOf<String?>(null) }
+    var deletionPreview by remember(gameId) { mutableStateOf<DeletionDecision?>(null) }
+    var workstationCopy by remember(gameId) { mutableStateOf(WorkstationCopy.UNKNOWN) }
+    var deleting by remember(gameId) { mutableStateOf(false) }
     val context = LocalContext.current
     val pendingExport = remember { mutableStateOf<suspend () -> IhubExportResult?>({ null }) }
     val createArchive = rememberLauncherForActivityResult(
@@ -107,10 +122,12 @@ fun VaultHost(
         createArchive.launch(name)
     }
 
-    suspend fun load(nextOffset: Int, advanceRemote: Boolean) {
+    suspend fun load(nextOffset: Int, advanceRemote: Boolean): VaultBrowse {
         offset = nextOffset
-        browse = catalog.browse(gameId, nextOffset, advanceRemote)
+        val next = catalog.browse(gameId, nextOffset, advanceRemote)
+        browse = next
         notice = null
+        return next
     }
 
     val openArchive = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -165,9 +182,18 @@ fun VaultHost(
             scope.launch {
                 val payload = catalog.readPayload(entry)
                 reading = readSnapshot(gameId, entry, payload)
+                workstationCopy = catalog.workstationCopy(entry.gameId, entry.id)
+                deletionPreview = deletion?.preview(
+                    entry.gameId,
+                    entry.id,
+                    workstationOnly = entry.residence == VaultResidence.REMOTE_ONLY,
+                )
             }
         },
-        onCloseDetail = { reading = null },
+        onCloseDetail = {
+            reading = null
+            deletionPreview = null
+        },
         onProtect = protection?.let { guard ->
             { entry ->
                 scope.launch {
@@ -239,6 +265,50 @@ fun VaultHost(
                 startExport("${entry.id}.ihub") { store.exportSnapshot(entry.id) }
             }
         },
+        deletionPreview = deletionPreview,
+        workstationCopy = workstationCopy,
+        onDeleteSnapshot = deletion?.let { service ->
+            { fingerprint ->
+                if (!deleting) {
+                    deleting = true
+                    scope.launch {
+                        val outcome = runCatching { service.delete(fingerprint) }.getOrElse { error ->
+                            com.example.hub.vault.DeletionResult(
+                                snapshotId = fingerprint.snapshotId,
+                                gameId = fingerprint.gameId,
+                                deleted = false,
+                                refusal = com.example.hub.vault.DeletionRefusal.STALE,
+                                message = error.message ?: "The snapshot was not deleted.",
+                            )
+                        }
+                        try {
+                            val refreshed = load(offset, advanceRemote = false)
+                            notice = outcome.message
+                            if (outcome.deleted) {
+                                reading = null
+                                deletionPreview = null
+                            } else {
+                                val current = refreshed.entries.firstOrNull { it.id == fingerprint.snapshotId }
+                                if (current == null) {
+                                    reading = null
+                                    deletionPreview = null
+                                } else {
+                                    reading = readSnapshot(gameId, current, catalog.readPayload(current))
+                                    workstationCopy = catalog.workstationCopy(current.gameId, current.id)
+                                    deletionPreview = service.preview(
+                                        current.gameId,
+                                        current.id,
+                                        workstationOnly = current.residence == VaultResidence.REMOTE_ONLY,
+                                    )
+                                }
+                            }
+                        } finally {
+                            deleting = false
+                        }
+                    }
+                }
+            }
+        },
         modifier = modifier,
     )
 }
@@ -266,6 +336,9 @@ fun VaultScreen(
     onExportAll: (() -> Unit)? = null,
     onImport: (() -> Unit)? = null,
     onExportSnapshot: ((VaultEntry) -> Unit)? = null,
+    deletionPreview: DeletionDecision? = null,
+    workstationCopy: WorkstationCopy = WorkstationCopy.UNKNOWN,
+    onDeleteSnapshot: ((SnapshotFingerprint) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val detail = reading
@@ -295,6 +368,9 @@ fun VaultScreen(
                 slotEmpty = slotEmpty,
                 onActivateImported = onActivateImported,
                 onExportSnapshot = onExportSnapshot,
+                deletionPreview = deletionPreview,
+                workstationCopy = workstationCopy,
+                onDeleteSnapshot = onDeleteSnapshot,
                 modifier = Modifier.padding(padding),
             )
         } else {
@@ -497,6 +573,9 @@ private fun VaultDetail(
     slotEmpty: Boolean,
     onActivateImported: ((VaultEntry) -> Unit)?,
     onExportSnapshot: ((VaultEntry) -> Unit)?,
+    deletionPreview: DeletionDecision?,
+    workstationCopy: WorkstationCopy,
+    onDeleteSnapshot: ((SnapshotFingerprint) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val entry = reading.entry
@@ -635,6 +714,77 @@ private fun VaultDetail(
                 ) {
                     Text("Protect")
                 }
+            }
+        }
+        val decision = deletionPreview?.takeIf { it.snapshotId == entry.id && it.eligible }
+        val fingerprint = decision?.fingerprint
+        val deleteSnapshot = onDeleteSnapshot
+        if (decision != null && fingerprint != null && deleteSnapshot != null) {
+            var confirm by remember(entry.id) { mutableStateOf(false) }
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Text(
+                text = "Delete snapshot removes one local historical row. It is separate from restore and protection.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = { confirm = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("vault-delete"),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) {
+                Text("Delete snapshot")
+            }
+            if (confirm) {
+                val progress = reading.shark?.detail()
+                    ?: reading.recomputedDetail?.takeIf { it.isNotBlank() }
+                    ?: entry.storedDetail?.takeIf { it.isNotBlank() }
+                    ?: "No progress summary is stored."
+                AlertDialog(
+                    onDismissRequest = { confirm = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    title = { Text("Delete snapshot") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Game ${entry.gameId}")
+                            Text("Captured ${formatCaptureTime(entry.capturedAtMillis)}")
+                            Text("Snapshot ${entry.id}")
+                            Text("Snapshot reason ${entry.reason}")
+                            Text("Progress summary $progress")
+                            Text(
+                                "This deletion removes the local historical snapshot only. " +
+                                    "The live save and every other snapshot stay.",
+                            )
+                            Text(workstationCopyStatement(workstationCopy))
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                confirm = false
+                                deleteSnapshot(fingerprint)
+                            },
+                            modifier = Modifier.testTag("vault-delete-confirm"),
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                        ) {
+                            Text("Delete local snapshot")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { confirm = false },
+                            modifier = Modifier.testTag("vault-delete-keep"),
+                        ) {
+                            Text("Keep snapshot")
+                        }
+                    },
+                )
             }
         }
     }

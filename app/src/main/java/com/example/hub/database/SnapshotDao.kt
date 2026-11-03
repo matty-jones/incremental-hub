@@ -87,4 +87,28 @@ interface SnapshotDao {
 
     @Query("DELETE FROM snapshots WHERE game_id = :gameId AND id IN (:ids)")
     suspend fun deleteByIds(gameId: String, ids: List<String>)
+
+    @Query(
+        """
+        DELETE FROM snapshots
+        WHERE id = :id
+          AND game_id = :gameId
+          AND pinned = :pinned
+          AND user_protected = :userProtected
+          AND reason = :reason
+          AND sequence = :sequence
+          AND lineage_id = :lineageId
+          AND content_sha256 = :contentSha256
+        """,
+    )
+    fun deleteOneIfUnchanged(
+        id: String,
+        gameId: String,
+        pinned: Int,
+        userProtected: Int,
+        reason: String,
+        sequence: Long,
+        lineageId: String,
+        contentSha256: String,
+    ): Int
 }

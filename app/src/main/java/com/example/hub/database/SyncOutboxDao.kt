@@ -37,6 +37,14 @@ interface SyncOutboxDao {
 
     @Query(
         """
+        SELECT snapshot_id FROM sync_outbox
+        WHERE game_id = :gameId AND state != 'acked'
+        """,
+    )
+    suspend fun unackedSnapshotIds(gameId: String): List<String>
+
+    @Query(
+        """
         UPDATE sync_outbox
         SET state = 'acked', remote_snapshot_id = :remoteId, attempt_count = attempt_count + 1
         WHERE idempotency_key = :key

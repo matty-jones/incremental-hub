@@ -14,6 +14,7 @@ import com.example.hub.games.GameRegistry
 import com.example.hub.games.ProgressionClass
 import com.example.hub.session.CaptureRepository
 import com.example.hub.session.DiagnosticSeverity
+import com.example.hub.session.RestoreJournalStore
 import com.example.hub.session.SessionController
 import com.example.hub.session.SessionRuntime
 import com.example.hub.session.SessionState
@@ -23,6 +24,7 @@ import com.example.hub.sync.WorkstationApi
 import com.example.hub.sync.WorkstationClient
 import com.example.hub.vault.IhubPublisher
 import com.example.hub.vault.RoomVaultIndex
+import com.example.hub.vault.SnapshotDeletion
 import com.example.hub.vault.VaultArchive
 import com.example.hub.vault.VaultCatalog
 import com.example.hub.vault.VaultProtection
@@ -49,6 +51,13 @@ class HubSessionViewModel(
         api = workstation,
         publisher = IhubPublisher(database, database.snapshotDao(), database.gameInstanceDao()),
         exporterVersion = BuildConfig.VERSION_NAME,
+    )
+    val snapshotDeletion: SnapshotDeletion = SnapshotDeletion(
+        snapshots = database.snapshotDao(),
+        instances = database.gameInstanceDao(),
+        outbox = database.syncOutboxDao(),
+        room = database,
+        journals = RestoreJournalStore(context.applicationContext),
     )
     val vaultProtection: VaultProtection = VaultProtection(
         snapshots = database.snapshotDao(),

@@ -38,6 +38,8 @@ import com.example.hub.games.SaveEnvelope
 import com.example.hub.games.SaveStanding
 import com.example.hub.games.SaveSummary
 import com.example.hub.games.StorageSlot
+import com.example.hub.vault.ActiveRestore
+import com.example.hub.vault.ExportHold
 import com.example.hub.vault.VaultAssessment
 import com.example.hub.vault.assessVaultRestore
 import com.example.hub.BuildConfig
@@ -1664,7 +1666,7 @@ class SessionController(
                 committed = true,
             )
             vaultOperation = false
-            vaultSnapshotId = null
+            assignVaultSnapshot(null)
             vaultLineageId = null
         }
         clearVaultCommitFlags()
@@ -2117,7 +2119,7 @@ class SessionController(
         val record = snapshotDao?.getById(snapshotId)
         if (record == null || record.gameId != gameId) {
             vaultOperation = false
-            vaultSnapshotId = null
+            assignVaultSnapshot(null)
             vaultLineageId = null
             _vaultPlan.value = assessVaultRestore(
                 requestedId = snapshotId,
@@ -2151,7 +2153,7 @@ class SessionController(
         )
         _vaultPlan.value = plan
         vaultOperation = plan.ready
-        vaultSnapshotId = if (plan.ready) record.id else null
+        assignVaultSnapshot(if (plan.ready) record.id else null)
         vaultLineageId = if (plan.ready) record.lineageId else null
     }
 
@@ -2217,9 +2219,18 @@ class SessionController(
         vaultBranchRequested = false
         vaultBranchConfirmed = false
         vaultHistorical = false
-        vaultSnapshotId = null
+        assignVaultSnapshot(null)
         vaultLineageId = null
         vaultBaselinePayload = null
+    }
+
+    private fun assignVaultSnapshot(id: String?) {
+        ExportHold.guard {
+            val previous = vaultSnapshotId
+            if (previous != null && previous != id) ActiveRestore.releaseUnlocked(previous)
+            if (id != null && previous != id) ActiveRestore.holdUnlocked(id)
+            vaultSnapshotId = id
+        }
     }
 
     /**

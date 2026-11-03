@@ -51,6 +51,7 @@ fun PlaySurface(
     vaultCatalog: com.example.hub.vault.VaultCatalog? = null,
     vaultProtection: com.example.hub.vault.VaultProtection? = null,
     vaultArchive: com.example.hub.vault.VaultArchive? = null,
+    snapshotDeletion: com.example.hub.vault.SnapshotDeletion? = null,
 ) {
     val state by controller.state.collectAsState()
     val profile by controller.activeProfile.collectAsState()
@@ -257,6 +258,7 @@ fun PlaySurface(
                             catalog = vaultCatalog,
                             protection = vaultProtection,
                             archive = vaultArchive,
+                            deletion = snapshotDeletion,
                             plan = vaultPlan,
                             onStageRestore = { entry ->
                                 controller.stageVaultRestore(entry.id, entry.lineageId)

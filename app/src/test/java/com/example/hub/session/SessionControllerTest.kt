@@ -4031,6 +4031,31 @@ class SessionControllerTest {
             rows.removeAll { it.gameId == gameId && it.id in drop }
         }
 
+        override fun deleteOneIfUnchanged(
+            id: String,
+            gameId: String,
+            pinned: Int,
+            userProtected: Int,
+            reason: String,
+            sequence: Long,
+            lineageId: String,
+            contentSha256: String,
+        ): Int {
+            val index = rows.indexOfFirst {
+                it.id == id &&
+                    it.gameId == gameId &&
+                    it.pinned == (pinned != 0) &&
+                    it.userProtected == (userProtected != 0) &&
+                    it.reason == reason &&
+                    it.sequence == sequence &&
+                    it.lineageId == lineageId &&
+                    it.contentSha256 == contentSha256
+            }
+            if (index < 0) return 0
+            rows.removeAt(index)
+            return 1
+        }
+
         override suspend fun releaseAutomaticPin(id: String) {
             val index = rows.indexOfFirst { it.id == id }
             if (index < 0) return

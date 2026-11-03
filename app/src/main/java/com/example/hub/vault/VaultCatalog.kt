@@ -85,6 +85,13 @@ class VaultCatalog(
         )
     }
 
+    fun workstationCopy(gameId: String, snapshotId: String): WorkstationCopy {
+        val walk = remote[gameId] ?: return WorkstationCopy.UNKNOWN
+        if (!walk.reachable) return WorkstationCopy.UNAVAILABLE
+        if (walk.rows.any { it.snapshotId == snapshotId }) return WorkstationCopy.KNOWN
+        return WorkstationCopy.UNKNOWN
+    }
+
     suspend fun readPayload(entry: VaultEntry): String? {
         payloadReads += 1
         if (entry.residence != VaultResidence.REMOTE_ONLY) {

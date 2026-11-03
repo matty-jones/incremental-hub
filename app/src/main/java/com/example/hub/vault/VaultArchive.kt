@@ -23,24 +23,27 @@ class VaultArchive(
     var archiveThread: String? = null
         private set
 
+    /** Test hook. Runs after a row is reserved and before that reservation becomes a hold. */
+    internal var beforeHold: (suspend () -> Unit)? = null
+
     /** Test hook. Runs after the export set is held and before those rows are written. */
     internal var afterSelection: (suspend () -> Unit)? = null
 
     suspend fun exportSnapshot(snapshotId: String): IhubExportResult = IhubArchive.runOffMain {
         noteThread()
-        val selected = selectOne(snapshotId)
+        val selected = takeForExport(snapshotId)
             ?: return@runOffMain IhubExportResult.Refused(
                 "Snapshot $snapshotId is not on this phone.",
                 listOf(snapshotId),
             )
-        val writer = IhubArchive.beginExport(
-            archiveId = UUID.randomUUID().toString(),
-            createdAt = Instant.now().toString(),
-            exporterVersion = exporterVersion,
-        )
-        ExportHold.hold(listOf(snapshotId))
         try {
-            afterSelection?.invoke()
+            val writer = IhubArchive.beginExport(
+                archiveId = UUID.randomUUID().toString(),
+                createdAt = Instant.now().toString(),
+                exporterVersion = exporterVersion,
+            )
+            try {
+                afterSelection?.invoke()
             val row = snapshots.getById(snapshotId)
             if (!selected.matches(row)) {
                 return@runOffMain writer.refuse(
@@ -51,9 +54,10 @@ class VaultArchive(
             val failure = writer.add(row!!.toDraft())
             if (failure != null) return@runOffMain failure
             writer.finish(complete = true, omissions = emptyList())
-        } catch (cancelled: CancellationException) {
-            writer.abort()
-            throw cancelled
+            } catch (cancelled: CancellationException) {
+                writer.abort()
+                throw cancelled
+            }
         } finally {
             ExportHold.release(listOf(snapshotId))
         }
@@ -134,18 +138,16 @@ class VaultArchive(
             for (gameId in gameIds) {
                 val selected = ArrayList<SelectedSnapshot>()
                 for (id in snapshots.idsForGame(gameId)) {
-                    val selectedRow = selectOne(id)
+                    val selectedRow = takeForExport(id)
                     if (selectedRow == null) {
                         omissions.add(id)
                     } else {
                         selected += selectedRow
+                        held += id
                     }
                 }
                 selectedByGame[gameId] = selected
             }
-            val holdIds = selectedByGame.values.flatten().map { it.id }
-            ExportHold.hold(holdIds)
-            held += holdIds
             afterSelection?.invoke()
             for (gameId in gameIds) {
                 val localIds = mutableSetOf<String>()
@@ -235,15 +237,27 @@ class VaultArchive(
         return page.complete || page.entries.isEmpty() || page.entries.size < pageSize
     }
 
-    private suspend fun selectOne(id: String): SelectedSnapshot? {
-        val row = snapshots.getById(id) ?: return null
-        val digest = PayloadDigest.sha256(row.payload)
-        return SelectedSnapshot(
-            id = row.id,
-            payloadSha256 = digest,
-            storedSha256 = row.contentSha256,
-            payloadBytes = row.payload.length,
-        )
+    private suspend fun takeForExport(id: String): SelectedSnapshot? {
+        ExportHold.beginSelection(id)
+        var transferred = false
+        try {
+            val row = snapshots.getById(id) ?: return null
+            beforeHold?.invoke()
+            val selected = SelectedSnapshot(
+                id = row.id,
+                payloadSha256 = PayloadDigest.sha256(row.payload),
+                storedSha256 = row.contentSha256,
+                payloadBytes = row.payload.length,
+            )
+            ExportHold.guard {
+                ExportHold.hold(listOf(id))
+                ExportHold.endSelection(id)
+                transferred = true
+            }
+            return selected
+        } finally {
+            if (!transferred) ExportHold.endSelection(id)
+        }
     }
 
     private fun noteThread() {

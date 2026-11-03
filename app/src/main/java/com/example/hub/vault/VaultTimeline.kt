@@ -17,6 +17,21 @@ enum class VaultAvailability {
     WORKSTATION_UNAVAILABLE,
 }
 
+enum class WorkstationCopy {
+    KNOWN,
+    UNKNOWN,
+    UNAVAILABLE,
+}
+
+fun workstationCopyStatement(copy: WorkstationCopy): String = when (copy) {
+    WorkstationCopy.KNOWN ->
+        "Workstation copy: known. An external backup was not verified."
+    WorkstationCopy.UNKNOWN ->
+        "Workstation copy: unknown. An external backup was not verified."
+    WorkstationCopy.UNAVAILABLE ->
+        "Workstation copy: unavailable. An external backup was not verified."
+}
+
 /**
  * One timeline row. The save payload is not part of this value.
  * Phone rows sort by capture sequence. Workstation-only rows sort by the
