@@ -40,6 +40,6 @@ From the launcher, a game with no live save can use **Use this save** on a local
 
 Export, import, and zip checks run off the main thread. One payload is held while it is written. Zip validation holds the manifest and one other metadata file, then drops that file. Size limits are unchanged: 512 MiB compressed, 1 GiB expanded, 10,000 entries, and 8 MiB for one save.
 
-Android Auto Backup and device transfer include display preferences only. The Room database, restore journals, and WebView profile directories are excluded, so a transfer cannot restore a native pointer without its profile or a profile without its pointer. The `.ihub` archive remains the portable recovery copy.
+Android Auto Backup and device transfer include display preferences only. The include is the whole rule: Room, restore journals, and WebView profile directories are not listed, because an exclude is valid only inside an included path. A transfer cannot restore a native pointer without its profile or a profile without its pointer. The `.ihub` archive remains the portable recovery copy.
 
 Deletion and bulk cleanup are not in this vault. Those stay for a later safety check.

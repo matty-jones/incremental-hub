@@ -27,18 +27,13 @@ class BackupRulesTest {
 
         listOf(rules, extraction).forEach { xml ->
             assertTrue(xml.contains("hub_display_preferences.xml"))
-            assertTrue(xml.contains("domain=\"database\" path=\"hub_database\""))
-            assertTrue(xml.contains("hub_database-wal"))
-            assertTrue(xml.contains("hub_database-shm"))
-            assertTrue(xml.contains("restore-journals"))
-            assertTrue(xml.contains("app_webview"))
-            assertTrue(xml.contains("app_webview_hub-game-shark-incremental"))
-            assertTrue(xml.contains("app_webview_hub-game-trimps"))
-            assertTrue(xml.contains("app_webview_hub-game-synergism"))
-            assertTrue(xml.contains("app_webview_hub-game-fe000000"))
-            assertFalse(xml.contains("domain=\"database\" path=\"hub_database\"") && xml.contains("<include domain=\"database\""))
+            assertFalse(xml.contains("<exclude"))
+            assertFalse(xml.contains("<include domain=\"database\""))
             assertFalse(xml.contains("<include domain=\"root\""))
             assertFalse(xml.contains("<include domain=\"file\""))
+            assertFalse(xml.contains("hub_database"))
+            assertFalse(xml.contains("restore-journals"))
+            assertFalse(xml.contains("app_webview"))
         }
         assertTrue(extraction.contains("<cloud-backup>"))
         assertTrue(extraction.contains("<device-transfer>"))

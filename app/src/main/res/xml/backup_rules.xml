@@ -1,27 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  API 30 Auto Backup. An include switches the default to "only these files".
-  Excludes name the vault, journals, and WebView profiles so a transport that
-  still starts from "include everything" cannot restore a pointer without its
-  profile, or a profile without its pointer. The .ihub archive is the recovery
-  contract. Display zoom is the only non-sensitive preference kept.
+  API 30 Auto Backup. One include switches the default to "only these files".
+  Room, restore journals, and WebView profiles are left out because they are
+  not included. An exclude is valid only inside an included path, so listing
+  them separately is rejected by release lint and is not required.
+  The .ihub archive is the recovery contract. Display zoom is the only
+  preference kept.
 -->
 <full-backup-content>
     <include domain="sharedpref" path="hub_display_preferences.xml" />
-
-    <exclude domain="database" path="hub_database" />
-    <exclude domain="database" path="hub_database-wal" />
-    <exclude domain="database" path="hub_database-shm" />
-    <exclude domain="database" path="hub_database-journal" />
-
-    <exclude domain="sharedpref" path="hub_settings.xml" />
-    <exclude domain="sharedpref" path="WebViewChromiumPrefs.xml" />
-
-    <exclude domain="file" path="restore-journals" />
-
-    <exclude domain="root" path="app_webview" />
-    <exclude domain="root" path="app_webview_hub-game-shark-incremental" />
-    <exclude domain="root" path="app_webview_hub-game-trimps" />
-    <exclude domain="root" path="app_webview_hub-game-synergism" />
-    <exclude domain="root" path="app_webview_hub-game-fe000000" />
 </full-backup-content>
