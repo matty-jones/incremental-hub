@@ -250,8 +250,8 @@ class VaultArchive(
                 payloadBytes = row.payload.length,
             )
             ExportHold.guard {
-                ExportHold.hold(listOf(id))
-                ExportHold.endSelection(id)
+                ExportHold.holdUnlocked(listOf(id))
+                ExportHold.endSelectionUnlocked(id)
                 transferred = true
             }
             return selected

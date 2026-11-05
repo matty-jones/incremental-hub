@@ -60,19 +60,10 @@ object SnapshotRetention {
     }
 
     /**
-     * True when removing [snapshotId] still leaves the same distinct-payload
-     * floor and the same populated hour, day, and week buckets for its lineage.
+     * Test hook. Runs after pruning is requested and before reserved export
+     * ids are excluded from the delete. The hook must not already hold [ExportHold.guard].
      */
-    fun removalPreservesCoverage(
-        rows: List<SnapshotRecord>,
-        nowMillis: Long,
-        snapshotId: String,
-    ): Boolean {
-        val target = rows.singleOrNull { it.id == snapshotId } ?: return false
-        val lineageRows = rows.filter { it.lineageId == target.lineageId }
-        val remaining = lineageRows.filter { it.id != snapshotId }
-        return coverageOf(lineageRows, nowMillis) == coverageOf(remaining, nowMillis)
-    }
+    internal var beforeExclusion: (suspend () -> Unit)? = null
 
     /**
      * An outgoing pointer is stored as an unpinned retained-pointer only when
@@ -101,49 +92,24 @@ object SnapshotRetention {
         gameId: String,
         nowMillis: Long,
     ) {
-        val instance = instanceDao.get(gameId) ?: return
-        if (!instance.captureIncident.isNullOrBlank()) return
-        val rows = snapshotDao.history(gameId)
-        val protectedIds = setOfNotNull(instance.highWaterSnapshotId) +
-            ExportHold.protectedIds() +
-            ActiveRestore.snapshotIds()
-        val keep = keepIds(rows, nowMillis, protectedIds)
-        val remove = rows
-            .filter { it.id !in keep && !isProtected(it, protectedIds) }
-            .map { it.id }
-        remove.chunked(DELETE_BATCH).forEach { ids ->
-            if (ids.isNotEmpty()) snapshotDao.deleteByIds(gameId, ids)
+        val existing = instanceDao.get(gameId) ?: return
+        if (!existing.captureIncident.isNullOrBlank()) return
+        beforeExclusion?.invoke()
+        ExportHold.guard {
+            val instance = instanceDao.get(gameId) ?: return@guard
+            if (!instance.captureIncident.isNullOrBlank()) return@guard
+            val rows = snapshotDao.history(gameId)
+            val protectedIds = setOfNotNull(instance.highWaterSnapshotId) +
+                ExportHold.protectedIdsUnlocked() +
+                ActiveRestore.snapshotIdsUnlocked()
+            val keep = keepIds(rows, nowMillis, protectedIds)
+            val remove = rows
+                .filter { it.id !in keep && !isProtected(it, protectedIds) }
+                .map { it.id }
+            remove.chunked(DELETE_BATCH).forEach { ids ->
+                if (ids.isNotEmpty()) snapshotDao.deleteByIds(gameId, ids)
+            }
         }
-    }
-
-    private data class Coverage(
-        val recentDistinct: Int,
-        val hours: Set<Long>,
-        val days: Set<LocalDate>,
-        val weeks: Set<Pair<Int, Int>>,
-    )
-
-    private fun coverageOf(rows: List<SnapshotRecord>, nowMillis: Long): Coverage {
-        val accepted = rows.filter { isAcceptedAutomatic(it) }
-        val today = utcDate(nowMillis)
-        val earliestDay = today.minusDays(DAILY_WINDOW_DAYS - 1)
-        val hourlyStart = nowMillis - HOURLY_WINDOW_HOURS * 60L * 60L * 1000L
-        val openWeeks = isoWeeks(today)
-        return Coverage(
-            recentDistinct = minOf(RECENT_DISTINCT, distinctPayloadCount(accepted)),
-            hours = accepted.filter { it.capturedAtMillis >= hourlyStart }.map { hourKey(it.capturedAtMillis) }.toSet(),
-            days = accepted.filter { !utcDate(it.capturedAtMillis).isBefore(earliestDay) }.map { utcDate(it.capturedAtMillis) }.toSet(),
-            weeks = accepted.filter { weekKey(it.capturedAtMillis) in openWeeks }.map { weekKey(it.capturedAtMillis) }.toSet(),
-        )
-    }
-
-    private fun distinctPayloadCount(rows: List<SnapshotRecord>): Int {
-        val chosen = mutableListOf<SnapshotRecord>()
-        for (row in rows) {
-            if (chosen.any { sameContent(it, row) }) continue
-            chosen += row
-        }
-        return chosen.size
     }
 
     private fun isProtected(row: SnapshotRecord, protectedIds: Set<String>): Boolean {

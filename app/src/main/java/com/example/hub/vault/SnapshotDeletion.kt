@@ -96,8 +96,10 @@ data class DeletionResult(
 
 /**
  * Manual deletion of one local snapshot. Eligibility is a pure function of
- * [DeletionFacts]. The repository re-reads those facts inside the delete
- * transaction and deletes only when the same fingerprint still matches.
+ * [DeletionFacts]. The repository holds the export mutex, re-reads those facts
+ * inside the delete transaction, and deletes only when the same fingerprint
+ * still matches. A snapshot [SnapshotRetention.keepIds] currently selects is
+ * refused, including one of the ten newest distinct rows in a full bucket.
  */
 object SnapshotDeletionPolicy {
     fun decide(facts: DeletionFacts): DeletionDecision {
@@ -146,8 +148,13 @@ object SnapshotDeletionPolicy {
         if (lineageCount <= 1) {
             return refuse(facts, DeletionRefusal.LAST_LINEAGE_COPY, "is the last snapshot for its lineage")
         }
-        if (!SnapshotRetention.removalPreservesCoverage(facts.rows, facts.nowMillis, row.id)) {
-            return refuse(facts, DeletionRefusal.RETENTION, "would drop retained history for its lineage")
+        val selected = SnapshotRetention.keepIds(
+            facts.rows,
+            facts.nowMillis,
+            protectedIds = setOfNotNull(facts.highWaterSnapshotId),
+        )
+        if (row.id in selected) {
+            return refuse(facts, DeletionRefusal.RETENTION, "is kept by retention")
         }
         return DeletionDecision(
             snapshotId = facts.snapshotId,
@@ -216,11 +223,11 @@ class SnapshotDeletion(
                 ),
             )
         }
-        return transaction { decide(gameId, snapshotId, fingerprint = null) }
+        return ExportHold.guard { transaction { decide(gameId, snapshotId, fingerprint = null) } }
     }
 
     suspend fun delete(fingerprint: SnapshotFingerprint): DeletionResult {
-        return transaction { deleteLocked(fingerprint) }
+        return ExportHold.guard { transaction { deleteLocked(fingerprint) } }
     }
 
     private suspend fun deleteLocked(fingerprint: SnapshotFingerprint): DeletionResult {
@@ -228,21 +235,19 @@ class SnapshotDeletion(
         if (!decision.eligible) {
             return result(fingerprint, deleted = false, decision.refusal, decision.message)
         }
-        val removed = ExportHold.guard {
-            when {
-                ExportHold.isProtectedUnlocked(fingerprint.snapshotId) -> -1
-                ActiveRestore.isHeldUnlocked(fingerprint.snapshotId) -> -2
-                else -> snapshots.deleteOneIfUnchanged(
-                    id = fingerprint.snapshotId,
-                    gameId = fingerprint.gameId,
-                    pinned = if (fingerprint.pinned) 1 else 0,
-                    userProtected = if (fingerprint.userProtected) 1 else 0,
-                    reason = fingerprint.reason,
-                    sequence = fingerprint.sequence,
-                    lineageId = fingerprint.lineageId,
-                    contentSha256 = fingerprint.contentSha256,
-                )
-            }
+        val removed = when {
+            ExportHold.isProtectedUnlocked(fingerprint.snapshotId) -> -1
+            ActiveRestore.isHeldUnlocked(fingerprint.snapshotId) -> -2
+            else -> snapshots.deleteOneIfUnchanged(
+                id = fingerprint.snapshotId,
+                gameId = fingerprint.gameId,
+                pinned = if (fingerprint.pinned) 1 else 0,
+                userProtected = if (fingerprint.userProtected) 1 else 0,
+                reason = fingerprint.reason,
+                sequence = fingerprint.sequence,
+                lineageId = fingerprint.lineageId,
+                contentSha256 = fingerprint.contentSha256,
+            )
         }
         return when (removed) {
             1 -> {
@@ -294,8 +299,8 @@ class SnapshotDeletion(
             highWaterSnapshotId = instance?.highWaterSnapshotId,
             captureIncident = instance?.captureIncident,
             pendingSyncIds = outbox.unackedSnapshotIds(gameId).toSet(),
-            exportProtected = snapshotId in ExportHold.protectedIds(),
-            restoreConflict = snapshotId in ActiveRestore.snapshotIds() ||
+            exportProtected = ExportHold.isProtectedUnlocked(snapshotId),
+            restoreConflict = ActiveRestore.isHeldUnlocked(snapshotId) ||
                 journals?.blocksDeletion(gameId) == true,
             workstationOnly = false,
             nowMillis = clock(),

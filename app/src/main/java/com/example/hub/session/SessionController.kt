@@ -2214,7 +2214,7 @@ class SessionController(
         confirmRecoverLocked(record.sequence)
     }
 
-    private fun clearVaultIntent() {
+    private suspend fun clearVaultIntent() {
         vaultOperation = false
         vaultBranchRequested = false
         vaultBranchConfirmed = false
@@ -2224,7 +2224,7 @@ class SessionController(
         vaultBaselinePayload = null
     }
 
-    private fun assignVaultSnapshot(id: String?) {
+    private suspend fun assignVaultSnapshot(id: String?) {
         ExportHold.guard {
             val previous = vaultSnapshotId
             if (previous != null && previous != id) ActiveRestore.releaseUnlocked(previous)

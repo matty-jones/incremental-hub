@@ -2,17 +2,19 @@ package com.example.hub.vault
 
 /**
  * Snapshot ids named by a staged or in-progress vault restore.
- * Counts share [ExportHold]'s lock so a deletion check and a restore
+ * Counts share [ExportHold]'s mutex so a deletion check and a restore
  * reservation cannot pass each other.
  */
 object ActiveRestore {
     private val counts = HashMap<String, Int>()
 
-    fun hold(snapshotId: String) = ExportHold.guard { holdUnlocked(snapshotId) }
+    suspend fun hold(snapshotId: String) = ExportHold.guard { holdUnlocked(snapshotId) }
 
-    fun release(snapshotId: String) = ExportHold.guard { releaseUnlocked(snapshotId) }
+    suspend fun release(snapshotId: String) = ExportHold.guard { releaseUnlocked(snapshotId) }
 
-    fun snapshotIds(): Set<String> = ExportHold.guard { counts.keys.toSet() }
+    suspend fun snapshotIds(): Set<String> = ExportHold.guard { snapshotIdsUnlocked() }
+
+    internal fun snapshotIdsUnlocked(): Set<String> = counts.keys.toSet()
 
     internal fun holdUnlocked(snapshotId: String) {
         counts[snapshotId] = (counts[snapshotId] ?: 0) + 1

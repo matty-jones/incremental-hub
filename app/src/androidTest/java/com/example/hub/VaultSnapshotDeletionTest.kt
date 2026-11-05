@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
@@ -155,8 +156,15 @@ class VaultSnapshotDeletionTest {
             ).assertIsDisplayed()
             compose.onNodeWithTag("vault-delete-confirm").performClick()
             compose.waitUntil(timeoutMillis = 10_000) {
-                compose.onAllNodesWithTag("vault-entry-copy").fetchSemanticsNodes().isEmpty() &&
-                    runBlocking { db.snapshotDao().getById("copy") == null }
+                val rootHeight = compose.onNodeWithTag("vault-screen").fetchSemanticsNode().size.height
+                val shown = compose.onAllNodesWithText("Deleted local snapshot copy", substring = true)
+                    .fetchSemanticsNodes()
+                    .any { node ->
+                        val top = node.positionInRoot.y
+                        val bottom = top + node.size.height
+                        node.size.height > 0 && bottom > 0f && top < rootHeight
+                    }
+                shown && runBlocking { db.snapshotDao().getById("copy") == null }
             }
             compose.onNodeWithText("Deleted local snapshot copy", substring = true).assertIsDisplayed()
             runBlocking {

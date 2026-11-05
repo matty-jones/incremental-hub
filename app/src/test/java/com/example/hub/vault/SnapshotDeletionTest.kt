@@ -22,7 +22,9 @@ import com.example.hub.sync.WorkstationApi
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.Executor
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -359,6 +361,188 @@ class SnapshotDeletionTest {
     }
 
     @Test
+    fun eligibleDeletionLeavesEveryRetentionSelection() = runTest {
+        val db = open()
+        try {
+            db.gameInstanceDao().upsert(instance(LIVE).copy(highWaterSnapshotId = "hw"))
+            db.snapshotDao().insert(row("hw", LIVE, 10_000, NOW))
+            repeat(12) { index ->
+                db.snapshotDao().insert(row("hour-$index", "payload-$index", index.toLong(), NOW))
+            }
+            val service = service(db)
+            val beforeRows = db.snapshotDao().history(GAME)
+            val beforeKeep = SnapshotRetention.keepIds(beforeRows, NOW, protectedIds = setOf("hw"))
+            assertTrue("hour-3" in beforeKeep)
+            assertFalse("hour-2" in beforeKeep)
+            assertEquals(DeletionRefusal.HIGH_WATER, service.preview(GAME, "hw", workstationOnly = false).refusal)
+            for (index in 3..11) {
+                val decision = service.preview(GAME, "hour-$index", workstationOnly = false)
+                assertEquals("hour-$index", DeletionRefusal.RETENTION, decision.refusal)
+                assertEquals("payload-$index", db.snapshotDao().getById("hour-$index")!!.payload)
+            }
+            val deleted = service.delete(service.preview(GAME, "hour-2", workstationOnly = false).fingerprint!!)
+            assertTrue(deleted.deleted)
+            val afterRows = db.snapshotDao().history(GAME)
+            assertNull(afterRows.find { it.id == "hour-2" })
+            for (kept in beforeRows.filter { it.id in beforeKeep }) {
+                assertEquals(kept, afterRows.single { it.id == kept.id })
+            }
+            assertEquals(LIVE, db.gameInstanceDao().get(GAME)!!.snapshotPayload)
+            assertEquals("hw", db.gameInstanceDao().get(GAME)!!.highWaterSnapshotId)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun pruningThatStartsFirstStillKeepsAnExportReservation() = runTest {
+        val db = open()
+        val entered = CompletableDeferred<Unit>()
+        val reserved = CompletableDeferred<Unit>()
+        try {
+            seedAncient(db)
+            SnapshotRetention.beforeExclusion = {
+                entered.complete(Unit)
+                reserved.await()
+            }
+            val pruning = async { SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), GAME, NOW) }
+            entered.await()
+            val archive = archive(db)
+            archive.beforeHold = {
+                reserved.complete(Unit)
+                pruning.await()
+                assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+                assertTrue("old-0" in ExportHold.protectedIds())
+                assertNull(db.snapshotDao().getById("old-1"))
+            }
+            val exported = archive.exportSnapshot("old-0")
+            assertTrue(exported is IhubExportResult.Ready)
+            assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+            assertEquals(LIVE, db.snapshotDao().getById("hw")!!.payload)
+            assertTrue(ExportHold.protectedIds().isEmpty())
+            (exported as IhubExportResult.Ready).file.delete()
+        } finally {
+            SnapshotRetention.beforeExclusion = null
+            if (!reserved.isCompleted) reserved.complete(Unit)
+            db.close()
+        }
+    }
+
+    @Test
+    fun exportReservationBeforePruningKeepsThePayload() = runTest {
+        val db = open()
+        try {
+            seedAncient(db)
+            val archive = archive(db)
+            archive.beforeHold = {
+                SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), GAME, NOW)
+                assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+                assertTrue("old-0" in ExportHold.protectedIds())
+                assertNull(db.snapshotDao().getById("old-1"))
+                assertNull(db.snapshotDao().getById("old-2"))
+            }
+            val exported = archive.exportSnapshot("old-0")
+            assertTrue(exported is IhubExportResult.Ready)
+            assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+            assertEquals(LIVE, db.gameInstanceDao().get(GAME)!!.snapshotPayload)
+            assertTrue(ExportHold.protectedIds().isEmpty())
+            (exported as IhubExportResult.Ready).file.delete()
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun overlappingExportsStayIntactWhilePruning() = runTest {
+        val db = open()
+        val firstReady = CompletableDeferred<Unit>()
+        val secondReady = CompletableDeferred<Unit>()
+        val pruned = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        try {
+            seedAncient(db)
+            val first = archive(db)
+            val second = archive(db)
+            first.beforeHold = {
+                firstReady.complete(Unit)
+                secondReady.await()
+                SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), GAME, NOW)
+                assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+                assertTrue("old-0" in ExportHold.protectedIds())
+                assertNull(db.snapshotDao().getById("old-1"))
+                pruned.complete(Unit)
+                release.await()
+            }
+            second.beforeHold = {
+                secondReady.complete(Unit)
+                release.await()
+            }
+            val firstExport = async { first.exportSnapshot("old-0") }
+            firstReady.await()
+            val secondExport = async { second.exportSnapshot("old-0") }
+            secondReady.await()
+            pruned.await()
+            release.complete(Unit)
+            val firstResult = firstExport.await()
+            val secondResult = secondExport.await()
+            assertTrue(firstResult is IhubExportResult.Ready)
+            assertTrue(secondResult is IhubExportResult.Ready)
+            assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+            assertEquals(LIVE, db.snapshotDao().getById("hw")!!.payload)
+            assertTrue(ExportHold.protectedIds().isEmpty())
+            (firstResult as IhubExportResult.Ready).file.delete()
+            (secondResult as IhubExportResult.Ready).file.delete()
+        } finally {
+            if (!secondReady.isCompleted) secondReady.complete(Unit)
+            if (!pruned.isCompleted) pruned.complete(Unit)
+            if (!release.isCompleted) release.complete(Unit)
+            db.close()
+        }
+    }
+
+    @Test
+    fun manualDeletionExportAndPruningLeaveTheReservedPayload() = runTest {
+        val db = open()
+        try {
+            seedAncient(db)
+            val service = service(db)
+            val reserved = service.preview(GAME, "old-0", workstationOnly = false).fingerprint!!
+            val other = service.preview(GAME, "old-1", workstationOnly = false).fingerprint!!
+            assertTrue(service.preview(GAME, "old-0", workstationOnly = false).eligible)
+            val archive = archive(db)
+            archive.beforeHold = {
+                coroutineScope {
+                    val selectedDelete = async { service.delete(reserved) }
+                    val otherDelete = async { service.delete(other) }
+                    val pruning = async {
+                        SnapshotRetention.prune(db.snapshotDao(), db.gameInstanceDao(), GAME, NOW)
+                    }
+                    val selectedResult = selectedDelete.await()
+                    val otherResult = otherDelete.await()
+                    pruning.await()
+                    assertFalse(selectedResult.deleted)
+                    assertEquals(DeletionRefusal.ACTIVE_EXPORT, selectedResult.refusal)
+                    assertTrue(otherResult.deleted || otherResult.refusal == DeletionRefusal.NOT_ON_PHONE)
+                    assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+                    assertNull(db.snapshotDao().getById("old-1"))
+                    assertNull(db.snapshotDao().getById("old-2"))
+                    assertTrue("old-0" in ExportHold.protectedIds())
+                }
+            }
+            val exported = archive.exportSnapshot("old-0")
+            assertTrue(exported is IhubExportResult.Ready)
+            assertEquals("old-0", db.snapshotDao().getById("old-0")!!.payload)
+            assertEquals(LIVE, db.snapshotDao().getById("hw")!!.payload)
+            assertEquals(LIVE, db.gameInstanceDao().get(GAME)!!.snapshotPayload)
+            assertEquals("hw", db.gameInstanceDao().get(GAME)!!.highWaterSnapshotId)
+            assertTrue(ExportHold.protectedIds().isEmpty())
+            (exported as IhubExportResult.Ready).file.delete()
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
     fun reimportRestoresADeletedHistoricalRow() = runTest {
         val db = open()
         try {
@@ -423,6 +607,23 @@ class SnapshotDeletionTest {
         db.gameInstanceDao().upsert(instance(LIVE).copy(highWaterSnapshotId = "hw"))
         db.snapshotDao().insert(row("hw", LIVE, 2, NOW))
         db.snapshotDao().insert(row("copy", LIVE, 1, NOW))
+    }
+
+    private suspend fun seedAncient(db: HubDatabase) {
+        db.gameInstanceDao().upsert(instance(LIVE).copy(highWaterSnapshotId = "hw"))
+        db.snapshotDao().insert(row("hw", LIVE, 10_000, NOW))
+        repeat(12) { index ->
+            db.snapshotDao().insert(row("old-$index", "old-$index", index.toLong(), ANCIENT + index))
+        }
+    }
+
+    private fun archive(db: HubDatabase): VaultArchive {
+        return VaultArchive(
+            db.snapshotDao(),
+            emptyApi(),
+            IhubPublisher(db, db.snapshotDao(), db.gameInstanceDao()),
+            "test",
+        )
     }
 
     private fun open(): HubDatabase {
