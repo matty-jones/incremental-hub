@@ -268,9 +268,9 @@ class SessionController(
     private val backgroundClock: BackgroundClock = SystemBackgroundClock()
     private var gameTimersPaused = false
     private var offlineResumeActive = false
-    private var offlineReload = false
     private val _backgroundNotice = MutableStateFlow<BackgroundNotice?>(null)
     val backgroundNotice: StateFlow<BackgroundNotice?> = _backgroundNotice.asStateFlow()
+    private var acknowledgedReport: String? = null
 
     /** Set while a configuration change is moving the existing WebView. */
     @Volatile var retainAcrossConfiguration: Boolean = false
@@ -599,21 +599,21 @@ class SessionController(
         }
     }
 
-    fun continueBackgroundSession() {
+    /**
+     * Hides the menu-bar line for the current result. The sentence stays in the
+     * menu until a later interval replaces it. A calculation that has not
+     * finished is not acknowledged, so its result can still be shown once.
+     */
+    fun acknowledgeBackgroundStatus() {
         scope.launch {
             mutex.withLock {
+                val current = _backgroundNotice.value ?: return@withLock
+                val report = current.report ?: return@withLock
+                acknowledgedReport = "${current.checkpointKey}|$report"
                 val gameId = _activeGameId.value
                 if (gameId != null) backgroundStore.markHandled(gameId)
-                _backgroundNotice.value = null
-                if (!offlineResumeActive) resumeGameTimers()
+                _backgroundNotice.value = current.copy(barVisible = false)
             }
-        }
-    }
-
-    fun confirmBackgroundCatchUp() {
-        scope.launch {
-            val pending = mutex.withLock { confirmCatchUpLocked() }
-            if (pending != null) finishOfflineWork(pending)
         }
     }
 
@@ -3423,192 +3423,82 @@ class SessionController(
                 backgroundStore.markHandled(gameId)
                 resumeGameTimers()
                 transitionTo(SessionState.Playing, gameId)
-                publishNotice(plan, checkpoint?.snapshotId)
+                publishNotice(plan, checkpoint)
                 return PendingOffline(gameId)
             }
             publishNotice(
                 plan.copy(
                     action = ResumeAction.ASK,
                     detail = "The game did not start offline progression ($started). The live session was kept.",
-                    showBanner = true,
-                    offerCatchUp = checkpoint?.committed == true,
-                    offerContinue = true,
-                    offerInspect = checkpoint?.committed == true,
+                    showBanner = false,
+                    report = BACKGROUND_REPORT_SKIPPED,
+                    mention = true,
                 ),
-                checkpoint?.snapshotId,
+                checkpoint,
             )
             resumeGameTimers()
             transitionTo(SessionState.Playing, gameId)
             return null
         }
-        publishNotice(plan, checkpoint?.snapshotId)
+        publishNotice(plan, checkpoint)
         resumeGameTimers()
         transitionTo(SessionState.Playing, gameId)
         return null
     }
 
-    private suspend fun confirmCatchUpLocked(): PendingOffline? {
-        val gameId = _activeGameId.value ?: return null
-        val checkpoint = backgroundStore.read(gameId)
-        val snapshotId = checkpoint?.snapshotId
-        val expectedSha = checkpoint?.contentSha256
-        if (checkpoint?.committed != true || snapshotId.isNullOrBlank() || expectedSha.isNullOrBlank()) {
-            _sessionError.value = "There is no verified background save to calculate from."
-            return null
-        }
-        val row = snapshotDao?.getById(snapshotId)
-        val actualSha = row?.payload?.let { PayloadDigest.sha256(it) }
-        if (row == null || row.gameId != gameId || actualSha != expectedSha) {
-            _sessionError.value = "The background save could not be verified. Nothing was written."
-            return null
-        }
-        val adapter = activeAdapter
-        val view = webView
-        if (adapter == null || view == null || _state.value !is SessionState.Playing) {
-            _sessionError.value = "Offline progression can run while the game is open. Nothing was written."
-            return null
-        }
-        val inspection = adapter.inspectOffline(view)
-        val gap = inspection.gapSeconds
-        val canCall = inspection.supported &&
-            inspection.payloadSha256 == expectedSha &&
-            inspection.offlineEnabled &&
-            !inspection.simulationActive &&
-            !inspection.blocksSave &&
-            gap != null && gap > 60.0 &&
-            adapter.offlineSupport().capability == OfflineCapability.NATIVE_ON_RESUME
-        if (canCall) {
-            val started = adapter.startNativeOffline(view)
-            if (started == OfflineStart.STARTED) {
-                offlineResumeActive = true
-                backgroundStore.markHandled(gameId)
-                resumeGameTimers()
-                recordDiagnostic(DiagnosticSeverity.INFO, "offline", "Confirmed native offline start for $snapshotId.")
-                return PendingOffline(gameId)
-            }
-        }
-        val live = try {
-            val client = peekClient
-            if (client != null) client.invoke(view, adapter) else adapter.peekStorage(view)
-        } catch (_: Exception) {
-            PeekOutcome.Failed
-        }
-        val livePayload = (live as? PeekOutcome.Value)?.payload
-        if (livePayload.isNullOrBlank()) {
-            _sessionError.value = "The current session could not be protected, so the game was not reloaded."
-            return null
-        }
-        pinCopy(gameId, adapter, livePayload, SnapshotReasons.PRE_RESTORE)
-        val wrote = adapter.replaceStoredSave(view, row.payload)
-        if (!wrote) {
-            _sessionError.value = "The recovery save was not written. The live session was kept."
-            return null
-        }
-        offlineResumeActive = true
-        offlineReload = true
-        backgroundStore.markHandled(gameId)
-        resumeGameTimers()
-        if (webView != null) _reloadEpoch.value = _reloadEpoch.value + 1
-        _backgroundNotice.value = BackgroundNotice(
-            gameId = gameId,
-            headline = _backgroundNotice.value?.headline ?: absenceHeadline(gameId, gameRegistry.getGame(gameId)?.displayName ?: gameId, 0L),
-            detail = "The game is reloading the background save. Its own load path calculates the interval. The previous session was pinned. The workstation pointer was not moved.",
-            offerCatchUp = false,
-            offerContinue = true,
-            offerInspect = true,
-            checkpointId = snapshotId,
-        )
-        recordDiagnostic(
-            DiagnosticSeverity.INFO,
-            "offline",
-            "Reloaded background checkpoint $snapshotId ${shaPrefix(expectedSha)}. The previous session was pinned. The workstation pointer was not moved.",
-        )
-        return PendingOffline(gameId)
-    }
-
     private suspend fun finishOfflineWork(pending: PendingOffline) {
         val adapter = activeAdapter
         val view = webView
-        val reloading = offlineReload
         val settlement = if (adapter != null && view != null && _activeGameId.value == pending.gameId) {
-            if (reloading) awaitReloadedOffline(adapter, view) else adapter.awaitOfflineSettlement(view)
+            adapter.awaitOfflineSettlement(view)
         } else {
             OfflineSettlement.INTERRUPTED
         }
         mutex.withLock {
             offlineResumeActive = false
-            offlineReload = false
             resumeGameTimers()
             if (_activeGameId.value != pending.gameId) return@withLock
             recordDiagnostic(DiagnosticSeverity.INFO, "offline", "Offline settlement $settlement.")
             val current = _backgroundNotice.value
-            if (settlement == OfflineSettlement.COMPLETE && _state.value is SessionState.Playing) {
-                val attempt = performCaptureLocked("offline-resume")
-                val saved = attempt is CaptureAttempt.Saved
-                if (current != null) {
-                    _backgroundNotice.value = current.copy(
-                        detail = if (saved) {
-                            "Offline calculation completed and the result was saved."
-                        } else {
-                            "Offline calculation completed. The follow-up save was not stored. The previous save was kept."
-                        },
-                        offerContinue = true,
-                        offerCatchUp = false,
-                    )
-                }
-            } else if (current != null) {
-                _backgroundNotice.value = current.copy(
-                    detail = "Offline calculation was interrupted. The partial result was not saved.",
-                    offerCatchUp = true,
-                    offerContinue = true,
-                    offerInspect = true,
-                )
+            val finished = settlement == OfflineSettlement.COMPLETE && _state.value is SessionState.Playing
+            val saved = if (finished) {
+                performCaptureLocked("offline-resume") is CaptureAttempt.Saved
+            } else {
+                false
             }
+            val (report, detail) = settledOfflineStatus(finished, saved)
+            val key = current?.checkpointKey ?: pending.gameId
+            _backgroundNotice.value = BackgroundNotice(
+                gameId = pending.gameId,
+                headline = current?.headline ?: absenceHeadline(
+                    pending.gameId,
+                    gameRegistry.getGame(pending.gameId)?.displayName ?: pending.gameId,
+                    0L,
+                ),
+                detail = detail,
+                elapsedLabel = current?.elapsedLabel.orEmpty(),
+                report = report,
+                checkpointKey = key,
+                barVisible = acknowledgedReport != "$key|$report",
+            )
         }
     }
 
-    /**
-     * A reload clears the runtime before loadGame starts Shark's own simulation.
-     * Wait until that simulation is seen and then finishes. Do not capture the
-     * page that was on screen before the reload.
-     */
-    private suspend fun awaitReloadedOffline(
-        adapter: com.example.hub.games.GameAdapter,
-        view: android.webkit.WebView,
-    ): OfflineSettlement {
-        val deadline = System.currentTimeMillis() + 45_000L
-        var sawSimulation = false
-        while (System.currentTimeMillis() < deadline) {
-            val inspection = try {
-                adapter.inspectOffline(view)
-            } catch (_: Exception) {
-                null
-            }
-            if (inspection != null && inspection.supported &&
-                (inspection.blocksSave || inspection.simulationActive)
-            ) {
-                sawSimulation = true
-            } else if (sawSimulation) {
-                return OfflineSettlement.COMPLETE
-            }
-            kotlinx.coroutines.delay(300L)
-        }
-        return OfflineSettlement.INTERRUPTED
-    }
-
-    private fun publishNotice(plan: ResumePlan, checkpointId: String?) {
-        if (!plan.showBanner) {
+    private fun publishNotice(plan: ResumePlan, checkpoint: BackgroundCheckpoint?) {
+        if (!plan.mention) {
             _backgroundNotice.value = null
             return
         }
+        val key = checkpoint?.let { backgroundCheckpointKey(it) }.orEmpty()
+        val report = plan.report
         _backgroundNotice.value = BackgroundNotice(
             gameId = _activeGameId.value.orEmpty(),
             headline = plan.headline,
             detail = plan.detail,
-            offerCatchUp = plan.offerCatchUp,
-            offerContinue = plan.offerContinue,
-            offerInspect = plan.offerInspect,
-            checkpointId = checkpointId,
+            elapsedLabel = plan.elapsedLabel,
+            report = report,
+            checkpointKey = key,
+            barVisible = report != null && acknowledgedReport != "$key|$report",
         )
     }
 
@@ -3660,7 +3550,6 @@ class SessionController(
     private suspend fun destroyWebViewAndFinalize() {
         resumeGameTimers()
         offlineResumeActive = false
-        offlineReload = false
         stopCaptureCadence()
         val gameId = _activeGameId.value
         if (gameId != null) {
@@ -3683,7 +3572,6 @@ class SessionController(
     private suspend fun forceClose() {
         resumeGameTimers()
         offlineResumeActive = false
-        offlineReload = false
         stopCaptureCadence()
         val view = webView
         webView = null

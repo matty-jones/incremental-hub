@@ -95,6 +95,12 @@ class NativeMenuTest {
     // -----------------------------------------------------------------
 
     @Test
+    fun backFromASubpanelReturnsToTheActionList() {
+        assertEquals(MenuBackTarget.PANEL, menuBackTarget(inSubpanel = true))
+        assertEquals(MenuBackTarget.CLOSE, menuBackTarget(inSubpanel = false))
+    }
+
+    @Test
     fun backHandler_closesMenu_whenOpen() {
         var menuOpen = true
         var backCalled = false

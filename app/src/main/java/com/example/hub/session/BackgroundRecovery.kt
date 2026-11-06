@@ -126,16 +126,51 @@ enum class ResumeAction {
     ELAPSED,
 }
 
+const val BACKGROUND_REPORT_RAN = "ran"
+const val BACKGROUND_REPORT_SKIPPED = "skipped"
+const val BACKGROUND_REPORT_FAILED = "failed"
+
 data class ResumePlan(
     val action: ResumeAction,
     val headline: String,
     val detail: String,
+    val elapsedLabel: String,
+    /** True only when the game should be covered. Ordinary results stay in the menu bar. */
     val showBanner: Boolean,
-    val offerCatchUp: Boolean,
-    val offerContinue: Boolean,
-    val offerInspect: Boolean,
+    /** "ran", "skipped", or "failed". Null until that result is known. */
+    val report: String?,
+    /** True when the menu should show [detail]. A silent plan clears the status. */
+    val mention: Boolean,
     val gameGapSeconds: Double?,
 )
+
+fun backgroundBarLabel(elapsedLabel: String, report: String?): String? {
+    if (elapsedLabel.isBlank()) return null
+    if (report != BACKGROUND_REPORT_RAN &&
+        report != BACKGROUND_REPORT_SKIPPED &&
+        report != BACKGROUND_REPORT_FAILED
+    ) {
+        return null
+    }
+    return "$elapsedLabel · $report"
+}
+
+/**
+ * Copy for a calculation that already started. "ran" is used only after the
+ * game's own offline function has finished.
+ */
+fun settledOfflineStatus(complete: Boolean, saved: Boolean): Pair<String, String> {
+    if (!complete) {
+        return BACKGROUND_REPORT_FAILED to
+            "Offline progression failed. The partial result was not saved."
+    }
+    val detail = if (saved) {
+        "Offline progression ran and the result was saved."
+    } else {
+        "Offline progression ran. The follow-up save was not stored. The previous save was kept."
+    }
+    return BACKGROUND_REPORT_RAN to detail
+}
 
 data class ResumeInput(
     val gameId: String,
@@ -154,58 +189,58 @@ fun planBackgroundResume(input: ResumeInput): ResumePlan {
     val duration = absence?.trustedMillis ?: absence?.elapsedMillis ?: absence?.wallMillis ?: 0L
     val headline = absenceHeadline(input.gameId, input.displayName, duration.coerceAtLeast(0L))
     val gap = input.inspection?.gapSeconds
+    val elapsedLabel = formatAbsence(duration.coerceAtLeast(0L))
     fun plan(
         action: ResumeAction,
         detail: String,
-        showBanner: Boolean = true,
-        catchUp: Boolean = false,
-        continueSession: Boolean = true,
-        inspect: Boolean = input.checkpointCommitted,
-    ) = ResumePlan(action, headline, detail, showBanner, catchUp, continueSession, inspect, gap)
+        showBanner: Boolean = false,
+        report: String? = null,
+        mention: Boolean = false,
+    ) = ResumePlan(action, headline, detail, elapsedLabel, showBanner, report, mention, gap)
 
     if (absence == null || !absence.possiblyLong()) {
-        return plan(ResumeAction.IGNORE, "The absence was shorter than the offline threshold.", showBanner = false, continueSession = false, inspect = false)
+        return plan(ResumeAction.IGNORE, "The absence was shorter than the offline threshold.")
     }
     if (!input.sameBoot) {
         return plan(
             ResumeAction.DELEGATE_TO_LOAD,
             "The process restarted. A qualified game calculates this interval when it loads. Hub did not apply it again.",
-            showBanner = false,
-            continueSession = false,
-            inspect = false,
-        )
-    }
-    if (input.capability == OfflineCapability.UNSUPPORTED) {
-        return plan(
-            ResumeAction.UNSUPPORTED,
-            "This game has no verified offline calculation in Hub. The live session was kept.",
-            catchUp = false,
-            inspect = false,
         )
     }
     if (input.capability == OfflineCapability.ELAPSED_TIME) {
         return plan(
             ResumeAction.ELAPSED,
             "This game applies elapsed time in its own loop. Hub did not add a second calculation.",
-            showBanner = false,
-            continueSession = false,
-            inspect = false,
+        )
+    }
+    if (input.checkpointHandled) {
+        return plan(
+            ResumeAction.ALREADY_APPLIED,
+            "This background interval was already reported. Offline progression was not run again.",
+        )
+    }
+    if (input.capability == OfflineCapability.UNSUPPORTED) {
+        return plan(
+            ResumeAction.UNSUPPORTED,
+            "This game has no verified offline calculation in Hub. The live session was kept.",
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
     if (!input.checkpointCommitted || input.checkpointSha256.isNullOrBlank()) {
         return plan(
             ResumeAction.NO_CHECKPOINT,
             "Hub could not verify a background save, so offline progression was not run. The live session was kept.",
-            catchUp = false,
-            inspect = false,
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
     if (absence.confidence != ClockConfidence.AGREED) {
         return plan(
             ResumeAction.ASK,
-            "The device clock and the elapsed timer disagree, so offline progression was not run automatically.",
-            catchUp = input.capability == OfflineCapability.NATIVE_ON_RESUME ||
-                input.capability == OfflineCapability.NATIVE_ON_LOAD,
+            "The device clock and the elapsed timer disagree, so offline progression was not run. The live session was kept.",
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
     val inspection = input.inspection
@@ -213,22 +248,23 @@ fun planBackgroundResume(input: ResumeInput): ResumePlan {
         return plan(
             ResumeAction.ASK,
             "The running game could not be compared with the background save. Nothing was changed.",
-            catchUp = true,
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
     if (inspection.simulationActive || inspection.blocksSave) {
         return plan(
             ResumeAction.IN_PROGRESS,
             "Offline progression is already running. Hub did not start it again and did not save the partial result.",
-            catchUp = false,
-            continueSession = true,
+            mention = true,
         )
     }
     if (!inspection.offlineEnabled) {
         return plan(
             ResumeAction.DISABLED,
             "Offline progression is turned off in the game. The live session was kept.",
-            catchUp = false,
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
     val hashMatches = inspection.payloadSha256 != null && inspection.payloadSha256 == input.checkpointSha256
@@ -236,40 +272,42 @@ fun planBackgroundResume(input: ResumeInput): ResumePlan {
     val trusted = absence.trustedMillis
     val gapAgrees = trusted != null && gapMillis != null &&
         abs(gapMillis - trusted) <= maxOf(15_000.0, trusted / 10.0)
-    if (input.checkpointHandled && (gap == null || gap <= 60.0)) {
+    if (gap != null && gap <= 60.0 && hashMatches) {
         return plan(
             ResumeAction.ALREADY_APPLIED,
             "Offline progression was already applied for this absence. It was not applied again.",
-            catchUp = false,
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
-    if (hashMatches && gap != null && gap > 60.0 && gapAgrees && input.capability == OfflineCapability.NATIVE_ON_RESUME) {
+    if (hashMatches && gapAgrees && input.capability == OfflineCapability.NATIVE_ON_RESUME) {
         return plan(
             ResumeAction.AUTO,
-            "Offline calculation is using the game's own clock.",
-            catchUp = false,
-            continueSession = true,
-            inspect = input.checkpointCommitted,
+            "Offline progression is using the game's own clock.",
+            mention = true,
         )
     }
-    if (!hashMatches || (gap != null && gap <= 60.0)) {
+    if (!hashMatches) {
         return plan(
             ResumeAction.ASK,
-            "The running session has moved on from the background save. Offline progression was not applied automatically.",
-            catchUp = true,
+            "The running session has moved on from the background save. Offline progression was not applied. The live session was kept.",
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
     if (input.capability == OfflineCapability.NATIVE_ON_LOAD) {
         return plan(
             ResumeAction.ASK,
-            "This game calculates offline progress when it loads. Hub did not reload it automatically.",
-            catchUp = true,
+            "This game calculates offline progress when it loads. Hub did not reload it. The live session was kept.",
+            report = BACKGROUND_REPORT_SKIPPED,
+            mention = true,
         )
     }
     return plan(
         ResumeAction.ASK,
         "Hub could not prove that automatic catch-up was safe. The live session was kept.",
-        catchUp = false,
+        report = BACKGROUND_REPORT_SKIPPED,
+        mention = true,
     )
 }
 
@@ -355,11 +393,18 @@ data class BackgroundNotice(
     val gameId: String,
     val headline: String,
     val detail: String,
-    val offerCatchUp: Boolean,
-    val offerContinue: Boolean,
-    val offerInspect: Boolean,
-    val checkpointId: String?,
-)
+    val elapsedLabel: String,
+    val report: String?,
+    val checkpointKey: String,
+    val barVisible: Boolean,
+) {
+    val barLabel: String?
+        get() = if (barVisible) backgroundBarLabel(elapsedLabel, report) else null
+}
+
+fun backgroundCheckpointKey(checkpoint: BackgroundCheckpoint): String {
+    return "${checkpoint.gameId}:${checkpoint.wallStartMillis}:${checkpoint.bootToken}"
+}
 
 fun shaPrefix(sha: String?): String {
     if (sha.isNullOrBlank()) return "absent"

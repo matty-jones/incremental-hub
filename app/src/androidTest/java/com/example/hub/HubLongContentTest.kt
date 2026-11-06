@@ -152,6 +152,20 @@ class HubLongContentTest {
             waitForTag("vault-entry-copy")
             compose.onNodeWithTag("vault-entry-copy").performClick()
             waitForTag("vault-restore-confirmation")
+            compose.onNodeWithTag("vault-close").assertIsDisplayed()
+            compose.onNodeWithTag("vault-to-timeline").assertIsDisplayed().performClick()
+            waitForTag("vault-timeline")
+            compose.onNodeWithTag("vault-close").assertIsDisplayed()
+            val returned = System.currentTimeMillis() + 10_000
+            while (System.currentTimeMillis() < returned &&
+                compose.onAllNodesWithTag("vault-entry-copy").fetchSemanticsNodes().isEmpty()
+            ) {
+                compose.onNodeWithTag("vault-timeline").performTouchInput { swipeUp() }
+                compose.waitForIdle()
+            }
+            waitForTag("vault-entry-copy")
+            compose.onNodeWithTag("vault-entry-copy").performClick()
+            waitForTag("vault-restore-confirmation")
             compose.onNodeWithTag("vault-restore-confirmation").assertIsDisplayed()
             compose.onNodeWithTag("vault-delete").assertIsNotDisplayed()
             compose.onNodeWithTag("vault-protect").performScrollTo().performClick()

@@ -92,7 +92,10 @@ fun PlaySurface(
     var menuOpen by remember(gameId) { mutableStateOf(false) }
     var menuPanel by remember(gameId) { mutableStateOf(MenuPanel.Actions) }
     var vaultOpen by rememberSaveable(gameId) { mutableStateOf(false) }
-    var vaultFocusId by remember { mutableStateOf<String?>(null) }
+    val restoreCommitted = vaultPlan?.committed == true
+    LaunchedEffect(restoreCommitted, vaultPlan?.snapshotId) {
+        if (closeVaultAfterCommittedRestore(restoreCommitted)) vaultOpen = false
+    }
 
     ImmersiveSystemBars()
 
@@ -110,7 +113,10 @@ fun PlaySurface(
         }
     }
 
-    BackHandler(enabled = !menuOpen && state !is SessionState.Closed && state !is SessionState.RecoveryRequired) {
+    BackHandler(
+        enabled = !menuOpen && !vaultOpen &&
+            state !is SessionState.Closed && state !is SessionState.RecoveryRequired,
+    ) {
         Log.d(TAG, "PlaySurface: back pressed state=$state")
         exitSession()
     }
@@ -124,12 +130,16 @@ fun PlaySurface(
             // Chrome sits above the WebView so games that put controls at the
             // top of the document (FE000000) are not covered by the hub header.
             Column(modifier = Modifier.fillMaxSize()) {
-                if (!menuOpen && state !is SessionState.Closed) {
+                if (!menuOpen && !vaultOpen && state !is SessionState.Closed) {
                     PlayChrome(
                         onMenuClick = {
                             menuPanel = MenuPanel.Actions
                             menuOpen = true
+                            controller.acknowledgeBackgroundStatus()
                         },
+                        statusLabel = backgroundNotice
+                            ?.takeIf { it.gameId == gameId }
+                            ?.barLabel,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -210,6 +220,13 @@ fun PlaySurface(
                             saveBusy = saveBusy,
                             saveBlockedReason = captureBlockReason,
                             saveNotice = saveNotice,
+                            backgroundHeadline = backgroundNotice
+                                ?.takeIf { it.gameId == gameId }
+                                ?.headline,
+                            backgroundDetail = backgroundNotice
+                                ?.takeIf { it.gameId == gameId }
+                                ?.detail,
+                            restoreNotice = vaultPlan?.takeIf { it.committed }?.message,
                             onPanelBack = { menuPanel = MenuPanel.Actions },
                             display = {
                                 DisplayPanel(
@@ -261,7 +278,6 @@ fun PlaySurface(
                             protection = vaultProtection,
                             archive = vaultArchive,
                             deletion = snapshotDeletion,
-                            initialSnapshotId = vaultFocusId,
                             plan = vaultPlan,
                             onStageRestore = { entry ->
                                 controller.stageVaultRestore(entry.id, entry.lineageId)
@@ -270,26 +286,12 @@ fun PlaySurface(
                                 controller.confirmVaultRestore(branch)
                             },
                             onBack = {
-                                controller.cancelVaultRestore()
+                                if (cancelVaultPlanOnLeave(vaultPlan?.committed == true)) {
+                                    controller.cancelVaultRestore()
+                                }
                                 vaultOpen = false
                             },
                             modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-
-                    val recovery = backgroundNotice
-                    if (recovery != null && recovery.gameId == gameId && !vaultOpen &&
-                        state !is SessionState.RecoveryRequired
-                    ) {
-                        BackgroundRecoveryBanner(
-                            notice = recovery,
-                            onCatchUp = { controller.confirmBackgroundCatchUp() },
-                            onContinue = { controller.continueBackgroundSession() },
-                            onInspect = {
-                                vaultFocusId = recovery.checkpointId
-                                if (vaultCatalog != null) vaultOpen = true
-                            },
-                            modifier = Modifier.align(Alignment.BottomCenter),
                         )
                     }
 

@@ -1,6 +1,7 @@
 package com.example.hub.ui
 
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +29,13 @@ private const val TAG = "RecoveryOverlay"
 
 private fun formatWhen(millis: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
+
+/** A confirmation step goes back to the recovery choices. Close still leaves the session. */
+internal fun recoveryBackDismissesConfirmation(
+    confirmingRestore: Boolean,
+    confirmingSnapshot: Boolean,
+    confirmingStartOver: Boolean,
+): Boolean = confirmingRestore || confirmingSnapshot || confirmingStartOver
 
 /**
  * Overlay shown when the session enters [com.example.hub.session.SessionState.RecoveryRequired].
@@ -62,6 +70,20 @@ fun RecoveryOverlay(
     var confirming by rememberSaveable(gameId) { mutableStateOf(false) }
     var confirmingStartOver by rememberSaveable(gameId) { mutableStateOf(false) }
     var confirmingUse by rememberSaveable(gameId) { mutableStateOf(-1L) }
+    BackHandler {
+        if (recoveryBackDismissesConfirmation(
+                confirmingRestore = confirming,
+                confirmingSnapshot = confirmingUse >= 0L,
+                confirmingStartOver = confirmingStartOver,
+            )
+        ) {
+            confirming = false
+            confirmingUse = -1L
+            confirmingStartOver = false
+        } else {
+            onClose()
+        }
+    }
     val incident = detail?.contains("Capture incident") == true ||
         diagnostic?.note?.contains("Capture incident") == true
     OverlaySheet(

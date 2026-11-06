@@ -1,14 +1,17 @@
 package com.example.hub.ui.chrome
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
@@ -18,10 +21,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /**
@@ -34,6 +40,7 @@ import androidx.compose.ui.unit.dp
 fun PlayChrome(
     onMenuClick: () -> Unit,
     modifier: Modifier = Modifier,
+    statusLabel: String? = null,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -45,12 +52,28 @@ fun PlayChrome(
                 WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal),
             ),
         ) {
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(32.dp),
-                contentAlignment = Alignment.CenterEnd,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (!statusLabel.isNullOrBlank()) {
+                    Text(
+                        text = statusLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 8.dp)
+                            .clickable(onClick = onMenuClick)
+                            .testTag("background-status"),
+                    )
+                } else {
+                    Box(modifier = Modifier.weight(1f))
+                }
                 CompositionLocalProvider(
                     LocalMinimumInteractiveComponentSize provides 0.dp,
                 ) {

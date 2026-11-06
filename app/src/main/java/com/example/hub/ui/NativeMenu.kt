@@ -29,6 +29,7 @@ import com.example.hub.ui.theme.HubColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,6 +87,16 @@ internal val MenuAction.label: String
  */
 internal fun sessionStateForcesMenuOpen(state: SessionState): Boolean = false
 
+internal enum class MenuBackTarget {
+    PANEL,
+    CLOSE,
+}
+
+/** Display and Diagnostics go back to the action list. The action list closes the menu. */
+internal fun menuBackTarget(inSubpanel: Boolean): MenuBackTarget {
+    return if (inSubpanel) MenuBackTarget.PANEL else MenuBackTarget.CLOSE
+}
+
 /**
  * In-session menu drawn in an [OverlaySheet] over the WebView.
  * Compact windows drop it from the top. Dismissing the sheet only hides it.
@@ -102,6 +113,9 @@ fun NativeMenu(
     saveBusy: Boolean = false,
     saveBlockedReason: String? = null,
     saveNotice: ManualSaveNotice? = null,
+    backgroundHeadline: String? = null,
+    backgroundDetail: String? = null,
+    restoreNotice: String? = null,
     onPanelBack: () -> Unit = {},
     display: @Composable () -> Unit = {},
     diagnostics: @Composable () -> Unit = {},
@@ -110,9 +124,15 @@ fun NativeMenu(
         onExpandedChange(true)
     }
 
+    val inSubpanel = showDisplay || showDiagnostics
     BackHandler(enabled = expanded) {
-        Log.d(TAG, "NativeMenu: BackHandler closing menu (state=$state)")
-        onExpandedChange(false)
+        if (menuBackTarget(inSubpanel) == MenuBackTarget.PANEL) {
+            Log.d(TAG, "NativeMenu: BackHandler returning to actions (state=$state)")
+            onPanelBack()
+        } else {
+            Log.d(TAG, "NativeMenu: BackHandler closing menu (state=$state)")
+            onExpandedChange(false)
+        }
     }
 
     if (!expanded) return
@@ -151,12 +171,34 @@ fun NativeMenu(
             }
         }
 
-        if (showDisplay || showDiagnostics) {
+        if (inSubpanel) {
             HubTextButton(onClick = onPanelBack) {
                 Text("Back")
             }
             if (showDisplay) display() else diagnostics()
         } else {
+            val background = backgroundDetail
+            if (!backgroundHeadline.isNullOrBlank() && !background.isNullOrBlank()) {
+                Text(
+                    text = backgroundHeadline,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = background,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("background-detail"),
+                )
+            }
+            if (!restoreNotice.isNullOrBlank()) {
+                Text(
+                    text = restoreNotice,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.testTag("vault-restore-notice"),
+                )
+            }
             if (!saveBlockedReason.isNullOrBlank()) {
                 Text(
                     text = saveBlockedReason,

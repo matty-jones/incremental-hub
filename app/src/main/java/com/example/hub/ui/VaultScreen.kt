@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -73,6 +75,21 @@ import kotlinx.coroutines.launch
  * and the generation, so opening the vault or a fold does not rebuild it.
  */
 fun webViewIdentity(gameId: String, generation: Int): Pair<String, Int> = gameId to generation
+
+internal enum class VaultBackTarget {
+    TIMELINE,
+    LEAVE,
+}
+
+/** A snapshot goes back to the timeline. The timeline leaves the vault. */
+internal fun vaultBackTarget(detailOpen: Boolean): VaultBackTarget {
+    return if (detailOpen) VaultBackTarget.TIMELINE else VaultBackTarget.LEAVE
+}
+
+/** A committed restore returns to the game. Closing that screen does not undo it. */
+internal fun closeVaultAfterCommittedRestore(committed: Boolean): Boolean = committed
+
+internal fun cancelVaultPlanOnLeave(committed: Boolean): Boolean = !committed
 
 /**
  * Identity of the play-surface WebView. Vault visibility and the fold width
@@ -192,7 +209,16 @@ fun VaultHost(
         openReading(entry)
     }
 
-    BackHandler { onBack() }
+    val detailOpen = reading != null || !selectedId.isNullOrBlank()
+    BackHandler {
+        if (vaultBackTarget(detailOpen) == VaultBackTarget.TIMELINE) {
+            selectedId = null
+            reading = null
+            deletionPreview = null
+        } else {
+            onBack()
+        }
+    }
 
     VaultScreen(
         gameId = gameId,
@@ -378,8 +404,21 @@ fun VaultScreen(
                 title = "Vault",
                 subtitle = gameId,
                 navigationIcon = {
-                    HubTextButton(onClick = if (detail == null) onBack else onCloseDetail) {
-                        Text(if (detail == null) "Back" else "Timeline")
+                    if (detail != null || !pendingSnapshotId.isNullOrBlank()) {
+                        HubTextButton(
+                            onClick = onCloseDetail,
+                            modifier = Modifier.testTag("vault-to-timeline"),
+                        ) {
+                            Text("Timeline")
+                        }
+                    }
+                },
+                actions = {
+                    HubTextButton(
+                        onClick = onBack,
+                        modifier = Modifier.testTag("vault-close"),
+                    ) {
+                        Text("Close")
                     }
                 },
             )
@@ -440,6 +479,7 @@ fun VaultScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun VaultTimeline(
     browse: VaultBrowse?,
@@ -482,7 +522,13 @@ private fun VaultTimeline(
                 )
             }
             if (onExportGame != null && onExportAll != null && onImport != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) {
                     HubTextButton(onClick = onExportGame, modifier = Modifier.testTag("vault-export-game")) {
                         Text("Export game")
                     }

@@ -5,6 +5,7 @@ import com.example.hub.games.OfflineInspection
 import com.example.hub.games.SharkIncrementalAdapter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,7 +16,8 @@ class BackgroundRecoveryTest {
         val plan = plan(absence = agreed(10_000))
         assertEquals(ResumeAction.IGNORE, plan.action)
         assertFalse(plan.showBanner)
-        assertFalse(plan.offerCatchUp)
+        assertFalse(plan.mention)
+        assertNull(plan.report)
     }
 
     @Test
@@ -23,7 +25,10 @@ class BackgroundRecoveryTest {
         val plan = plan(absence = agreed(EIGHT_HOURS), gapSeconds = 8.0 * 3600, hashMatches = true)
         assertEquals(ResumeAction.AUTO, plan.action)
         assertTrue(plan.headline.contains("8h"))
-        assertFalse(plan.offerCatchUp)
+        assertFalse(plan.showBanner)
+        assertTrue(plan.mention)
+        assertNull(plan.report)
+        assertFalse(plan.detail.contains("ran"))
     }
 
     @Test
@@ -35,31 +40,58 @@ class BackgroundRecoveryTest {
             handled = true,
         )
         assertEquals(ResumeAction.ALREADY_APPLIED, plan.action)
-        assertFalse(plan.offerCatchUp)
+        assertFalse(plan.showBanner)
+        assertFalse(plan.mention)
+        assertNull(plan.report)
     }
 
     @Test
     fun aRunningLoopThatAlreadyMovedTheClockAsks() {
         val plan = plan(absence = agreed(EIGHT_HOURS), gapSeconds = 2.0, hashMatches = false)
         assertEquals(ResumeAction.ASK, plan.action)
-        assertTrue(plan.offerCatchUp)
-        assertTrue(plan.offerContinue)
-        assertTrue(plan.offerInspect)
+        assertFalse(plan.showBanner)
+        assertEquals(BACKGROUND_REPORT_SKIPPED, plan.report)
+        assertFalse(plan.detail.contains("ran"))
     }
 
     @Test
     fun disabledOfflineDoesNotCatchUp() {
         val plan = plan(absence = agreed(EIGHT_HOURS), gapSeconds = 8.0 * 3600, hashMatches = true, enabled = false)
         assertEquals(ResumeAction.DISABLED, plan.action)
-        assertFalse(plan.offerCatchUp)
+        assertFalse(plan.showBanner)
+        assertEquals(BACKGROUND_REPORT_SKIPPED, plan.report)
     }
 
     @Test
     fun aMissingCheckpointDoesNotCatchUp() {
         val plan = plan(absence = agreed(EIGHT_HOURS), committed = false, sha = null)
         assertEquals(ResumeAction.NO_CHECKPOINT, plan.action)
-        assertFalse(plan.offerCatchUp)
-        assertFalse(plan.offerInspect)
+        assertFalse(plan.showBanner)
+        assertEquals(BACKGROUND_REPORT_SKIPPED, plan.report)
+        assertFalse(plan.detail.contains("ran"))
+        assertEquals("8h · skipped", backgroundBarLabel(plan.elapsedLabel, plan.report))
+    }
+
+    @Test
+    fun aHandledCheckpointDoesNotCoverTheGame() {
+        val plan = plan(absence = agreed(EIGHT_HOURS), committed = false, sha = null, handled = true)
+        assertEquals(ResumeAction.ALREADY_APPLIED, plan.action)
+        assertFalse(plan.showBanner)
+        assertFalse(plan.mention)
+        assertNull(plan.report)
+    }
+
+    @Test
+    fun ranIsReportedOnlyAfterSettlement() {
+        val running = settledOfflineStatus(complete = false, saved = false)
+        assertEquals(BACKGROUND_REPORT_FAILED, running.first)
+        assertFalse(running.second.contains("ran"))
+        val saved = settledOfflineStatus(complete = true, saved = true)
+        assertEquals(BACKGROUND_REPORT_RAN, saved.first)
+        assertTrue(saved.second.contains("ran"))
+        val unsaved = settledOfflineStatus(complete = true, saved = false)
+        assertEquals(BACKGROUND_REPORT_RAN, unsaved.first)
+        assertTrue(unsaved.second.contains("not stored"))
     }
 
     @Test
@@ -67,22 +99,27 @@ class BackgroundRecoveryTest {
         val plan = plan(absence = wallOnly(EIGHT_HOURS), sameBoot = false)
         assertEquals(ResumeAction.DELEGATE_TO_LOAD, plan.action)
         assertFalse(plan.showBanner)
-        assertFalse(plan.offerCatchUp)
+        assertFalse(plan.mention)
+        assertNull(plan.report)
     }
 
     @Test
     fun anActiveSimulationIsNotStartedAgain() {
         val plan = plan(absence = agreed(EIGHT_HOURS), gapSeconds = 8.0 * 3600, hashMatches = true, active = true)
         assertEquals(ResumeAction.IN_PROGRESS, plan.action)
-        assertFalse(plan.offerCatchUp)
+        assertFalse(plan.showBanner)
+        assertNull(plan.report)
+        assertTrue(plan.mention)
     }
 
     @Test
     fun clockDisagreementDoesNotRunAutomatically() {
         val plan = plan(absence = MeasuredAbsence(EIGHT_HOURS, 5_000, ClockConfidence.DISAGREE))
         assertEquals(ResumeAction.ASK, plan.action)
+        assertFalse(plan.showBanner)
+        assertEquals(BACKGROUND_REPORT_SKIPPED, plan.report)
         assertFalse(plan.detail.contains("completed"))
-        assertTrue(plan.offerCatchUp)
+        assertFalse(plan.detail.contains("ran"))
     }
 
     @Test
@@ -113,7 +150,8 @@ class BackgroundRecoveryTest {
     fun anUnsupportedGameDoesNotOfferCatchUp() {
         val plan = plan(absence = agreed(EIGHT_HOURS), capability = OfflineCapability.UNSUPPORTED)
         assertEquals(ResumeAction.UNSUPPORTED, plan.action)
-        assertFalse(plan.offerCatchUp)
+        assertFalse(plan.showBanner)
+        assertEquals(BACKGROUND_REPORT_SKIPPED, plan.report)
         assertTrue(plan.detail.contains("no verified offline"))
     }
 
