@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.example.hub.session.SaveDiagnostic
 import com.example.hub.ui.chrome.HubOutlinedButton
 import com.example.hub.ui.chrome.HubPrimaryButton
+import com.example.hub.ui.chrome.HubWrappedText
 import com.example.hub.ui.chrome.OverlaySheet
 import java.text.DateFormat
 import java.util.Date
@@ -80,7 +81,7 @@ fun RecoveryOverlay(
             modifier = Modifier.fillMaxWidth(),
         )
         if (diagnostic == null) {
-            Text(
+            HubWrappedText(
                 text = buildString {
                     append("The session for ")
                     append(gameId)
@@ -96,12 +97,12 @@ fun RecoveryOverlay(
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
             )
             HubPrimaryButton(
                 onClick = onRetry,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("recovery-retry"),
             ) {
                 Text("Retry")
             }
@@ -353,7 +354,9 @@ fun RecoveryOverlay(
             }
         HubOutlinedButton(
             onClick = onClose,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("recovery-close"),
         ) {
             Text("Close")
         }

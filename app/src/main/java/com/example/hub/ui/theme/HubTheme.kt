@@ -32,6 +32,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.example.hub.R
 
 val HubWideWidth = 600.dp
+val HubReadingMaxWidth = 640.dp
 val HubChipCorner = 20.dp
 val HubSheetCorner = 28.dp
 

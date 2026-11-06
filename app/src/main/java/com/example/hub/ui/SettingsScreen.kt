@@ -3,9 +3,11 @@ package com.example.hub.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,6 +29,7 @@ import com.example.hub.ui.chrome.HubCard
 import com.example.hub.ui.chrome.HubPrimaryButton
 import com.example.hub.ui.chrome.HubScaffold
 import com.example.hub.ui.chrome.HubTopBar
+import com.example.hub.ui.chrome.hubReadableWidth
 
 /**
  * Version, the workstation update check, and the debug-tools switch.
@@ -50,7 +53,9 @@ fun SettingsScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.semantics { contentDescription = "Back" },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .semantics { contentDescription = "Back" },
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -61,10 +66,15 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(padding),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+        Column(
+            modifier = Modifier
+                .hubReadableWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -131,6 +141,7 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
         }
     }
 }

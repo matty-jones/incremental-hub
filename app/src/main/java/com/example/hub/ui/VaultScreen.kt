@@ -3,17 +3,22 @@ package com.example.hub.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -29,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -38,6 +44,8 @@ import com.example.hub.ui.chrome.HubOutlinedButton
 import com.example.hub.ui.chrome.HubScaffold
 import com.example.hub.ui.chrome.HubTextButton
 import com.example.hub.ui.chrome.HubTopBar
+import com.example.hub.ui.chrome.HubWrappedText
+import com.example.hub.ui.chrome.hubReadableWidth
 import com.example.hub.vault.IhubArchive
 import com.example.hub.vault.IhubExportResult
 import com.example.hub.vault.IhubOpenResult
@@ -96,9 +104,11 @@ fun VaultHost(
     onActivateImported: (suspend (VaultEntry) -> String)? = null,
     archive: VaultArchive? = null,
     deletion: SnapshotDeletion? = null,
+    initialSnapshotId: String? = null,
 ) {
     val scope = rememberCoroutineScope()
     var offset by rememberSaveable(gameId) { mutableIntStateOf(0) }
+    var selectedId by rememberSaveable(gameId) { mutableStateOf(initialSnapshotId) }
     var browse by remember(gameId) { mutableStateOf<VaultBrowse?>(null) }
     var reading by remember(gameId) { mutableStateOf<VaultReading?>(null) }
     var notice by remember(gameId) { mutableStateOf<String?>(null) }
@@ -155,8 +165,31 @@ fun VaultHost(
         }
     }
 
+    LaunchedEffect(initialSnapshotId) {
+        if (!initialSnapshotId.isNullOrBlank()) selectedId = initialSnapshotId
+    }
+
     LaunchedEffect(gameId) {
-        load(0, advanceRemote = true)
+        load(offset, advanceRemote = true)
+    }
+
+    suspend fun openReading(entry: VaultEntry) {
+        selectedId = entry.id
+        val payload = catalog.readPayload(entry)
+        reading = readSnapshot(gameId, entry, payload)
+        workstationCopy = catalog.workstationCopy(entry.gameId, entry.id)
+        deletionPreview = deletion?.preview(
+            entry.gameId,
+            entry.id,
+            workstationOnly = entry.residence == VaultResidence.REMOTE_ONLY,
+        )
+    }
+
+    LaunchedEffect(selectedId, browse) {
+        val id = selectedId ?: return@LaunchedEffect
+        if (reading?.entry?.id == id) return@LaunchedEffect
+        val entry = browse?.entries?.firstOrNull { it.id == id } ?: return@LaunchedEffect
+        openReading(entry)
     }
 
     BackHandler { onBack() }
@@ -179,18 +212,10 @@ fun VaultHost(
             scope.launch { load(offset, advanceRemote = true) }
         },
         onSelect = { entry ->
-            scope.launch {
-                val payload = catalog.readPayload(entry)
-                reading = readSnapshot(gameId, entry, payload)
-                workstationCopy = catalog.workstationCopy(entry.gameId, entry.id)
-                deletionPreview = deletion?.preview(
-                    entry.gameId,
-                    entry.id,
-                    workstationOnly = entry.residence == VaultResidence.REMOTE_ONLY,
-                )
-            }
+            scope.launch { openReading(entry) }
         },
         onCloseDetail = {
+            selectedId = null
             reading = null
             deletionPreview = null
         },
@@ -285,11 +310,13 @@ fun VaultHost(
                             val refreshed = load(offset, advanceRemote = false)
                             notice = outcome.message
                             if (outcome.deleted) {
+                                selectedId = null
                                 reading = null
                                 deletionPreview = null
                             } else {
                                 val current = refreshed.entries.firstOrNull { it.id == fingerprint.snapshotId }
                                 if (current == null) {
+                                    selectedId = null
                                     reading = null
                                     deletionPreview = null
                                 } else {
@@ -309,6 +336,7 @@ fun VaultHost(
                 }
             }
         },
+        pendingSnapshotId = selectedId,
         modifier = modifier,
     )
 }
@@ -337,9 +365,10 @@ fun VaultScreen(
     onImport: (() -> Unit)? = null,
     onExportSnapshot: ((VaultEntry) -> Unit)? = null,
     deletionPreview: DeletionDecision? = null,
-    workstationCopy: WorkstationCopy = WorkstationCopy.UNKNOWN,
-    onDeleteSnapshot: ((SnapshotFingerprint) -> Unit)? = null,
-    modifier: Modifier = Modifier,
+        workstationCopy: WorkstationCopy = WorkstationCopy.UNKNOWN,
+        onDeleteSnapshot: ((SnapshotFingerprint) -> Unit)? = null,
+        pendingSnapshotId: String? = null,
+        modifier: Modifier = Modifier,
 ) {
     val detail = reading
     HubScaffold(
@@ -373,19 +402,40 @@ fun VaultScreen(
                 onDeleteSnapshot = onDeleteSnapshot,
                 modifier = Modifier.padding(padding),
             )
+        } else if (!pendingSnapshotId.isNullOrBlank()) {
+            Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .testTag("vault-detail-pending"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                HubWrappedText("Opening snapshot $pendingSnapshotId.")
+                HubOutlinedButton(onClick = onCloseDetail, modifier = Modifier.fillMaxWidth()) {
+                    Text("Timeline")
+                }
+            }
         } else {
-            VaultTimeline(
-                browse = browse,
-                notice = notice,
-                onOlder = onOlder,
-                onNewer = onNewer,
-                onMoreRemote = onMoreRemote,
-                onSelect = onSelect,
-                onExportGame = onExportGame,
-                onExportAll = onExportAll,
-                onImport = onImport,
-                modifier = Modifier.padding(padding),
-            )
+            Box(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize(),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                VaultTimeline(
+                    browse = browse,
+                    notice = notice,
+                    onOlder = onOlder,
+                    onNewer = onNewer,
+                    onMoreRemote = onMoreRemote,
+                    onSelect = onSelect,
+                    onExportGame = onExportGame,
+                    onExportAll = onExportAll,
+                    onImport = onImport,
+                    modifier = Modifier.hubReadableWidth().fillMaxSize(),
+                )
+            }
         }
     }
 }
@@ -579,22 +629,37 @@ private fun VaultDetail(
     modifier: Modifier = Modifier,
 ) {
     val entry = reading.entry
+    val scroll = rememberSaveable(entry.id, saver = ScrollState.Saver) { ScrollState(0) }
+    val shown = plan?.takeIf { it.snapshotId == entry.id }
+    val confirmVisible = shown != null && shown.ready && onConfirmRestore != null && !shown.committed
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp)
             .testTag("vault-detail"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+        Column(
+            modifier = Modifier
+                .hubReadableWidth()
+                .verticalScroll(scroll)
+                .padding(16.dp)
+                .testTag("vault-detail-scroll"),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
         Text(entry.labels.joinToString(" · "), style = MaterialTheme.typography.titleMedium)
         Text("Captured ${formatCaptureTime(entry.capturedAtMillis)}")
         if (entry.sequence > 0L) Text("Sequence ${entry.sequence}")
         Text("Reason ${entry.reason}")
         Text("Source ${entry.origin}")
-        Text("Lineage ${entry.lineageId}")
+        HubWrappedText("Lineage ${entry.lineageId}")
         Text("Integrity ${entry.integrity}")
         val hash = reading.computedSha ?: entry.sha256.ifBlank { "not recorded" }
-        Text("SHA-256 $hash")
+        HubWrappedText("SHA-256 $hash")
         val match = reading.hashMatches
         if (match != null) {
             Text(if (match) "Hash matches the stored payload." else "Hash does not match the stored payload.")
@@ -621,10 +686,10 @@ private fun VaultDetail(
         }
         val missing = reading.unavailableReason
         if (!missing.isNullOrBlank()) {
-            Text(missing, color = MaterialTheme.colorScheme.error)
+            HubWrappedText(missing, color = MaterialTheme.colorScheme.error)
         }
         if (!notice.isNullOrBlank()) {
-            Text(notice, color = MaterialTheme.colorScheme.onSurface)
+            HubWrappedText(notice)
         }
         val stageRestore = onStageRestore
         val canRestore = stageRestore != null &&
@@ -662,37 +727,15 @@ private fun VaultDetail(
                 Text("Use this save")
             }
         }
-        val shown = plan?.takeIf { it.snapshotId == entry.id }
         if (shown != null) {
             Text("Source ${formatCaptureTime(shown.capturedAtMillis)}")
-            Text("Current save ${shown.currentDetail}")
-            Text("Selected save ${shown.sourceDetail}")
+            HubWrappedText("Current save ${shown.currentDetail}")
+            HubWrappedText("Selected save ${shown.sourceDetail}")
             val unordered = shown.unorderedNote
-            if (!unordered.isNullOrBlank()) Text(unordered)
-            Text(shown.message)
+            if (!unordered.isNullOrBlank()) HubWrappedText(unordered)
+            HubWrappedText(shown.message)
             if (shown.localBranch) {
                 Text("This phone is on a local lineage. The workstation pointer was not moved.")
-            }
-            if (shown.ready && onConfirmRestore != null && !shown.committed) {
-                if (shown.requiresBranch) {
-                    HubOutlinedButton(
-                        onClick = { onConfirmRestore(true) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("vault-restore-branch"),
-                    ) {
-                        Text("Restore on a new lineage")
-                    }
-                } else {
-                    HubOutlinedButton(
-                        onClick = { onConfirmRestore(false) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("vault-restore-confirm"),
-                    ) {
-                        Text("Confirm restore")
-                    }
-                }
             }
         }
         if (onProtect != null && onUnprotect != null) {
@@ -732,6 +775,7 @@ private fun VaultDetail(
                 onClick = { confirm = true },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .testTag("vault-delete"),
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.error,
@@ -749,17 +793,23 @@ private fun VaultDetail(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     title = { Text("Delete snapshot") },
                     text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 320.dp)
+                                .verticalScroll(rememberScrollState())
+                                .testTag("vault-delete-dialog"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             Text("Game ${entry.gameId}")
                             Text("Captured ${formatCaptureTime(entry.capturedAtMillis)}")
-                            Text("Snapshot ${entry.id}")
+                            HubWrappedText("Snapshot ${entry.id}")
                             Text("Snapshot reason ${entry.reason}")
-                            Text("Progress summary $progress")
+                            HubWrappedText("Progress summary $progress")
                             Text(
                                 "This deletion removes the local historical snapshot only. " +
                                     "The live save and every other snapshot stay.",
                             )
-                            Text(workstationCopyStatement(workstationCopy))
+                            HubWrappedText(workstationCopyStatement(workstationCopy))
                         }
                     },
                     confirmButton = {
@@ -768,7 +818,9 @@ private fun VaultDetail(
                                 confirm = false
                                 deleteSnapshot(fingerprint)
                             },
-                            modifier = Modifier.testTag("vault-delete-confirm"),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("vault-delete-confirm"),
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.error,
                             ),
@@ -779,12 +831,48 @@ private fun VaultDetail(
                     dismissButton = {
                         TextButton(
                             onClick = { confirm = false },
-                            modifier = Modifier.testTag("vault-delete-keep"),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("vault-delete-keep"),
                         ) {
                             Text("Keep snapshot")
                         }
                     },
                 )
+            }
+        }
+        }
+        }
+        val confirmRestore = onConfirmRestore
+        if (confirmVisible && shown != null && confirmRestore != null) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                Column(
+                    modifier = Modifier
+                        .hubReadableWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("vault-restore-confirmation"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (shown.requiresBranch) {
+                        HubOutlinedButton(
+                            onClick = { confirmRestore(true) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("vault-restore-branch"),
+                        ) {
+                            Text("Restore on a new lineage")
+                        }
+                    } else {
+                        HubOutlinedButton(
+                            onClick = { confirmRestore(false) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("vault-restore-confirm"),
+                        ) {
+                            Text("Confirm restore")
+                        }
+                    }
+                }
             }
         }
     }

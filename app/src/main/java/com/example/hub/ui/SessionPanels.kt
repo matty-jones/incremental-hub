@@ -20,12 +20,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.hub.session.DiagnosticEvent
 import com.example.hub.session.DiagnosticSeverity
 import com.example.hub.ui.chrome.HubOutlinedButton
 import com.example.hub.ui.chrome.HubTextButton
+import com.example.hub.ui.chrome.HubWrappedText
 import com.example.hub.ui.theme.hubWarning
 
 @Composable
@@ -196,7 +197,10 @@ fun DiagnosticsPanel(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HubOutlinedButton(onClick = { shareReport(context, report) }) {
+            HubOutlinedButton(
+                onClick = { shareReport(context, report) },
+                modifier = Modifier.testTag("diagnostics-export"),
+            ) {
                 Text("Export")
             }
             HubTextButton(onClick = { copyReport(context, report) }) {
@@ -218,12 +222,11 @@ fun DiagnosticsPanel(
                 )
             }
             events.asReversed().take(40).forEach { event ->
-                Text(
+                HubWrappedText(
                     text = "${event.severity.name.lowercase()} · ${event.category}: ${event.message}",
+                    modifier = Modifier.testTag("diagnostics-event"),
                     style = MaterialTheme.typography.bodySmall,
                     color = severityColor(event.severity),
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

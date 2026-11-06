@@ -46,6 +46,7 @@ import com.example.hub.database.GameInstanceDao
 import com.example.hub.games.GameRegistry
 import com.example.hub.games.RegisteredGame
 import com.example.hub.ui.chrome.HubCard
+import com.example.hub.ui.chrome.hubReadableWidth
 import com.example.hub.ui.chrome.HubChipKind
 import com.example.hub.ui.chrome.HubPrimaryButton
 import com.example.hub.ui.chrome.HubScaffold
@@ -104,6 +105,7 @@ fun LauncherScreen(
                     IconButton(
                         onClick = onOpenSettings,
                         modifier = Modifier
+                            .size(48.dp)
                             .testTag("open-settings")
                             .semantics { contentDescription = "Settings" },
                     ) {
@@ -117,10 +119,16 @@ fun LauncherScreen(
         },
     ) { padding ->
         val checkingWorkstation = !syncSettled && games.any { it.gameId !in snapshotIds }
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+        Column(
+            modifier = Modifier
+                .hubReadableWidth()
+                .fillMaxSize(),
         ) {
             if (checkingWorkstation) {
                 Text(
@@ -172,6 +180,7 @@ fun LauncherScreen(
                     }
                 }
             }
+        }
         }
     }
 }

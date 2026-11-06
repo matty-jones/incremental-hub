@@ -91,7 +91,7 @@ fun OverlaySheet(
                 .align(alignment)
                 .then(
                     if (wide) {
-                        Modifier.width(320.dp).fillMaxHeight()
+                        Modifier.width(440.dp).fillMaxHeight()
                     } else {
                         Modifier
                             .fillMaxWidth()
