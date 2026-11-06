@@ -1,5 +1,7 @@
 package com.example.hub.database
 
+import androidx.room.RoomDatabase
+import androidx.room.withTransaction
 import com.example.hub.vault.ActiveRestore
 import com.example.hub.vault.ExportHold
 import java.time.Instant
@@ -86,29 +88,45 @@ object SnapshotRetention {
         return extra
     }
 
+    /**
+     * Takes [ExportHold.guard] and only then opens [room]. Callers must not
+     * already be inside a Room transaction: the capture commit finishes first,
+     * and a failure here cannot roll that commit back.
+     */
     suspend fun prune(
         snapshotDao: SnapshotDao,
         instanceDao: GameInstanceDao,
         gameId: String,
         nowMillis: Long,
+        room: RoomDatabase? = null,
     ) {
         val existing = instanceDao.get(gameId) ?: return
         if (!existing.captureIncident.isNullOrBlank()) return
         beforeExclusion?.invoke()
         ExportHold.guard {
-            val instance = instanceDao.get(gameId) ?: return@guard
-            if (!instance.captureIncident.isNullOrBlank()) return@guard
-            val rows = snapshotDao.history(gameId)
-            val protectedIds = setOfNotNull(instance.highWaterSnapshotId) +
-                ExportHold.protectedIdsUnlocked() +
-                ActiveRestore.snapshotIdsUnlocked()
-            val keep = keepIds(rows, nowMillis, protectedIds)
-            val remove = rows
-                .filter { it.id !in keep && !isProtected(it, protectedIds) }
-                .map { it.id }
-            remove.chunked(DELETE_BATCH).forEach { ids ->
-                if (ids.isNotEmpty()) snapshotDao.deleteByIds(gameId, ids)
-            }
+            val body = suspend { pruneHeld(snapshotDao, instanceDao, gameId, nowMillis) }
+            if (room != null) room.withTransaction { body() } else body()
+        }
+    }
+
+    private suspend fun pruneHeld(
+        snapshotDao: SnapshotDao,
+        instanceDao: GameInstanceDao,
+        gameId: String,
+        nowMillis: Long,
+    ) {
+        val instance = instanceDao.get(gameId) ?: return
+        if (!instance.captureIncident.isNullOrBlank()) return
+        val rows = snapshotDao.history(gameId)
+        val protectedIds = setOfNotNull(instance.highWaterSnapshotId) +
+            ExportHold.protectedIdsUnlocked() +
+            ActiveRestore.snapshotIdsUnlocked()
+        val keep = keepIds(rows, nowMillis, protectedIds)
+        val remove = rows
+            .filter { it.id !in keep && !isProtected(it, protectedIds) }
+            .map { it.id }
+        remove.chunked(DELETE_BATCH).forEach { ids ->
+            if (ids.isNotEmpty()) snapshotDao.deleteByIds(gameId, ids)
         }
     }
 

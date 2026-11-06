@@ -19,7 +19,6 @@ import com.example.hub.database.GameInstanceDao
 import com.example.hub.database.SnapshotDao
 import com.example.hub.database.SnapshotReasons
 import com.example.hub.database.SnapshotRecord
-import com.example.hub.database.SnapshotRetention
 import com.example.hub.database.SyncOutboxDao
 import com.example.hub.database.SyncOutboxEntry
 import com.example.hub.database.enqueueAcceptedSnapshot
@@ -2618,7 +2617,6 @@ class SessionController(
             contentSha256 = PayloadDigest.sha256(payload),
         )
         dao.insert(record)
-        if (!pinned) SnapshotRetention.prune(dao, instanceDao, gameId, record.capturedAtMillis)
         return record
     }
 

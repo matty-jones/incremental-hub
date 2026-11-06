@@ -1,5 +1,6 @@
 package com.example.hub.session
 
+import android.util.Log
 import androidx.room.RoomDatabase
 import androidx.room.withTransaction
 import com.example.hub.database.GameInstance
@@ -57,7 +58,11 @@ class CaptureRepository(
     ): CaptureCommit {
         val apply = suspend { commitLocked(gameId, candidate, reason, adapter, sessionId, stillCurrent, manual) }
         val database = roomDatabase
-        return if (database != null) database.withTransaction { apply() } else apply()
+        val committed = if (database != null) database.withTransaction { apply() } else apply()
+        if (committed.disposition == CaptureDisposition.STORED) {
+            pruneAfterCommit(gameId)
+        }
+        return committed
     }
 
     suspend fun openLineage(
@@ -296,7 +301,6 @@ class CaptureRepository(
                 releaseSupersededAnchor(instance, previousAnchor, adapter, now)
             }
         }
-        if (snapshotId != null) pruneAccepted(instance.gameId, now)
         if (snapshotId != null) {
             enqueueCommitted(
                 instance = updated,
@@ -528,7 +532,6 @@ class CaptureRepository(
             return false
         }
         insertSnapshot(instance, payload, reason, pinned, adapter, now, sha)
-        pruneAccepted(instance.gameId, now)
         return true
     }
 
@@ -843,12 +846,23 @@ class CaptureRepository(
         )
     }
 
-    private suspend fun pruneAccepted(gameId: String, now: Long) {
+    /**
+     * Retention runs after the snapshot, pointer, and outbox commit. A pruning
+     * failure leaves that commit in place.
+     */
+    private suspend fun pruneAfterCommit(gameId: String) {
         val dao = snapshotDao ?: return
-        SnapshotRetention.prune(dao, instanceDao, gameId, now)
+        try {
+            SnapshotRetention.prune(dao, instanceDao, gameId, clock(), roomDatabase)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Automatic pruning failed after the save committed for $gameId", error)
+        }
     }
 
     private companion object {
         const val SAMPLE_WINDOW_MS = 60L * 60L * 1000L
+        const val TAG = "CaptureRepository"
     }
 }
