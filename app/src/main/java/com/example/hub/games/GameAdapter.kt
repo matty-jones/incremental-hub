@@ -201,6 +201,25 @@ interface GameAdapter {
      */
     fun captureDecline(): String? = null
 
+    /** Verified offline behaviour. Adapters without a proven path stay unsupported. */
+    fun offlineSupport(): OfflineSupport = OfflineSupport.unsupported()
+
+    /** Read clocks and flags without calling the game's save routine. */
+    suspend fun inspectOffline(webView: WebView): OfflineInspection = OfflineInspection.unsupported()
+
+    /**
+     * Start the game's own offline calculation. The default refuses.
+     * An implementation must not accept an elapsed time chosen by Hub.
+     */
+    suspend fun startNativeOffline(webView: WebView): OfflineStart = OfflineStart.UNSUPPORTED
+
+    /** Wait until a started calculation has finished or the timeout expires. */
+    suspend fun awaitOfflineSettlement(webView: WebView, timeoutMs: Long = 45_000L): OfflineSettlement =
+        OfflineSettlement.UNSUPPORTED
+
+    /** Replace the stored save without calling save() or moving a Hub pointer. */
+    suspend fun replaceStoredSave(webView: WebView, payload: String): Boolean = false
+
     /**
      * [ACCEPTED] enters play. [REJECTED] rolls the restore back.
      * [DEFERRED] keeps the restored keys and does not capture.

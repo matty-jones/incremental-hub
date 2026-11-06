@@ -80,6 +80,7 @@ fun PlaySurface(
     val saveNotice by controller.manualSaveNotice.collectAsState()
     val saveBusy by controller.manualSaveInFlight.collectAsState()
     val captureBlockReason by controller.captureBlockReason.collectAsState()
+    val backgroundNotice by controller.backgroundNotice.collectAsState()
     val smallestWidth = LocalConfiguration.current.smallestScreenWidthDp
     val trimpsInset = with(LocalDensity.current) {
         TrimpsFrame.bottomInsetPx(gameId, smallestWidth).toDp()
@@ -91,6 +92,7 @@ fun PlaySurface(
     var menuOpen by remember(gameId) { mutableStateOf(false) }
     var menuPanel by remember(gameId) { mutableStateOf(MenuPanel.Actions) }
     var vaultOpen by rememberSaveable(gameId) { mutableStateOf(false) }
+    var vaultFocusId by remember { mutableStateOf<String?>(null) }
 
     ImmersiveSystemBars()
 
@@ -259,6 +261,7 @@ fun PlaySurface(
                             protection = vaultProtection,
                             archive = vaultArchive,
                             deletion = snapshotDeletion,
+                            initialSnapshotId = vaultFocusId,
                             plan = vaultPlan,
                             onStageRestore = { entry ->
                                 controller.stageVaultRestore(entry.id, entry.lineageId)
@@ -271,6 +274,22 @@ fun PlaySurface(
                                 vaultOpen = false
                             },
                             modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
+                    val recovery = backgroundNotice
+                    if (recovery != null && recovery.gameId == gameId && !vaultOpen &&
+                        state !is SessionState.RecoveryRequired
+                    ) {
+                        BackgroundRecoveryBanner(
+                            notice = recovery,
+                            onCatchUp = { controller.confirmBackgroundCatchUp() },
+                            onContinue = { controller.continueBackgroundSession() },
+                            onInspect = {
+                                vaultFocusId = recovery.checkpointId
+                                if (vaultCatalog != null) vaultOpen = true
+                            },
+                            modifier = Modifier.align(Alignment.BottomCenter),
                         )
                     }
 

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Shark offline runtime</title></head>
+<body>
+<script>
+var FPS = 30;
+var date = Date.now();
+var player = {
+  latest_time: Date.now(),
+  fish: 0,
+  radios: { offline: 1 }
+};
+var offline = { active: false, nosave: false, speed: 10, elapsed: 0 };
+var __offlineDt = 0;
+var __liveDt = 0;
+function el() { return { style: {}, innerHTML: "" }; }
+function resetCanvasGraph() {}
+function updateCanvasGraph() {}
+function updateTemp() {}
+function addGraphPlot() {}
+function lang_text() { return ""; }
+var graphs = { offline: { max_graph_x: 0 } };
+
+function calc(dt) {
+  player.latest_time = Date.now();
+  if (offline.active) __offlineDt += dt;
+  else __liveDt += dt;
+}
+
+function loop() {
+  if (offline.active) return;
+  var diff = (Date.now() - date) / 1000;
+  calc(diff);
+  date = Date.now();
+}
+
+function offlineDone() {
+  offline.active = false;
+}
+
+function simulateOffline(time) {
+  if (offline.active) return;
+  offline.nosave = offline.active = true;
+  offline.speed = Math.max(12, time / 5);
+  offline.elapsed = 0;
+  el("app").style.display = "none";
+  el("offline").style.display = "";
+  resetCanvasGraph("offline");
+  var d = new Date();
+  el("offline-time").innerHTML = (d.getDate() == 1 && d.getMonth() == 3 ? "" : "") + lang_text("offline-time-text", time);
+  graphs.offline.max_graph_x = time;
+  addGraphPlot("offline", 0, player.fish, false);
+  date = Date.now();
+  var tt = 0;
+  var update_graph = setInterval(updateCanvasGraph, 1000 / FPS, "offline");
+  var ol = setInterval(function () {
+    updateTemp();
+    var diff = (Date.now() - date) / 1000;
+    var dt = Math.min(time, offline.elapsed + diff * offline.speed) - offline.elapsed;
+    tt += diff;
+    calc(dt);
+    offline.elapsed += dt;
+    date = Date.now();
+    addGraphPlot("offline", offline.elapsed, player.fish, false);
+    if (offline.elapsed >= time) {
+      updateCanvasGraph("offline");
+      offline.nosave = false;
+      clearInterval(ol);
+      clearInterval(update_graph);
+      el("offline-done").style.display = "";
+    }
+  }, 1000 / FPS);
+}
+
+function ageSeconds(seconds) {
+  player.latest_time = Date.now() - seconds * 1000;
+  date = player.latest_time;
+  offline.active = false;
+  offline.nosave = false;
+  offline.elapsed = 0;
+  __offlineDt = 0;
+  __liveDt = 0;
+}
+
+function counters() {
+  return JSON.stringify({
+    offline: __offlineDt,
+    live: __liveDt,
+    elapsed: offline.elapsed,
+    latest: player.latest_time,
+    now: Date.now(),
+    active: offline.active,
+    nosave: offline.nosave
+  });
+}
+</script>
+</body>
+</html>

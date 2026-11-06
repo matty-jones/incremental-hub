@@ -91,6 +91,50 @@ class SharkIncrementalAdapter : GameAdapter {
         private const val JS_SET_SAVE =
             "(function(){ localStorage.setItem('$SAVE_KEY', __PAYLOAD__); return true; })()"
 
+        /**
+         * Reads Shark's clock and storage. The payload is hashed by the adapter
+         * and is not written into Hub diagnostics.
+         */
+        internal const val JS_INSPECT_OFFLINE =
+            "(function(){ try {" +
+                " if (typeof player === 'undefined' || player === null) return 'missing';" +
+                " var calc = (typeof offline !== 'undefined' && offline) ? offline : null;" +
+                " return JSON.stringify({" +
+                " latestTime: (typeof player.latest_time === 'number') ? player.latest_time : null," +
+                " now: Date.now()," +
+                " enabled: !!(player.radios && player.radios.offline)," +
+                " active: !!(calc && calc.active)," +
+                " nosave: !!(calc && calc.nosave)," +
+                " elapsed: (calc && typeof calc.elapsed === 'number') ? calc.elapsed : 0," +
+                " storage: localStorage.getItem('$SAVE_KEY')" +
+                " });" +
+                " } catch (e) { return 'error'; } })()"
+
+        /**
+         * Shark's load path is `simulateOffline((Date.now()-player.latest_time)/1000)`.
+         * This calls that function. It does not take a duration from Hub.
+         */
+        internal const val JS_START_OFFLINE =
+            "(function(){ try {" +
+                " if (typeof player === 'undefined' || player === null || typeof simulateOffline !== 'function') return 'unsupported';" +
+                " var calc = (typeof offline !== 'undefined' && offline) ? offline : null;" +
+                " if (calc && (calc.active || calc.nosave)) return 'busy';" +
+                " if (!player.radios || !player.radios.offline) return 'disabled';" +
+                " var gap = (Date.now() - player.latest_time) / 1000;" +
+                " if (!(gap > 60)) return 'short';" +
+                " simulateOffline(gap);" +
+                " return 'started';" +
+                " } catch (e) { return 'error'; } })()"
+
+        internal const val JS_OFFLINE_PHASE =
+            "(function(){ try {" +
+                " if (typeof offline === 'undefined' || !offline) return 'missing';" +
+                " if (offline.nosave) return 'running';" +
+                " if (typeof offline.elapsed === 'number' && offline.elapsed > 0) return 'settled';" +
+                " if (offline.active) return 'running';" +
+                " return 'idle';" +
+                " } catch (e) { return 'error'; } })()"
+
         /** Minimal Shark save used only by the qualification injector. */
         internal const val QUALIFICATION_FIXTURE =
             "eyJWRVJTSU9OIjozLCJnb2xkIjoxMDAwLCJjbGlja3MiOjUwfQ=="
@@ -232,6 +276,82 @@ class SharkIncrementalAdapter : GameAdapter {
 
     override fun chooseStored(candidates: List<String>): String? = SharkProgress.chooseStored(candidates)
 
+    override fun offlineSupport(): OfflineSupport = OfflineSupport(
+        OfflineCapability.NATIVE_ON_RESUME,
+        "Shark calculates offline progress in loadGame when the save is more than 60 seconds old " +
+            "and the offline radio is on. The same simulateOffline function can run on a frozen page " +
+            "whose latest_time has not moved. Hub does not pass its own duration into that function.",
+    )
+
+    override suspend fun inspectOffline(webView: WebView): OfflineInspection {
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_INSPECT_OFFLINE) }
+        } catch (_: Exception) {
+            return OfflineInspection.unsupported()
+        }
+        val text = unwrapJsResult(raw) ?: return OfflineInspection.unsupported()
+        if (text == "missing" || text == "error") return OfflineInspection.unsupported()
+        val json = try {
+            JSONObject(text)
+        } catch (_: Exception) {
+            return OfflineInspection.unsupported()
+        }
+        val storage = json.optString("storage").takeIf { it.isNotBlank() && it != "null" }
+        return OfflineInspection(
+            supported = true,
+            latestTimeMillis = json.optLongOrNull("latestTime"),
+            gameNowMillis = json.optLongOrNull("now"),
+            offlineEnabled = json.optBoolean("enabled"),
+            simulationActive = json.optBoolean("active"),
+            blocksSave = json.optBoolean("nosave"),
+            payloadSha256 = storage?.let { PayloadDigest.sha256(it) },
+        )
+    }
+
+    override suspend fun startNativeOffline(webView: WebView): OfflineStart {
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJs(webView, JS_START_OFFLINE) }
+        } catch (_: Exception) {
+            return OfflineStart.FAILED
+        }
+        return when (unwrapJsResult(raw)) {
+            "started" -> OfflineStart.STARTED
+            "busy" -> OfflineStart.BUSY
+            "disabled" -> OfflineStart.DISABLED
+            "short" -> OfflineStart.SHORT
+            "unsupported", "missing" -> OfflineStart.UNSUPPORTED
+            else -> OfflineStart.FAILED
+        }
+    }
+
+    override suspend fun awaitOfflineSettlement(webView: WebView, timeoutMs: Long): OfflineSettlement {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val phase = try {
+                unwrapJsResult(withTimeoutOrNull(500L) { evaluateJs(webView, JS_OFFLINE_PHASE) })
+            } catch (_: Exception) {
+                null
+            }
+            when (phase) {
+                "settled" -> return OfflineSettlement.COMPLETE
+                "running", null -> Unit
+                "missing", "error" -> return OfflineSettlement.UNSUPPORTED
+                else -> return OfflineSettlement.INTERRUPTED
+            }
+            kotlinx.coroutines.delay(200L)
+        }
+        return OfflineSettlement.INTERRUPTED
+    }
+
+    override suspend fun replaceStoredSave(webView: WebView, payload: String): Boolean {
+        val raw = try {
+            withTimeoutOrNull(5_000L) { evaluateJsArg(webView, JS_SET_SAVE, payload) }
+        } catch (_: Exception) {
+            return false
+        }
+        return unwrapJsResult(raw) == "true"
+    }
+
     override suspend fun acceptsRuntime(webView: WebView, importedPayload: String): Boolean {
         val expected = SharkProgress.parsePayload(importedPayload) ?: return false
         val raw = try {
@@ -260,5 +380,14 @@ class SharkIncrementalAdapter : GameAdapter {
         val cb: ValueCallback<String?> = ValueCallback { deferred.complete(it) }
         webView.evaluateJavascript(jsWithArg, cb)
         return deferred.await()
+    }
+}
+
+private fun JSONObject.optLongOrNull(name: String): Long? {
+    if (!has(name) || isNull(name)) return null
+    val value = opt(name)
+    return when (value) {
+        is Number -> value.toLong()
+        else -> null
     }
 }
