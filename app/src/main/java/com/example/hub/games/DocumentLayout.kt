@@ -14,7 +14,9 @@ object DocumentLayout {
         val limit = limitCssPx.coerceAtLeast(0)
         return "(function(){" +
             "window.__hubLayoutLimit = $limit;" +
-            "if (window.__hubLayoutFit) { window.__hubLayoutFit(); return '$MARKER'; }" +
+            "if (window.__hubLayoutInstalled) {" +
+            " if (window.__hubLayoutFit) window.__hubLayoutFit();" +
+            " return '$MARKER'; }" +
             "var SPATIAL = '#evolution-tree,#decay-chain,#runes-div,#rune-grid,#core-assembler-grid,#solar-system';" +
             "var SKIP = '#tooltip-div,#popup,#offline,#notify,#hadron-cutscene,#omni-cutscene,#black-hole,#title-center,#offlineWrapper,#main-background';" +
             "function bad(el) {" +
@@ -251,14 +253,15 @@ object DocumentLayout {
             " pending = true;" +
             " setTimeout(function(){ pending = false; fit(); }, 120);" +
             "}" +
-            "window.__hubLayoutFit = fit;" +
-            "window.addEventListener('resize', schedule);" +
-            "if (window.visualViewport) window.visualViewport.addEventListener('resize', schedule);" +
-            "document.addEventListener('click', schedule, true);" +
+            "function watchOne(obs, node, options) {" +
+            " if (!node || node.nodeType !== 1) return false;" +
+            " try { obs.observe(node, options); return true; } catch (e) { return false; }" +
+            "}" +
             "var tabObs = new MutationObserver(function(records){" +
             " var changed = false;" +
             " for (var i = 0; i < records.length; i++) {" +
             " var tab = records[i].target;" +
+            " if (!tab || tab.nodeType !== 1) continue;" +
             " var showing = getComputedStyle(tab).display !== 'none';" +
             " if (tab.__hubShowing !== showing) {" +
             " tab.__hubShowing = showing; changed = true; }" +
@@ -268,21 +271,19 @@ object DocumentLayout {
             "function watchTabs() {" +
             " var tabs = document.querySelectorAll('[id' + '$=' + '\"-tab\"]');" +
             " for (var t = 0; t < tabs.length; t++) {" +
-            " if (tabs[t].__hubWatch) continue;" +
-            " tabs[t].__hubWatch = true;" +
+            " if (!tabs[t] || tabs[t].nodeType !== 1 || tabs[t].__hubWatch) continue;" +
             " tabs[t].__hubShowing = getComputedStyle(tabs[t]).display !== 'none';" +
-            " tabObs.observe(tabs[t], {attributes:true, attributeFilter:['style','class']});" +
+            " if (watchOne(tabObs, tabs[t], {attributes:true, attributeFilter:['style','class']})) {" +
+            " tabs[t].__hubWatch = true; }" +
             " }" +
             "}" +
-            "watchTabs();" +
             "function markBoard(node) {" +
             " if (!node || node.nodeType !== 1) return;" +
             " var board = (node.matches && node.matches(SPATIAL)) ? node :" +
             " (node.closest ? node.closest(SPATIAL) : null);" +
             " if (board) board.setAttribute('data-hub-dirty', '1');" +
             "}" +
-            "var app = document.getElementById('app') || document.body;" +
-            "new MutationObserver(function(records){" +
+            "var appObs = new MutationObserver(function(records){" +
             " var structural = false;" +
             " for (var i = 0; i < records.length; i++) {" +
             " var target = records[i].target;" +
@@ -305,9 +306,52 @@ object DocumentLayout {
             " }" +
             " if (!structural) return;" +
             " watchTabs(); schedule();" +
-            "}).observe(app, {childList:true, subtree:true});" +
-            "fit();" +
-            "return '$MARKER';" +
+            "});" +
+            "function install() {" +
+            " if (window.__hubLayoutInstalled) {" +
+            " if (window.__hubLayoutFit) window.__hubLayoutFit();" +
+            " return '$MARKER'; }" +
+            " var root = document.body;" +
+            " if (!root || root.nodeType !== 1) return 'no-body';" +
+            " var app = document.getElementById('app') || root;" +
+            " if (!app || app.nodeType !== 1) return 'no-body';" +
+            " if (!window.__hubLayoutListening) {" +
+            " window.__hubLayoutListening = 1;" +
+            " window.addEventListener('resize', schedule);" +
+            " if (window.visualViewport) window.visualViewport.addEventListener('resize', schedule);" +
+            " document.addEventListener('click', schedule, true);" +
+            " }" +
+            " watchTabs();" +
+            " if (!watchOne(appObs, app, {childList:true, subtree:true})) return 'no-body';" +
+            " window.__hubLayoutFit = fit;" +
+            " window.__hubLayoutInstalled = 1;" +
+            " window.__hubLayoutInstalls = (window.__hubLayoutInstalls || 0) + 1;" +
+            " fit();" +
+            " return '$MARKER';" +
+            "}" +
+            "function armWait() {" +
+            " if (window.__hubLayoutWait) return;" +
+            " window.__hubLayoutWait = 1;" +
+            " function kick() {" +
+            " if (window.__hubLayoutInstalled) return;" +
+            " if (install() === '$MARKER' && window.__hubLayoutBootObs) {" +
+            " try { window.__hubLayoutBootObs.disconnect(); } catch (e) {}" +
+            " window.__hubLayoutBootObs = null; }" +
+            " }" +
+            " document.addEventListener('DOMContentLoaded', kick);" +
+            " var docEl = document.documentElement;" +
+            " if (docEl && docEl.nodeType === 1) {" +
+            " var boot = new MutationObserver(function() {" +
+            " if (!document.body || document.body.nodeType !== 1) return;" +
+            " try { boot.disconnect(); } catch (e) {}" +
+            " kick();" +
+            " });" +
+            " if (watchOne(boot, docEl, {childList:true})) window.__hubLayoutBootObs = boot;" +
+            " }" +
+            "}" +
+            "var ready = install();" +
+            "if (ready === 'no-body' && (!document.body || document.body.nodeType !== 1)) armWait();" +
+            "return ready;" +
             "})()"
     }
 }

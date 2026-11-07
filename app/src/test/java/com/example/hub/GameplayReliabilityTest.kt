@@ -172,6 +172,16 @@ class GameplayReliabilityTest {
         assertFalse(script.contains("removeAttribute('data-hub-room')"))
         assertFalse(script.contains("localStorage"))
         assertFalse(script.contains("location.reload"))
+        val body = script.indexOf("var root = document.body;")
+        val assign = script.indexOf("window.__hubLayoutFit = fit;")
+        assertTrue(body in 0 until assign)
+        assertTrue(script.indexOf("if (window.__hubLayoutInstalled)") in 0 until assign)
+        assertTrue(script.contains("if (!watchOne(appObs, app, {childList:true, subtree:true})) return 'no-body';"))
+        assertTrue(script.contains("DOMContentLoaded"))
+        assertTrue(script.contains("document.documentElement"))
+        assertTrue(script.contains("function armWait()"))
+        assertFalse(script.contains("}).observe(app,"))
+        assertFalse(script.contains("if (window.__hubLayoutFit) { window.__hubLayoutFit(); return"))
     }
 
     @Test

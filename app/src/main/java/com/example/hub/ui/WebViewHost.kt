@@ -22,6 +22,7 @@ import androidx.webkit.WebViewFeature
 import com.example.hub.games.DocumentLayout
 import com.example.hub.games.SharkLayout
 import com.example.hub.games.TrimpsLayout
+import com.example.hub.games.unwrapJsResult
 import com.example.hub.session.DiagnosticSeverity
 import com.example.hub.session.DocumentGate
 import com.example.hub.session.SessionState
@@ -522,8 +523,13 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
         if (isSharkUrl(url)) webView.evaluateJavascript(SharkLayout.injectionScript(), null)
         if (url.contains("trimps.github.io")) webView.evaluateJavascript(TrimpsLayout.injectionScript(), null)
         if (wantsDocumentLayout(url)) {
-            webView.evaluateJavascript(DocumentLayout.injectionScript(expectW), null)
-            slot.layoutAppliedForUrl = url
+            val layoutUrl = url
+            webView.evaluateJavascript(DocumentLayout.injectionScript(expectW)) { raw ->
+                val current = runCatching { webView.url }.getOrNull()
+                if (unwrapJsResult(raw) == DocumentLayout.MARKER && current == layoutUrl) {
+                    slot.layoutAppliedForUrl = layoutUrl
+                }
+            }
         }
     }
     Log.i(
