@@ -185,6 +185,106 @@ class SharkProgressTest {
         assertEquals(emptyList<String>(), rejected)
     }
 
+    @Test
+    fun blackHoleResetIsAheadWhenBestCountRisesBelowThree() {
+        val before = resource("before-black-hole.b64")
+        val after = resource("after-black-hole.b64")
+        val beforeProgress = SharkProgress.parsePayload(before)!!
+        val afterProgress = SharkProgress.parsePayload(after)!!
+        assertEquals(16, beforeProgress.feature)
+        assertEquals(2865L, beforeProgress.prestigeTimes)
+        assertEquals(1200L, beforeProgress.coreTimes)
+        assertEquals(410L, beforeProgress.humanoidTimes)
+        assertFalse(beforeProgress.singularityFirst)
+        assertEquals(0L, beforeProgress.bestBlackHoles)
+        assertEquals(0, afterProgress.feature)
+        assertEquals(0L, afterProgress.prestigeTimes)
+        assertEquals(0L, afterProgress.coreTimes)
+        assertEquals(0L, afterProgress.humanoidTimes)
+        assertTrue(afterProgress.singularityFirst)
+        assertEquals(1L, afterProgress.bestBlackHoles)
+        assertTrue(afterProgress.detail().contains("black holes 1"))
+        assertEquals(ProgressionClass.ADVANCED, SharkProgress.classifyCapture(after, before))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(before, after))
+        assertEquals(SaveComparison.LIVE_AHEAD, SharkProgress.compare(after, before))
+        assertEquals(after, SharkProgress.chooseStored(listOf(before, after)))
+        val dropped = encode(JSONObject(String(Base64.getDecoder().decode(before))).put("feature", 0))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(dropped, before))
+    }
+
+    @Test
+    fun repeatedBlackHoleResetsFollowTheTierFloors() {
+        val first = hole(feature = 16, prestige = 2865, core = 1200, humanoid = 410, best = "0")
+        val second = hole(feature = 0, prestige = 0, core = 0, humanoid = 0, best = "2")
+        assertEquals(ProgressionClass.ADVANCED, SharkProgress.classifyCapture(second, first))
+        val held = hole(feature = 16, prestige = 10, core = 4, humanoid = 2, best = "2")
+        val tierThree = hole(feature = 12, prestige = 10, core = 4, humanoid = 2, best = "3")
+        val belowFloor = hole(feature = 11, prestige = 10, core = 4, humanoid = 2, best = "3")
+        val droppedCounter = hole(feature = 12, prestige = 9, core = 4, humanoid = 2, best = "3")
+        assertEquals(ProgressionClass.ADVANCED, SharkProgress.classifyCapture(tierThree, held))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(belowFloor, held))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(droppedCounter, held))
+        val tierSeven = hole(feature = 13, prestige = 10, core = 4, humanoid = 2, best = "7")
+        val sevenLow = hole(feature = 12, prestige = 10, core = 4, humanoid = 2, best = "7")
+        assertEquals(ProgressionClass.ADVANCED, SharkProgress.classifyCapture(tierSeven, tierThree))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(sevenLow, tierThree))
+        val tierEight = hole(feature = 16, prestige = 10, core = 4, humanoid = 2, best = "8")
+        val eightDrop = hole(feature = 15, prestige = 10, core = 4, humanoid = 2, best = "8")
+        val eightAgain = hole(feature = 16, prestige = 10, core = 4, humanoid = 2, best = "8")
+        assertEquals(ProgressionClass.ADVANCED, SharkProgress.classifyCapture(tierEight, tierSeven))
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(eightAgain, tierEight))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(eightDrop, tierEight))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(tierSeven, tierEight))
+        val flipped = hole(feature = 16, prestige = 10, core = 4, humanoid = 2, best = "0", first = false)
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(flipped, tierEight))
+        val inconsistent = hole(feature = 16, prestige = 10, core = 4, humanoid = 2, best = "1", first = false)
+        assertEquals(ProgressionClass.INCOMPARABLE, SharkProgress.classifyCapture(inconsistent, tierEight))
+        val missing = hole(feature = 0, prestige = 0, core = 0, humanoid = 0, best = null, first = true)
+        assertEquals(ProgressionClass.INCOMPARABLE, SharkProgress.classifyCapture(missing, first))
+    }
+
+    @Test
+    fun bestBlackHoleCountIsAnExactInteger() {
+        val text = hole(feature = 0, prestige = 0, core = 0, humanoid = 0, best = "1")
+        val parsed = SharkProgress.parsePayload(text)!!
+        val obj = JSONObject(String(Base64.getDecoder().decode(text)))
+        obj.getJSONObject("singularity").put(
+            "best_bh",
+            JSONObject().put("s", 1).put("e", 0).put("c", JSONArray().put(1)),
+        )
+        val fromObject = encode(obj)
+        assertEquals(parsed.bestBlackHoles, SharkProgress.parsePayload(fromObject)!!.bestBlackHoles)
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(fromObject, text))
+        val eight = hole(feature = 0, prestige = 0, core = 0, humanoid = 0, best = "8")
+        assertTrue(SharkProgress.parsePayload(eight)!!.bestBlackHoles > parsed.bestBlackHoles)
+        assertFalse(SharkProgress.acceptsRuntime(parsed, SharkProgress.parsePayload(eight)!!))
+        assertTrue(SharkProgress.acceptsRuntime(parsed, SharkProgress.parsePayload(fromObject)!!))
+    }
+
+    private fun hole(
+        feature: Int,
+        prestige: Long,
+        core: Long,
+        humanoid: Long,
+        best: String?,
+        first: Boolean = best != null && best != "0",
+    ): String {
+        val singularity = JSONObject().put("first", first)
+        if (best != null) singularity.put("best_bh", best)
+        return encode(
+            JSONObject()
+                .put("VERSION", 3)
+                .put("feature", feature)
+                .put("totalTimePlayed", 1000)
+                .put("shark_level", "1")
+                .put("total_fish", "1")
+                .put("prestige", JSONObject().put("times", prestige))
+                .put("core", JSONObject().put("times", core))
+                .put("humanoid", JSONObject().put("times", humanoid))
+                .put("singularity", singularity),
+        )
+    }
+
     private fun resource(name: String): String {
         val stream = javaClass.classLoader!!.getResourceAsStream("shark/$name")
             ?: error("Missing fixture shark/$name")

@@ -10,9 +10,11 @@ data class SharkMilestones(
     val core: Long,
     val humanoid: Long,
     val singularity: Boolean,
+    val bestBlackHoles: Long,
 ) {
     fun detail(): String {
-        return "feature $feature, prestige $prestige, core $core, humanoid $humanoid, singularity $singularity"
+        return "feature $feature, prestige $prestige, core $core, humanoid $humanoid, " +
+            "singularity $singularity, black holes $bestBlackHoles"
     }
 }
 
@@ -35,8 +37,8 @@ fun storedProgressDetail(progressJson: String?): String? {
 
 /**
  * Milestone text for one payload. Shark currencies stay on [com.example.hub.games.DecimalRank]
- * and are not converted through floating point. The vault shows the five
- * monotonic milestones, not the currency magnitude.
+ * and are not converted through floating point. The vault shows feature,
+ * prestige, core, humanoid, singularity, and the black-hole count.
  */
 fun readSnapshot(gameId: String, entry: VaultEntry, payload: String?): VaultReading {
     if (payload == null) {
@@ -86,6 +88,7 @@ fun sharkMilestones(payload: String): SharkMilestones? {
         core = progress.coreTimes,
         humanoid = progress.humanoidTimes,
         singularity = progress.singularityFirst,
+        bestBlackHoles = progress.bestBlackHoles,
     )
 }
 

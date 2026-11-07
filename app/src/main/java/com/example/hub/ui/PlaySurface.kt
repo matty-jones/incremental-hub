@@ -80,6 +80,7 @@ fun PlaySurface(
     val saveNotice by controller.manualSaveNotice.collectAsState()
     val saveBusy by controller.manualSaveInFlight.collectAsState()
     val captureBlockReason by controller.captureBlockReason.collectAsState()
+    val forceSavePrompt by controller.forceSavePrompt.collectAsState()
     val backgroundNotice by controller.backgroundNotice.collectAsState()
     val smallestWidth = LocalConfiguration.current.smallestScreenWidthDp
     val trimpsInset = with(LocalDensity.current) {
@@ -205,6 +206,7 @@ fun PlaySurface(
                                         controller.requestForeground()
                                     }
                                     MenuAction.Save -> controller.requestCheckpoint()
+                                    MenuAction.ForceSave -> controller.requestForceSavePrompt()
                                     MenuAction.Reload -> controller.requestReload()
                                     MenuAction.Vault -> {
                                         menuOpen = false
@@ -309,6 +311,8 @@ fun PlaySurface(
                             onClose = { exitSession() },
                             onExport = { shareReport(context, controller.diagnosticReport()) },
                             onKeepWebView = { controller.keepWebViewSave() },
+                            onPromote = { controller.confirmPromoteLiveSave(confirmed = true) },
+                            onRequestForceSave = { controller.requestForceSavePrompt() },
                             onOpenVault = {
                                 if (vaultCatalog != null) vaultOpen = true
                             },
@@ -318,6 +322,14 @@ fun PlaySurface(
                             inspectedSequence = inspectedSequence,
                             exportedPayload = exportedSnapshot,
                             modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    val forcePrompt = forceSavePrompt
+                    if (forcePrompt != null) {
+                        ForceSaveConfirmation(
+                            prompt = forcePrompt,
+                            onConfirm = { controller.confirmForceSave(confirmed = true) },
+                            onCancel = { controller.confirmForceSave(confirmed = false) },
                         )
                     }
                 }

@@ -1,5 +1,6 @@
 package com.example.hub.games
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.BigInteger
@@ -55,6 +56,7 @@ data class SharkProgress(
     val coreTimes: Long,
     val humanoidTimes: Long,
     val singularityFirst: Boolean,
+    val bestBlackHoles: Long,
 ) : Comparable<SharkProgress> {
 
     val fresh: Boolean
@@ -65,16 +67,19 @@ data class SharkProgress(
             prestigeTimes == 0L &&
             coreTimes == 0L &&
             humanoidTimes == 0L &&
-            !singularityFirst
+            !singularityFirst &&
+            bestBlackHoles == 0L
 
     fun detail(): String {
         val shark = if (sharkLevel.sign == 0) "0" else "e${sharkLevel.exponent}"
         val fish = if (totalFish.sign == 0) "0" else "e${totalFish.exponent}"
         return "feature $feature, played ${totalTimePlayed.toPlainString()}, shark $shark, fish $fish, " +
-            "prestige $prestigeTimes, core $coreTimes, humanoid $humanoidTimes, singularity $singularityFirst"
+            "prestige $prestigeTimes, core $coreTimes, humanoid $humanoidTimes, " +
+            "singularity $singularityFirst, black holes $bestBlackHoles"
     }
 
     override fun compareTo(other: SharkProgress): Int {
+        bestBlackHoles.compareTo(other.bestBlackHoles).takeIf { it != 0 }?.let { return it }
         feature.compareTo(other.feature).takeIf { it != 0 }?.let { return it }
         totalTimePlayed.compareTo(other.totalTimePlayed).takeIf { it != 0 }?.let { return it }
         sharkLevel.compareTo(other.sharkLevel).takeIf { it != 0 }?.let { return it }
@@ -125,6 +130,7 @@ data class SharkProgress(
             if (runtime.coreTimes != snapshot.coreTimes) return false
             if (runtime.humanoidTimes != snapshot.humanoidTimes) return false
             if (runtime.singularityFirst != snapshot.singularityFirst) return false
+            if (runtime.bestBlackHoles != snapshot.bestBlackHoles) return false
             if (runtime.totalTimePlayed < snapshot.totalTimePlayed) return false
             if (runtime.sharkLevel < snapshot.sharkLevel) return false
             if (runtime.totalFish < snapshot.totalFish) return false
@@ -150,9 +156,13 @@ data class SharkProgress(
         }
 
         /**
-         * Milestone order for a capture commit. Feature, prestige, core, humanoid,
-         * and singularity are monotonic. A later milestone may spend currencies.
-         * Play time and currency rank never prove an advance or excuse a lost milestone.
+         * Milestone order for a capture commit. `singularity.best_bh` is the durable
+         * Black Hole count. A higher count is a Black Hole reset: below 3 it may
+         * clear feature, prestige, core, and humanoid; from 3 to 7 it may lower
+         * feature to the reset floor and must not lower those counters; at 8 or
+         * above it must not lower feature or those counters. At the same count
+         * those four stay monotonic. Play time and currency rank never prove an
+         * advance or excuse a lost milestone.
          *
          * Inside one milestone, totalTimePlayed, shark level, total fish, and every
          * other JSON field are unordered. Identical bytes and different bytes at
@@ -175,16 +185,50 @@ data class SharkProgress(
             val stored = parsePayload(reference) ?: return ProgressionClass.INCOMPARABLE
             if (stored.version < SharkIncrementalAdapter.MIN_VERSION) return ProgressionClass.INCOMPARABLE
             if (candidate == reference) return ProgressionClass.EQUAL
-            val milestones = listOf(
+            return orderMilestones(current, stored)
+        }
+
+        /**
+         * Black Hole tier rules from Shark's `RESETS['black-hole'].doReset()`.
+         * `best_bh` is compared as an integer. A same-tier drop is a regression.
+         */
+        private fun orderMilestones(current: SharkProgress, stored: SharkProgress): ProgressionClass {
+            val blackHoles = current.bestBlackHoles.compareTo(stored.bestBlackHoles)
+            if (blackHoles < 0) return ProgressionClass.REGRESSED
+            if (blackHoles > 0) {
+                if (!current.singularityFirst) return ProgressionClass.REGRESSED
+                if (current.bestBlackHoles < 3) return ProgressionClass.ADVANCED
+                if (countersDropped(current, stored)) return ProgressionClass.REGRESSED
+                if (current.bestBlackHoles < 8) {
+                    val floor = if (current.bestBlackHoles >= 7) 13 else 12
+                    if (current.feature < floor) return ProgressionClass.REGRESSED
+                    return ProgressionClass.ADVANCED
+                }
+                if (current.feature < stored.feature) return ProgressionClass.REGRESSED
+                return ProgressionClass.ADVANCED
+            }
+            if (current.singularityFirst != stored.singularityFirst) {
+                return if (current.singularityFirst) {
+                    ProgressionClass.ADVANCED
+                } else {
+                    ProgressionClass.REGRESSED
+                }
+            }
+            val marks = listOf(
                 current.feature.compareTo(stored.feature),
                 current.prestigeTimes.compareTo(stored.prestigeTimes),
                 current.coreTimes.compareTo(stored.coreTimes),
                 current.humanoidTimes.compareTo(stored.humanoidTimes),
-                current.singularityFirst.compareTo(stored.singularityFirst),
             )
-            if (milestones.any { it < 0 }) return ProgressionClass.REGRESSED
-            if (milestones.any { it > 0 }) return ProgressionClass.ADVANCED
+            if (marks.any { it < 0 }) return ProgressionClass.REGRESSED
+            if (marks.any { it > 0 }) return ProgressionClass.ADVANCED
             return ProgressionClass.EQUAL
+        }
+
+        private fun countersDropped(current: SharkProgress, stored: SharkProgress): Boolean {
+            return current.prestigeTimes < stored.prestigeTimes ||
+                current.coreTimes < stored.coreTimes ||
+                current.humanoidTimes < stored.humanoidTimes
         }
 
         fun compare(livePayload: String?, storedPayload: String?): SaveComparison {
@@ -246,6 +290,9 @@ data class SharkProgress(
             if (!singularity.has("first") || singularity.isNull("first")) {
                 return failure(SharkParseKind.MISSING_FIELD, "singularity.first", "Missing field singularity.first")
             }
+            val first = singularity.getBoolean("first")
+            val bestBlackHoles = readBestBlackHoles(singularity, first)
+            if (bestBlackHoles.report != null) return bestBlackHoles.report
             return SharkParseReport(
                 SharkParseKind.OK,
                 null,
@@ -259,9 +306,113 @@ data class SharkProgress(
                     prestigeTimes = prestige,
                     coreTimes = core,
                     humanoidTimes = humanoid,
-                    singularityFirst = singularity.getBoolean("first"),
+                    singularityFirst = first,
+                    bestBlackHoles = bestBlackHoles.count,
                 ),
             )
+        }
+
+        private data class BlackHoleRead(val count: Long, val report: SharkParseReport?)
+
+        /**
+         * `best_bh` is a small integer. A missing field on a pre-Singularity save
+         * is 0. A count that does not match `first`, or that is not an integer
+         * from 0 to 8, cannot be ordered.
+         */
+        private fun readBestBlackHoles(singularity: JSONObject, first: Boolean): BlackHoleRead {
+            val missing = !singularity.has("best_bh") || singularity.isNull("best_bh")
+            if (missing) {
+                return if (first) {
+                    BlackHoleRead(
+                        0L,
+                        failure(
+                            SharkParseKind.MISSING_FIELD,
+                            "singularity.best_bh",
+                            "Missing field singularity.best_bh",
+                        ),
+                    )
+                } else {
+                    BlackHoleRead(0L, null)
+                }
+            }
+            val count = exactBlackHoleCount(singularity.opt("best_bh"))
+                ?: return BlackHoleRead(
+                    0L,
+                    failure(
+                        SharkParseKind.DECIMAL,
+                        "singularity.best_bh",
+                        "Unsupported Decimal representation in singularity.best_bh",
+                    ),
+                )
+            val consistent = if (first) count > 0L else count == 0L
+            if (!consistent) {
+                return BlackHoleRead(
+                    count,
+                    failure(
+                        SharkParseKind.INVALID_GAME,
+                        "singularity.best_bh",
+                        "singularity.first does not match singularity.best_bh",
+                    ),
+                )
+            }
+            return BlackHoleRead(count, null)
+        }
+
+        private fun exactBlackHoleCount(raw: Any?): Long? = when (raw) {
+            null, JSONObject.NULL -> null
+            is Number -> integralBlackHoles(runCatching { BigDecimal(raw.toString()) }.getOrNull())
+            is String -> {
+                val trimmed = raw.trim()
+                if (trimmed.equals("NaN", ignoreCase = true)) {
+                    null
+                } else {
+                    integralBlackHoles(runCatching { BigDecimal(trimmed) }.getOrNull())
+                }
+            }
+            is JSONObject -> blackHolesFromDecimal(raw)
+            else -> null
+        }
+
+        private fun blackHolesFromDecimal(raw: JSONObject): Long? {
+            if (!raw.has("s") || !raw.has("e") || raw.isNull("s") || raw.isNull("e")) return null
+            val sign = when (val value = raw.opt("s")) {
+                is Number -> value.toInt()
+                is String -> value.toIntOrNull() ?: return null
+                else -> return null
+            }
+            if (sign == 0) return 0L
+            if (sign != 1 || !raw.has("c") || raw.isNull("c")) return null
+            val exponent = exactSmallExponent(raw.opt("e")) ?: return null
+            val coefficient = blackHoleCoefficient(raw.opt("c")) ?: return null
+            val magnitude = if (exponent >= 0) {
+                coefficient.multiply(BigDecimal.TEN.pow(exponent))
+            } else {
+                coefficient.scaleByPowerOfTen(exponent)
+            }
+            return integralBlackHoles(magnitude)
+        }
+
+        private fun exactSmallExponent(raw: Any?): Int? = when (raw) {
+            is Number -> {
+                if (isNan(raw)) null else integralBlackHoles(runCatching { BigDecimal(raw.toString()) }.getOrNull())?.toInt()
+            }
+            is String -> integralBlackHoles(runCatching { BigDecimal(raw.trim()) }.getOrNull())?.toInt()
+            else -> null
+        }
+
+        private fun blackHoleCoefficient(raw: Any?): BigDecimal? = when (raw) {
+            is Number -> runCatching { BigDecimal(raw.toString()) }.getOrNull()
+            is String -> runCatching { BigDecimal(raw.trim()) }.getOrNull()
+            is JSONArray -> if (raw.length() == 1) blackHoleCoefficient(raw.opt(0)) else null
+            else -> null
+        }
+
+        private fun integralBlackHoles(value: BigDecimal?): Long? {
+            if (value == null) return null
+            val stripped = value.stripTrailingZeros()
+            if (stripped.scale() > 0) return null
+            val count = runCatching { stripped.longValueExact() }.getOrNull() ?: return null
+            return count.takeIf { it in 0L..8L }
         }
 
         private fun failure(kind: SharkParseKind, field: String, detail: String): SharkParseReport {

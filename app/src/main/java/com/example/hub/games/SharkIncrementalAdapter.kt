@@ -86,7 +86,11 @@ class SharkIncrementalAdapter : GameAdapter {
                 " prestige: {times: player.prestige ? player.prestige.times : null}," +
                 " core: {times: player.core ? player.core.times : null}," +
                 " humanoid: {times: player.humanoid ? player.humanoid.times : null}," +
-                " singularity: {first: player.singularity ? player.singularity.first : null}" +
+                " singularity: {first: player.singularity ? player.singularity.first : null," +
+                " best_bh: (function(){ var v = player.singularity ? player.singularity.best_bh : null;" +
+                " if (v == null) return null;" +
+                " if (typeof v === 'number' || typeof v === 'string') return v;" +
+                " if (typeof v.toString === 'function') return String(v); return null; })()}" +
                 " }); })()"
         private const val JS_SET_SAVE =
             "(function(){ localStorage.setItem('$SAVE_KEY', __PAYLOAD__); return true; })()"

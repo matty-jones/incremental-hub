@@ -23,14 +23,15 @@ import org.junit.Test
 class NativeMenuTest {
 
     // -----------------------------------------------------------------
-    // Seven menu items
+    // Eight menu items
     // -----------------------------------------------------------------
 
     @Test
     fun menuActionCountMatchesTheMenu() {
         val actions = menuActions()
-        assertEquals("Must have exactly one Save and no snapshot row", 7, actions.size)
+        assertEquals("Must have exactly one Save and no snapshot row", 8, actions.size)
         assertEquals(1, actions.count { it is MenuAction.Save })
+        assertEquals(1, actions.count { it is MenuAction.ForceSave })
     }
 
     @Test
@@ -38,6 +39,7 @@ class NativeMenuTest {
         val actions = menuActions()
         assertTrue("Must include Resume", actions.contains(MenuAction.Resume))
         assertTrue("Must include Save", actions.contains(MenuAction.Save))
+        assertTrue("Must include ForceSave", actions.contains(MenuAction.ForceSave))
         assertTrue("Must include Vault", actions.contains(MenuAction.Vault))
         assertTrue("Must include Reload", actions.contains(MenuAction.Reload))
         assertTrue("Must include Display", actions.contains(MenuAction.Display))
@@ -63,6 +65,11 @@ class NativeMenuTest {
     @Test
     fun saveActionLabel() {
         assertEquals("Save", MenuAction.Save.label)
+    }
+
+    @Test
+    fun forceSaveActionLabel() {
+        assertEquals("Save the current game anyway", MenuAction.ForceSave.label)
     }
 
     @Test
@@ -231,6 +238,18 @@ class NativeMenuTest {
     fun saveEnabled_whenPlaying() {
         assertTrue(isActionEnabled(MenuAction.Save, SessionState.Playing))
         assertFalse(isActionEnabled(MenuAction.Save, SessionState.Playing, saveBlocked = true))
+    }
+
+    @Test
+    fun forceSaveStaysAvailableWhenOrdinarySaveIsBlocked() {
+        assertTrue(isActionEnabled(MenuAction.ForceSave, SessionState.Playing, saveBlocked = true))
+        assertTrue(isActionEnabled(MenuAction.ForceSave, SessionState.Background))
+        assertTrue(isActionEnabled(MenuAction.ForceSave, SessionState.Degraded))
+        assertTrue(isActionEnabled(MenuAction.ForceSave, SessionState.RecoveryRequired))
+        assertFalse(isActionEnabled(MenuAction.ForceSave, SessionState.Closed))
+        assertFalse(isActionEnabled(MenuAction.ForceSave, SessionState.Opening))
+        assertFalse(isActionEnabled(MenuAction.ForceSave, SessionState.Capturing))
+        assertFalse(isActionEnabled(MenuAction.ForceSave, SessionState.Closing))
     }
 
     @Test

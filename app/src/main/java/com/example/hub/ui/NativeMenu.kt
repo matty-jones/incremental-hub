@@ -54,6 +54,7 @@ private val MinTouchTarget: Dp = 48.dp
 sealed class MenuAction {
     data object Resume : MenuAction()
     data object Save : MenuAction()
+    data object ForceSave : MenuAction()
     data object Vault : MenuAction()
     data object Reload : MenuAction()
     data object Display : MenuAction()
@@ -64,6 +65,7 @@ sealed class MenuAction {
 internal val sessionMenuActions: List<MenuAction> = listOf(
     MenuAction.Resume,
     MenuAction.Save,
+    MenuAction.ForceSave,
     MenuAction.Vault,
     MenuAction.Reload,
     MenuAction.Display,
@@ -75,6 +77,7 @@ internal val MenuAction.label: String
     get() = when (this) {
         is MenuAction.Resume -> "Resume"
         is MenuAction.Save -> "Save"
+        is MenuAction.ForceSave -> "Save the current game anyway"
         is MenuAction.Vault -> "Vault"
         is MenuAction.Reload -> "Reload"
         is MenuAction.Display -> "Display"
@@ -280,6 +283,10 @@ internal fun isActionEnabled(
             state is SessionState.Background ||
             state is SessionState.Degraded
         is MenuAction.Save -> state is SessionState.Playing && !saveBusy && !saveBlocked
+        is MenuAction.ForceSave -> state is SessionState.Playing ||
+            state is SessionState.Background ||
+            state is SessionState.Degraded ||
+            state is SessionState.RecoveryRequired
         is MenuAction.Vault -> state is SessionState.Playing ||
             state is SessionState.Background ||
             state is SessionState.Degraded ||
@@ -301,6 +308,7 @@ private fun MenuItemRow(
     val icon = when (action) {
         is MenuAction.Resume -> Icons.Default.PlayArrow
         is MenuAction.Save -> Icons.Default.Save
+        is MenuAction.ForceSave -> Icons.Default.Save
         is MenuAction.Vault -> Icons.Default.Cloud
         is MenuAction.Reload -> Icons.Default.Refresh
         is MenuAction.Display -> Icons.Default.Settings

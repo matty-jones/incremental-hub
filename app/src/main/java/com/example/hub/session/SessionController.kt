@@ -33,6 +33,7 @@ import com.example.hub.games.GameRegistry
 import com.example.hub.games.PayloadDigest
 import com.example.hub.games.PeekOutcome
 import com.example.hub.games.ProgressionClass
+import com.example.hub.games.combineProgression
 import com.example.hub.games.QualificationResult
 import com.example.hub.games.RuntimeVerdict
 import com.example.hub.games.SaveComparison
@@ -141,7 +142,17 @@ class SessionController(
         JOURNAL_APPLY,
         INSPECT_WRITE,
         INSPECT_VERIFY,
+        PROMOTE_PEEK,
+        FORCE_PEEK,
     }
+
+    private enum class LiveIntent { PROMOTE, FORCE }
+
+    private data class LiveReady(
+        val gameId: String,
+        val adapter: GameAdapter,
+        val view: WebView,
+    )
 
     private val _state = MutableStateFlow<SessionState>(SessionState.Closed)
     val state: StateFlow<SessionState> = _state.asStateFlow()
@@ -170,6 +181,11 @@ class SessionController(
     val manualSaveInFlight: StateFlow<Boolean> = _manualSaveInFlight.asStateFlow()
     private val _manualSaveNotice = MutableStateFlow<ManualSaveNotice?>(null)
     val manualSaveNotice: StateFlow<ManualSaveNotice?> = _manualSaveNotice.asStateFlow()
+
+    private val _forceSavePrompt = MutableStateFlow<ForceSavePrompt?>(null)
+    val forceSavePrompt: StateFlow<ForceSavePrompt?> = _forceSavePrompt.asStateFlow()
+    private var promotionPayload: String? = null
+    private var pendingLiveReturn: SessionState? = null
 
     private val _subresourceDiagnostic = MutableStateFlow<String?>(null)
     val subresourceDiagnostic: StateFlow<String?> = _subresourceDiagnostic.asStateFlow()
@@ -751,6 +767,69 @@ class SessionController(
         }
     }
 
+    /**
+     * Revalidates the profile save and promotes it only when the order says it
+     * is ahead of the pointer, the high-water snapshot, and the quarantined copy.
+     * An unconfirmed call writes nothing.
+     */
+    fun confirmPromoteLiveSave(confirmed: Boolean) {
+        if (!confirmed) return
+        scope.launch {
+            try {
+                promoteLiveSave()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "promote live save failed", e)
+                mutex.withLock {
+                    _sessionError.value =
+                        "storage error. ${e.message ?: "The live save was not stored."} The active save was kept."
+                }
+            }
+        }
+    }
+
+    /** Reads the current save and shows the force-save confirmation. Writes nothing. */
+    fun requestForceSavePrompt() {
+        scope.launch {
+            try {
+                stageForceSavePrompt()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "force-save prompt failed", e)
+                _forceSavePrompt.value = null
+                _sessionError.value = "No current save could be read. The active save was kept."
+            }
+        }
+    }
+
+    /**
+     * Stores the current profile save on the same lineage without consulting the
+     * progression order. Cadence and other automatic captures cannot call this.
+     * An unconfirmed call writes nothing.
+     */
+    fun confirmForceSave(confirmed: Boolean) {
+        if (!confirmed) {
+            scope.launch { mutex.withLock { cancelForcePromptLocked() } }
+            return
+        }
+        scope.launch {
+            try {
+                forceSaveConfirmed()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "force-save failed", e)
+                mutex.withLock {
+                    _forceSavePrompt.value = null
+                    _sessionError.value =
+                        "storage error. ${e.message ?: "The current save was not stored."} The active save was kept."
+                }
+            }
+        }
+    }
+
     fun retryRecovery() {
         scope.launch {
             mutex.withLock {
@@ -1069,7 +1148,8 @@ class SessionController(
             if (_state.value !is SessionState.Opening) return
             // Stale peek finishes that arrive after beginGameLoad bumped the token.
             if ((openStep == OpenStep.LOAD_GAME || openStep == OpenStep.RESTORE_VERIFY ||
-                    openStep == OpenStep.ROLLBACK || openStep == OpenStep.INSPECT_VERIFY) &&
+                    openStep == OpenStep.ROLLBACK || openStep == OpenStep.INSPECT_VERIFY ||
+                    openStep == OpenStep.PROMOTE_PEEK || openStep == OpenStep.FORCE_PEEK) &&
                 finishToken != _loadToken.value
             ) {
                 recordDiagnostic(
@@ -1175,6 +1255,8 @@ class SessionController(
             OpenStep.JOURNAL_APPLY -> finishJournalApply(work)
             OpenStep.INSPECT_WRITE -> finishInspectWrite(work)
             OpenStep.INSPECT_VERIFY -> finishInspectVerify(work)
+            OpenStep.PROMOTE_PEEK -> finishPromotePeek(work)
+            OpenStep.FORCE_PEEK -> finishForcePeek(work)
         }
     }
 
@@ -1325,6 +1407,11 @@ class SessionController(
             message = "document-complete probe=$initialProbe",
         )
         val ready = awaitGameReady(work)
+        val promoting = promotionPayload
+        if (promoting != null) {
+            completePromotionAfterLoad(work, promoting, ready)
+            return
+        }
         val settledProbe = productionDocumentProbe(work)
         val continueWatch = mutex.withLock {
             if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
@@ -3259,6 +3346,413 @@ class SessionController(
         } catch (e: Exception) {
             ProgressionClass.INCOMPARABLE
         }
+    }
+
+    private suspend fun promoteLiveSave() {
+        val ready = mutex.withLock {
+            if (inspectionProfileName != null) {
+                refuseLive("Inspection profile $inspectionProfileName was not stored. The active save was kept.")
+                return@withLock null
+            }
+            val gameId = _activeGameId.value ?: return@withLock null
+            val adapter = activeAdapter ?: return@withLock null
+            if (_state.value !is SessionState.RecoveryRequired && _state.value !is SessionState.Degraded) {
+                return@withLock null
+            }
+            val view = webView
+            if (view == null) {
+                beginLivePeekLocked(LiveIntent.PROMOTE)
+                return@withLock null
+            }
+            LiveReady(gameId, adapter, view)
+        } ?: return
+        val payload = peekPayload(ready.view, ready.adapter) ?: run {
+            mutex.withLock { refuseLive("No profile save could be read. The active save was kept.") }
+            return
+        }
+        val refusal = promotionRefusal(ready.gameId, ready.adapter, payload)
+        if (refusal != null) {
+            mutex.withLock { refuseLive(refusal) }
+            return
+        }
+        val runtimeOk = runtimeMatches(ready.view, ready.adapter, payload)
+        if (!runtimeOk) {
+            mutex.withLock {
+                refuseLive("The running game did not match the profile save. The active save was kept.")
+            }
+            return
+        }
+        val commit = mutex.withLock {
+            if (_activeGameId.value != ready.gameId) return@withLock null
+            if (_state.value !is SessionState.RecoveryRequired && _state.value !is SessionState.Degraded) {
+                return@withLock null
+            }
+            commitPromotion(ready.gameId, ready.adapter, payload)
+        } ?: return
+        deliverAccepted(ready.gameId, commit)
+    }
+
+    private suspend fun finishPromotePeek(work: ReadyWork) {
+        val payload = peekPayload(work.view, work.adapter)
+        val refusal = if (payload == null) {
+            "No profile save could be read. The active save was kept."
+        } else {
+            promotionRefusal(work.gameId, work.adapter, payload)
+        }
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            if (payload == null || refusal != null) {
+                pendingLiveReturn = null
+                openStep = OpenStep.DECIDE
+                refuseLive(refusal ?: "No profile save could be read. The active save was kept.")
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+                return
+            }
+            promotionPayload = payload
+            beginGameLoadLocked()
+        }
+    }
+
+    private suspend fun completePromotionAfterLoad(work: ReadyWork, payload: String, ready: Boolean) {
+        promotionPayload = null
+        if (!ready || !runtimeMatches(work.view, work.adapter, payload)) {
+            mutex.withLock {
+                if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+                val message = if (!ready) {
+                    "The game was not ready. The active save was kept."
+                } else {
+                    "The running game did not match the profile save. The active save was kept."
+                }
+                pendingLiveReturn = null
+                refuseLive(message)
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+            }
+            return
+        }
+        val commit = mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            commitPromotion(work.gameId, work.adapter, payload)
+        } ?: return
+        deliverAccepted(work.gameId, commit)
+    }
+
+    private suspend fun commitPromotion(
+        gameId: String,
+        adapter: GameAdapter,
+        payload: String,
+    ): CaptureCommit? {
+        val commit = try {
+            captureRepository().commitIfSafe(
+                gameId = gameId,
+                candidate = payload,
+                reason = SnapshotReasons.CHECKPOINT,
+                adapter = adapter,
+                sessionId = instanceDao.get(gameId)?.sessionIdentity,
+                stillCurrent = { _activeGameId.value == gameId },
+                manual = true,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            refuseLive("storage error. ${e.message ?: "The live save was not stored."} The active save was kept.")
+            return null
+        }
+        if (commit.disposition != CaptureDisposition.STORED || commit.classification != ProgressionClass.ADVANCED) {
+            val incident = instanceDao.get(gameId)?.captureIncident
+            if (!incident.isNullOrBlank()) {
+                incidentDetail = incident
+                setCaptureSuppressed(true)
+                _sessionError.value = commit.message ?: incident
+            } else {
+                refuseLive(commit.message ?: "The live save was not promoted. The active save was kept.")
+            }
+            if (_state.value is SessionState.Opening) {
+                transitionTo(SessionState.RecoveryRequired, gameId)
+            }
+            return null
+        }
+        return commit
+    }
+
+    private suspend fun promotionRefusal(gameId: String, adapter: GameAdapter, live: String): String? {
+        val instance = instanceDao.get(gameId)
+            ?: return "The game row is missing. The active save was kept."
+        val pointer = instance.snapshotPayload
+        val high = instance.highWaterSnapshotId?.let { id -> snapshotDao?.getById(id)?.payload }
+        val againstPointer = classifyQuiet(adapter, live, pointer)
+        val verdict = if (high.isNullOrBlank() || high == pointer) {
+            againstPointer
+        } else {
+            combineProgression(againstPointer, classifyQuiet(adapter, live, high))
+        }
+        if (verdict != ProgressionClass.ADVANCED) {
+            return "The live save is not ahead of the active save. The active save was kept."
+        }
+        val quarantine = snapshotDao?.latestByReason(gameId, SnapshotReasons.QUARANTINE)?.payload
+        if (!quarantine.isNullOrBlank() &&
+            classifyQuiet(adapter, live, quarantine) == ProgressionClass.REGRESSED
+        ) {
+            return "The live save is behind the quarantined copy. The active save was kept."
+        }
+        return null
+    }
+
+    private suspend fun stageForceSavePrompt() {
+        val ready = mutex.withLock {
+            if (inspectionProfileName != null) {
+                refuseLive("Inspection profile $inspectionProfileName was not stored. The active save was kept.")
+                return@withLock null
+            }
+            val gameId = _activeGameId.value ?: return@withLock null
+            val adapter = activeAdapter ?: return@withLock null
+            if (!forceSaveAllowed(_state.value)) return@withLock null
+            val view = webView
+            if (view == null && _state.value !is SessionState.Playing && _state.value !is SessionState.Background) {
+                beginLivePeekLocked(LiveIntent.FORCE)
+                return@withLock null
+            }
+            if (view == null && captureClient == null) {
+                refuseLive("No current save could be read. The active save was kept.")
+                return@withLock null
+            }
+            gameId to adapter
+        } ?: return
+        val (gameId, adapter) = ready
+        val payload = readForcePayload(gameId, adapter, webView) ?: run {
+            mutex.withLock { refuseLive("No current save could be read. The active save was kept.") }
+            return
+        }
+        val stored = instanceDao.get(gameId)?.snapshotPayload
+        _forceSavePrompt.value = forcePrompt(gameId, adapter, payload, stored)
+    }
+
+    private suspend fun finishForcePeek(work: ReadyWork) {
+        val payload = peekPayload(work.view, work.adapter)
+        if (payload == null) {
+            mutex.withLock {
+                if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+                pendingLiveReturn = null
+                openStep = OpenStep.DECIDE
+                refuseLive("No current save could be read. The active save was kept.")
+                transitionTo(SessionState.RecoveryRequired, work.gameId)
+            }
+            return
+        }
+        val stored = instanceDao.get(work.gameId)?.snapshotPayload
+        _forceSavePrompt.value = forcePrompt(work.gameId, work.adapter, payload, stored)
+        mutex.withLock {
+            if (_state.value !is SessionState.Opening || _activeGameId.value != work.gameId) return
+            openStep = OpenStep.DECIDE
+        }
+    }
+
+    private suspend fun forceSaveConfirmed() {
+        val ready = mutex.withLock {
+            if (inspectionProfileName != null) {
+                refuseLive("Inspection profile $inspectionProfileName was not stored. The active save was kept.")
+                return@withLock null
+            }
+            val gameId = _activeGameId.value ?: return@withLock null
+            val adapter = activeAdapter ?: return@withLock null
+            if (!forceSaveAllowed(_state.value)) return@withLock null
+            gameId to adapter
+        } ?: return
+        val (gameId, adapter) = ready
+        val payload = readForcePayload(gameId, adapter, webView) ?: run {
+            mutex.withLock { refuseLive("No current save could be read. The active save was kept.") }
+            return
+        }
+        val prompt = _forceSavePrompt.value
+        if (prompt != null && (prompt.gameId != gameId || prompt.liveHash != PayloadDigest.sha256(payload))) {
+            mutex.withLock {
+                _forceSavePrompt.value = null
+                refuseLive("The current save changed. Nothing was written. The active save was kept.")
+            }
+            return
+        }
+        val commit = mutex.withLock {
+            if (_activeGameId.value != gameId || !forceSaveAllowed(_state.value)) return@withLock null
+            if (inspectionProfileName != null) {
+                refuseLive("Inspection profile $inspectionProfileName was not stored. The active save was kept.")
+                return@withLock null
+            }
+            try {
+                captureRepository().forceStore(
+                    gameId = gameId,
+                    candidate = payload,
+                    adapter = adapter,
+                    sessionId = instanceDao.get(gameId)?.sessionIdentity,
+                    stillCurrent = { _activeGameId.value == gameId },
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                refuseLive("storage error. ${e.message ?: "The current save was not stored."} The active save was kept.")
+                null
+            }
+        } ?: return
+        if (commit.disposition != CaptureDisposition.STORED) {
+            mutex.withLock {
+                refuseLive(commit.message ?: "The current save was not stored. The active save was kept.")
+            }
+            return
+        }
+        deliverAccepted(gameId, commit)
+    }
+
+    private fun forcePrompt(
+        gameId: String,
+        adapter: GameAdapter,
+        payload: String,
+        stored: String?,
+    ): ForceSavePrompt {
+        return ForceSavePrompt(
+            gameId = gameId,
+            profileName = _activeProfileName.value ?: "hub-game-$gameId",
+            liveDetail = adapter.summarize(payload).detail,
+            liveHash = PayloadDigest.sha256(payload),
+            storedDetail = adapter.summarize(stored).detail,
+            storedHash = PayloadDigest.sha256OrAbsent(stored),
+        )
+    }
+
+    private fun forceSaveAllowed(state: SessionState): Boolean {
+        return state is SessionState.Playing ||
+            state is SessionState.Background ||
+            state is SessionState.Degraded ||
+            state is SessionState.RecoveryRequired ||
+            state is SessionState.Opening
+    }
+
+    private suspend fun beginLivePeekLocked(intent: LiveIntent) {
+        val gameId = _activeGameId.value ?: return
+        pendingLiveReturn = _state.value
+        openStep = if (intent == LiveIntent.PROMOTE) OpenStep.PROMOTE_PEEK else OpenStep.FORCE_PEEK
+        documentGate.phase = DocumentPhase.PEEK
+        documentGate.payload = null
+        _loadToken.value = _loadToken.value + 1
+        when (_state.value) {
+            is SessionState.Degraded -> {
+                transitionTo(SessionState.RecoveryRequired, gameId)
+                transitionTo(SessionState.Opening, gameId)
+            }
+            is SessionState.RecoveryRequired, is SessionState.Background ->
+                transitionTo(SessionState.Opening, gameId)
+            else -> {
+                pendingLiveReturn = null
+                openStep = OpenStep.DECIDE
+                refuseLive("No current save could be read. The active save was kept.")
+            }
+        }
+    }
+
+    private suspend fun cancelForcePromptLocked() {
+        if (pendingLiveReturn != null || openStep == OpenStep.FORCE_PEEK) {
+            val gameId = _activeGameId.value
+            val back = pendingLiveReturn
+            pendingLiveReturn = null
+            promotionPayload = null
+            _forceSavePrompt.value = null
+            openStep = OpenStep.DECIDE
+            if (_state.value is SessionState.Opening && gameId != null) {
+                if (back is SessionState.Playing || back is SessionState.Background) {
+                    transitionTo(SessionState.Playing, gameId)
+                } else {
+                    transitionTo(SessionState.RecoveryRequired, gameId)
+                }
+            }
+        } else {
+            _forceSavePrompt.value = null
+        }
+    }
+
+    private suspend fun readForcePayload(gameId: String, adapter: GameAdapter, view: WebView?): String? {
+        val fromStorage = _state.value is SessionState.RecoveryRequired ||
+            _state.value is SessionState.Degraded ||
+            _state.value is SessionState.Opening
+        return if (fromStorage) {
+            if (view == null) null else peekPayload(view, adapter)
+        } else {
+            capturePayload(view, adapter, gameId)
+        }
+    }
+
+    private suspend fun peekPayload(view: WebView, adapter: GameAdapter): String? {
+        val outcome = try {
+            peekClient?.invoke(view, adapter) ?: adapter.peekStorage(view)
+        } catch (e: Exception) {
+            Log.e(TAG, "profile peek failed", e)
+            null
+        }
+        return (outcome as? PeekOutcome.Value)?.payload?.takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun capturePayload(view: WebView?, adapter: GameAdapter, gameId: String): String? {
+        return try {
+            val client = captureClient
+            val payload = if (client != null) {
+                client.invoke(view, adapter)
+            } else if (view != null) {
+                captureThroughAdapter(view, adapter, gameId)
+            } else {
+                null
+            }
+            payload?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "force-save read failed", e)
+            null
+        }
+    }
+
+    private suspend fun runtimeMatches(view: WebView, adapter: GameAdapter, payload: String): Boolean {
+        return try {
+            runtimeCheck?.invoke(view, adapter, payload) ?: adapter.acceptsRuntime(view, payload)
+        } catch (e: Exception) {
+            Log.e(TAG, "runtime check failed", e)
+            false
+        }
+    }
+
+    private suspend fun deliverAccepted(gameId: String, commit: CaptureCommit) {
+        if (commit.sync) {
+            commit.instance?.let { saved ->
+                try {
+                    onSnapshotSaved?.invoke(saved)
+                } catch (e: Exception) {
+                    Log.e(TAG, "snapshot listener failed", e)
+                }
+            }
+        }
+        mutex.withLock {
+            if (_activeGameId.value != gameId) return@withLock
+            pendingLiveReturn = null
+            promotionPayload = null
+            _forceSavePrompt.value = null
+            resumeAfterAcceptedSave(gameId, commit.message)
+        }
+    }
+
+    private suspend fun resumeAfterAcceptedSave(gameId: String, message: String?) {
+        incidentDetail = null
+        setCaptureSuppressed(false)
+        _sessionError.value = message
+        when (val state = _state.value) {
+            is SessionState.RecoveryRequired, is SessionState.Degraded -> {
+                if (state is SessionState.Degraded) {
+                    transitionTo(SessionState.RecoveryRequired, gameId)
+                }
+                transitionTo(SessionState.Opening, gameId)
+                transitionTo(SessionState.Playing, gameId)
+            }
+            is SessionState.Opening, is SessionState.Background ->
+                transitionTo(SessionState.Playing, gameId)
+            is SessionState.Playing -> if (captureJob?.isActive != true) startCaptureCadence()
+            else -> Unit
+        }
+    }
+
+    private fun refuseLive(message: String) {
+        _sessionError.value = message
     }
 
     private suspend fun bindLiveProfile(gameId: String) {

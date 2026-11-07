@@ -65,6 +65,23 @@ class CaptureRepository(
         return committed
     }
 
+    /**
+     * Stores [candidate] as the active save without consulting progression order.
+     * The previous pointer is pinned and no snapshot row is deleted. Ordinary
+     * captures must keep using [commitIfSafe].
+     */
+    suspend fun forceStore(
+        gameId: String,
+        candidate: String,
+        adapter: GameAdapter,
+        sessionId: String?,
+        stillCurrent: () -> Boolean,
+    ): CaptureCommit {
+        val apply = suspend { forceStoreLocked(gameId, candidate, adapter, sessionId, stillCurrent) }
+        val database = roomDatabase
+        return if (database != null) database.withTransaction { apply() } else apply()
+    }
+
     suspend fun openLineage(
         gameId: String,
         confirmed: Boolean,
@@ -358,6 +375,112 @@ class CaptureRepository(
         )
         instanceDao.upsert(updated)
         return CaptureCommit(CaptureDisposition.QUARANTINED, verdict, updated, message, sync = false)
+    }
+
+    private suspend fun forceStoreLocked(
+        gameId: String,
+        candidate: String,
+        adapter: GameAdapter,
+        sessionId: String?,
+        stillCurrent: () -> Boolean,
+    ): CaptureCommit {
+        val instance = instanceDao.get(gameId)
+            ?: return rejected(ProgressionClass.INVALID, "unready. Missing game row. The active save was kept.")
+        if (!stillCurrent() || (sessionId != null && instance.sessionIdentity != sessionId)) {
+            return rejected(ProgressionClass.INVALID, "unready. Stale force-save was ignored. The active save was kept.")
+        }
+        if (candidate.isBlank()) {
+            return rejected(ProgressionClass.INVALID, "invalid. No save was readable. The active save was kept.")
+        }
+        val valid = try {
+            adapter.validate(candidate)
+        } catch (_: Exception) {
+            false
+        }
+        if (!valid) {
+            return rejected(ProgressionClass.INVALID, "invalid. The current save failed validation. The active save was kept.")
+        }
+        val now = clock()
+        val previous = instance.snapshotPayload?.takeIf { it.isNotBlank() }
+        if (previous != null && previous != candidate) {
+            pinExistingPayload(instance, previous, adapter, now)
+        }
+        fault?.invoke("before-write")
+        val sha = PayloadDigest.sha256(candidate)
+        val history = snapshotDao?.history(instance.gameId).orEmpty()
+        val existing = matching(history, sha, candidate)
+        val snapshotId = if (existing != null) {
+            snapshotDao?.pinById(existing.id)
+            existing.id
+        } else {
+            insertSnapshot(
+                instance = instance,
+                payload = candidate,
+                reason = SnapshotReasons.CHECKPOINT,
+                pinned = true,
+                adapter = adapter,
+                now = now,
+                sha = sha,
+            )
+        }
+        val updated = instance.copy(
+            lastCaptureAttemptAtMillis = now,
+            lastCaptureSuccessAtMillis = now,
+            lastCaptureAtMillis = now,
+            lastCaptureError = null,
+            lastSeenAtMillis = now,
+            snapshotPayload = candidate,
+            highWaterSnapshotId = snapshotId ?: instance.highWaterSnapshotId,
+            captureIncident = null,
+            captureIncidentSha = null,
+            captureIncidentCount = 0,
+            recoveryState = null,
+        )
+        fault?.invoke("after-pointer")
+        instanceDao.upsert(updated)
+        if (snapshotId != null && previous != candidate) {
+            enqueueCommitted(
+                instance = updated,
+                payload = candidate,
+                sha = sha,
+                now = now,
+                reason = SnapshotReasons.CHECKPOINT,
+                verdict = ProgressionClass.RESET_APPROVED,
+                snapshotId = snapshotId,
+            )
+        }
+        val message = "The current save is now active. Previous progress remains in history."
+        return CaptureCommit(
+            CaptureDisposition.STORED,
+            ProgressionClass.RESET_APPROVED,
+            updated,
+            message,
+            sync = previous != candidate && snapshotId != null,
+        )
+    }
+
+    private suspend fun pinExistingPayload(
+        instance: GameInstance,
+        payload: String,
+        adapter: GameAdapter,
+        now: Long,
+    ) {
+        val dao = snapshotDao ?: return
+        val sha = PayloadDigest.sha256(payload)
+        val matches = dao.history(instance.gameId).filter { samePayload(it, sha, payload) }
+        if (matches.isEmpty()) {
+            insertSnapshot(
+                instance = instance,
+                payload = payload,
+                reason = SnapshotReasons.CHECKPOINT,
+                pinned = true,
+                adapter = adapter,
+                now = now,
+                sha = sha,
+            )
+        } else {
+            matches.forEach { dao.pinById(it.id) }
+        }
     }
 
     private suspend fun lineageLocked(

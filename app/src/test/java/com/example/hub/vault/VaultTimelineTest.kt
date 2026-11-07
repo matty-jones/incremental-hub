@@ -84,7 +84,10 @@ class VaultTimelineTest {
         assertEquals(4L, milestones?.humanoid)
         assertEquals(false, milestones?.singularity)
         val reading = readSnapshot(SHARK_GAME_ID, entry("s", 1, 1, sha = PayloadDigest.sha256(payload)), payload)
-        assertEquals("feature 9, prestige 2639, core 2026, humanoid 4, singularity false", reading.recomputedDetail)
+        assertEquals(
+            "feature 9, prestige 2639, core 2026, humanoid 4, singularity false, black holes 0",
+            reading.recomputedDetail,
+        )
         assertTrue(reading.hashMatches == true)
         assertFalse(reading.recomputedDetail!!.contains("Infinity"))
     }

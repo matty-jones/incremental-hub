@@ -10,6 +10,19 @@ data class ManualSaveNotice(
     val message: String,
 )
 
+/**
+ * Confirmation for storing the current profile save even when ordinary capture
+ * would refuse it. The payload is read again on confirm and is not kept here.
+ */
+data class ForceSavePrompt(
+    val gameId: String,
+    val profileName: String,
+    val liveDetail: String,
+    val liveHash: String,
+    val storedDetail: String,
+    val storedHash: String,
+)
+
 enum class ManualSaveOutcome {
     SAVED,
     QUARANTINED,

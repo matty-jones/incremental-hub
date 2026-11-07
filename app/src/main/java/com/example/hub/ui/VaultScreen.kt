@@ -725,6 +725,7 @@ private fun VaultDetail(
             Text("Core ${shark.core}")
             Text("Humanoid ${shark.humanoid}")
             Text("Singularity ${shark.singularity}")
+            Text("Black holes ${shark.bestBlackHoles}")
         }
         val recomputed = reading.recomputedDetail
         if (!recomputed.isNullOrBlank() && shark == null) {

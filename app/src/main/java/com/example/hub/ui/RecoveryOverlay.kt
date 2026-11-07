@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.hub.session.ForceSavePrompt
 import com.example.hub.session.SaveDiagnostic
 import com.example.hub.ui.chrome.HubOutlinedButton
 import com.example.hub.ui.chrome.HubPrimaryButton
@@ -35,7 +36,8 @@ internal fun recoveryBackDismissesConfirmation(
     confirmingRestore: Boolean,
     confirmingSnapshot: Boolean,
     confirmingStartOver: Boolean,
-): Boolean = confirmingRestore || confirmingSnapshot || confirmingStartOver
+    confirmingPromote: Boolean = false,
+): Boolean = confirmingRestore || confirmingSnapshot || confirmingStartOver || confirmingPromote
 
 /**
  * Overlay shown when the session enters [com.example.hub.session.SessionState.RecoveryRequired].
@@ -58,6 +60,8 @@ fun RecoveryOverlay(
     onClose: () -> Unit,
     onExport: () -> Unit = {},
     onKeepWebView: () -> Unit = {},
+    onPromote: (() -> Unit)? = null,
+    onRequestForceSave: () -> Unit = {},
     onOpenVault: () -> Unit = {},
     onInspectSnapshot: (Long) -> Unit = {},
     onExportSnapshot: (Long) -> Unit = {},
@@ -69,17 +73,20 @@ fun RecoveryOverlay(
     Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId url=$launchUrl detail=$detail")
     var confirming by rememberSaveable(gameId) { mutableStateOf(false) }
     var confirmingStartOver by rememberSaveable(gameId) { mutableStateOf(false) }
+    var confirmingPromote by rememberSaveable(gameId) { mutableStateOf(false) }
     var confirmingUse by rememberSaveable(gameId) { mutableStateOf(-1L) }
     BackHandler {
         if (recoveryBackDismissesConfirmation(
                 confirmingRestore = confirming,
                 confirmingSnapshot = confirmingUse >= 0L,
                 confirmingStartOver = confirmingStartOver,
+                confirmingPromote = confirmingPromote,
             )
         ) {
             confirming = false
             confirmingUse = -1L
             confirmingStartOver = false
+            confirmingPromote = false
         } else {
             onClose()
         }
@@ -326,6 +333,43 @@ fun RecoveryOverlay(
                     Text("Start over on a new lineage")
                 }
             }
+            if (incident && onPromote != null && confirmingPromote) {
+                Text(
+                    text = "Revalidate and promote the live save checks the profile against the active save. It becomes the active save only when it is ahead. The previous active save stays in history.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HubPrimaryButton(
+                    onClick = {
+                        confirmingPromote = false
+                        onPromote()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Confirm promotion")
+                }
+                HubOutlinedButton(
+                    onClick = { confirmingPromote = false },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Back")
+                }
+            } else if (incident && onPromote != null) {
+                HubOutlinedButton(
+                    onClick = { confirmingPromote = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Revalidate and promote the live save")
+                }
+            }
+            if (incident && !confirmingPromote && !confirmingStartOver) {
+                HubOutlinedButton(
+                    onClick = onRequestForceSave,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Save the current game anyway")
+                }
+            }
             if (diagnostic.ambiguous) {
                 Text(
                     text = "Leave WebView save untouched does not load the game, capture a snapshot, or synchronise the workstation.",
@@ -381,6 +425,46 @@ fun RecoveryOverlay(
                 .testTag("recovery-close"),
         ) {
             Text("Close")
+        }
+    }
+}
+
+@Composable
+internal fun ForceSaveConfirmation(
+    prompt: ForceSavePrompt,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    BackHandler(onBack = onCancel)
+    OverlaySheet(onDismiss = onCancel, dismissOnScrim = false) {
+        Text(
+            text = "Save the current game anyway",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = "This stores the current save of ${prompt.gameId} on profile ${prompt.profileName}. " +
+                "The current save becomes the active one. Previous progress remains in history.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = "Current save\n${prompt.liveDetail}\n${prompt.liveHash}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = "Active Hub save\n${prompt.storedDetail}\n${prompt.storedHash}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HubPrimaryButton(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
+            Text("Confirm force save")
+        }
+        HubOutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel")
         }
     }
 }
