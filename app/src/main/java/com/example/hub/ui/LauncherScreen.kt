@@ -276,7 +276,7 @@ private fun GameCard(
                         .testTag("inspect-${game.gameId}"),
                     onClick = { onInspect(game.gameId) },
                 ) {
-                    Text("Inspect Save")
+                    Text("Preview save")
                 }
                 HubTextButton(
                     modifier = Modifier
@@ -284,7 +284,7 @@ private fun GameCard(
                         .testTag("safe-${game.gameId}"),
                     onClick = { onSafeLaunch(game.gameId) },
                 ) {
-                    Text("Safe Launch")
+                    Text("Play without saving")
                 }
                 HubTextButton(
                     modifier = Modifier
@@ -292,7 +292,7 @@ private fun GameCard(
                         .testTag("recover-${game.gameId}"),
                     onClick = { onRecover(game.gameId) },
                 ) {
-                    Text("Recover from Snapshot")
+                    Text("Load Hub's copy")
                 }
             }
         }

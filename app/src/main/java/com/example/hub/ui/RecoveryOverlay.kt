@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.hub.games.SaveComparison
 import com.example.hub.session.ForceSavePrompt
 import com.example.hub.session.SaveDiagnostic
 import com.example.hub.ui.chrome.HubOutlinedButton
@@ -30,6 +31,15 @@ private const val TAG = "RecoveryOverlay"
 
 private fun formatWhen(millis: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
+
+private fun comparisonLabel(comparison: SaveComparison): String = when (comparison) {
+    SaveComparison.MATCH -> "This game matches Hub's copy."
+    SaveComparison.LIVE_AHEAD -> "This game looks ahead of Hub's copy."
+    SaveComparison.LIVE_BEHIND -> "This game looks behind Hub's copy."
+    SaveComparison.LIVE_MISSING -> "This game has no save."
+    SaveComparison.INCONCLUSIVE -> "Hub cannot tell which copy is ahead."
+    SaveComparison.NO_SNAPSHOT -> "Hub has no saved copy."
+}
 
 /** A confirmation step goes back to the recovery choices. Close still leaves the session. */
 internal fun recoveryBackDismissesConfirmation(
@@ -56,11 +66,9 @@ fun RecoveryOverlay(
     onRetry: () -> Unit,
     onSafeLaunch: () -> Unit = {},
     onRecover: () -> Unit = {},
-    onStartOver: (() -> Unit)? = null,
     onClose: () -> Unit,
     onExport: () -> Unit = {},
     onKeepWebView: () -> Unit = {},
-    onPromote: (() -> Unit)? = null,
     onRequestForceSave: () -> Unit = {},
     onOpenVault: () -> Unit = {},
     onInspectSnapshot: (Long) -> Unit = {},
@@ -72,34 +80,30 @@ fun RecoveryOverlay(
 ) {
     Log.d(TAG, "RecoveryOverlay: shown for gameId=$gameId url=$launchUrl detail=$detail")
     var confirming by rememberSaveable(gameId) { mutableStateOf(false) }
-    var confirmingStartOver by rememberSaveable(gameId) { mutableStateOf(false) }
-    var confirmingPromote by rememberSaveable(gameId) { mutableStateOf(false) }
     var confirmingUse by rememberSaveable(gameId) { mutableStateOf(-1L) }
     BackHandler {
         if (recoveryBackDismissesConfirmation(
                 confirmingRestore = confirming,
                 confirmingSnapshot = confirmingUse >= 0L,
-                confirmingStartOver = confirmingStartOver,
-                confirmingPromote = confirmingPromote,
+                confirmingStartOver = false,
             )
         ) {
             confirming = false
             confirmingUse = -1L
-            confirmingStartOver = false
-            confirmingPromote = false
         } else {
             onClose()
         }
     }
-    val incident = detail?.contains("Capture incident") == true ||
-        diagnostic?.note?.contains("Capture incident") == true
+    val canKeepGame = diagnostic?.let {
+        it.liveBytes > 0 && it.comparison != SaveComparison.LIVE_MISSING
+    } == true
     OverlaySheet(
         onDismiss = onClose,
         dismissOnScrim = false,
         modifier = modifier,
     ) {
         Text(
-            text = if (diagnostic == null) "Session Recovery Required" else "Save diagnostics",
+            text = "This game was not opened",
             style = MaterialTheme.typography.headlineSmall,
             color = if (diagnostic == null) {
                 MaterialTheme.colorScheme.error
@@ -112,9 +116,9 @@ fun RecoveryOverlay(
         if (diagnostic == null) {
             HubWrappedText(
                 text = buildString {
-                    append("The session for ")
+                    append("Hub did not open ")
                     append(gameId)
-                    append(" needs recovery.")
+                    append(".")
                     if (!launchUrl.isNullOrBlank()) {
                         append("\n")
                         append(launchUrl)
@@ -137,7 +141,7 @@ fun RecoveryOverlay(
             }
         } else if (confirming) {
             Text(
-                text = "Recover from snapshot",
+                text = "Load Hub's copy",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -147,7 +151,7 @@ fun RecoveryOverlay(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "This writes the snapshot into the current profile, reloads the game once, and checks the running progress. If that check fails, the previous storage value is written back.",
+                text = "Replaces what is in the game with Hub's saved copy. The game reloads and is checked. If the check fails, the game is put back.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -159,7 +163,7 @@ fun RecoveryOverlay(
                 enabled = diagnostic.recoverAllowed,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Restore this snapshot")
+                Text("Load Hub's copy")
             }
             HubOutlinedButton(
                 onClick = { confirming = false },
@@ -169,15 +173,12 @@ fun RecoveryOverlay(
             }
         } else if (confirmingUse >= 0L) {
             Text(
-                text = "Use snapshot #$confirmingUse",
+                text = "Load copy #$confirmingUse",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                text = "This overwrites the live profile with snapshot #$confirmingUse. " +
-                    "Milestones can match while play time, currencies, and upgrades differ, and those differences are not ordered. " +
-                    "The game reloads and is checked before Room changes. Cancel writes nothing. " +
-                    "Play and workstation sync do not start until that check passes.",
+                text = "Replaces what is in the game with copy #$confirmingUse. Cancel changes nothing.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -189,7 +190,7 @@ fun RecoveryOverlay(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Overwrite the live profile")
+                Text("Load this copy")
             }
             HubOutlinedButton(
                 onClick = { confirmingUse = -1L },
@@ -204,7 +205,7 @@ fun RecoveryOverlay(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "Comparison: ${diagnostic.comparison.name}",
+                text = comparisonLabel(diagnostic.comparison),
                 style = MaterialTheme.typography.titleSmall,
             )
             if (diagnostic.consequence.isNotBlank()) {
@@ -217,12 +218,12 @@ fun RecoveryOverlay(
             val liveWhen = diagnostic.livePinnedAtMillis?.let { formatWhen(it) } ?: "capture time unknown"
             val roomWhen = diagnostic.storedCapturedAtMillis?.let { formatWhen(it) } ?: "capture time unknown"
             Text(
-                text = "WebView key: ${diagnostic.liveBytes} bytes, pinned $liveWhen. ${diagnostic.liveDetail}",
+                text = "This game: ${diagnostic.liveDetail} ($liveWhen)",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Room snapshot: ${diagnostic.storedBytes} bytes, captured $roomWhen. ${diagnostic.storedDetail}",
+                text = "Hub's copy: ${diagnostic.storedDetail} ($roomWhen)",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -246,20 +247,20 @@ fun RecoveryOverlay(
                                 onClick = { onInspectSnapshot(entry.sequence) },
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text("Inspect")
+                                Text("Preview")
                             }
                             HubOutlinedButton(
                                 onClick = { onExportSnapshot(entry.sequence) },
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text("Export")
+                                Text("Share")
                             }
                             HubOutlinedButton(
                                 onClick = { confirmingUse = entry.sequence },
                                 enabled = inspectedSequence == entry.sequence,
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text("Use")
+                                Text("Load")
                             }
                         }
                     }
@@ -267,7 +268,7 @@ fun RecoveryOverlay(
             }
             if (!exportedPayload.isNullOrEmpty()) {
                 Text(
-                    text = "Sharing the exact stored bytes, ${exportedPayload.length} characters. This does not restore or modify the snapshot.",
+                    text = "Sharing this copy. This does not change the game.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -292,8 +293,28 @@ fun RecoveryOverlay(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (canKeepGame) {
+                HubPrimaryButton(
+                    onClick = onRequestForceSave,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Save this game")
+                }
+                Text(
+                    text = "Keeps what is in the game and makes it Hub's current save. Hub's previous copy stays in history.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HubOutlinedButton(
+                onClick = { confirming = true },
+                enabled = diagnostic.recoverAllowed && !diagnostic.ambiguous,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Load Hub's copy")
+            }
             Text(
-                text = "Safe Launch loads the game without a Hub restore or snapshot. The game can still autosave.",
+                text = "Replaces what is in the game with Hub's saved copy.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -302,106 +323,27 @@ fun RecoveryOverlay(
                 enabled = diagnostic.backupReady,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Safe Launch")
+                Text("Play without saving")
             }
-            if (incident && onStartOver != null && confirmingStartOver) {
-                Text(
-                    text = "Start over keeps the current save in history and makes the quarantined save the active one. It is not uploaded.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HubPrimaryButton(
-                    onClick = {
-                        confirmingStartOver = false
-                        onStartOver()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Confirm new lineage")
-                }
-                HubOutlinedButton(
-                    onClick = { confirmingStartOver = false },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Back")
-                }
-            } else if (incident && onStartOver != null) {
-                HubOutlinedButton(
-                    onClick = { confirmingStartOver = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Start over on a new lineage")
-                }
-            }
-            if (incident && onPromote != null && confirmingPromote) {
-                Text(
-                    text = "Revalidate and promote the live save checks the profile against the active save. It becomes the active save only when it is ahead. The previous active save stays in history.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HubPrimaryButton(
-                    onClick = {
-                        confirmingPromote = false
-                        onPromote()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Confirm promotion")
-                }
-                HubOutlinedButton(
-                    onClick = { confirmingPromote = false },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Back")
-                }
-            } else if (incident && onPromote != null) {
-                HubOutlinedButton(
-                    onClick = { confirmingPromote = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Revalidate and promote the live save")
-                }
-            }
-            if (incident && !confirmingPromote && !confirmingStartOver) {
-                HubOutlinedButton(
-                    onClick = onRequestForceSave,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Save the current game anyway")
-                }
-            }
+            Text(
+                text = "Opens the game. Hub will not save or restore.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (diagnostic.ambiguous) {
-                Text(
-                    text = "Leave WebView save untouched does not load the game, capture a snapshot, or synchronise the workstation.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 HubOutlinedButton(
                     onClick = onKeepWebView,
                     enabled = !diagnostic.webViewLeftUntouched,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        if (diagnostic.webViewLeftUntouched) {
-                            "WebView save left untouched"
-                        } else {
-                            "Leave WebView save untouched"
-                        },
-                    )
+                    Text(if (diagnostic.webViewLeftUntouched) "Nothing changed" else "Change nothing")
                 }
-            }
-            HubPrimaryButton(
-                onClick = { confirming = true },
-                enabled = diagnostic.recoverAllowed && !diagnostic.ambiguous,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Recover from snapshot")
             }
             HubOutlinedButton(
                 onClick = onRetry,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Check storage again")
+                Text("Check again")
             }
         }
             HubOutlinedButton(
@@ -438,30 +380,30 @@ internal fun ForceSaveConfirmation(
     BackHandler(onBack = onCancel)
     OverlaySheet(onDismiss = onCancel, dismissOnScrim = false) {
         Text(
-            text = "Save the current game anyway",
+            text = "Save this game",
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            text = "This stores the current save of ${prompt.gameId} on profile ${prompt.profileName}. " +
-                "The current save becomes the active one. Previous progress remains in history.",
+            text = "${prompt.relation} This becomes Hub's current save for ${prompt.gameId}. " +
+                "The previous copy stays in history.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            text = "Current save\n${prompt.liveDetail}\n${prompt.liveHash}",
+            text = "This game: ${prompt.liveDetail}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = "Active Hub save\n${prompt.storedDetail}\n${prompt.storedHash}",
+            text = "Hub's copy: ${prompt.storedDetail}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         HubPrimaryButton(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
-            Text("Confirm force save")
+            Text("Save this game")
         }
         HubOutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
             Text("Cancel")

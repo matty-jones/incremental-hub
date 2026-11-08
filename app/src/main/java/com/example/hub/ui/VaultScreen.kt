@@ -750,7 +750,7 @@ private fun VaultDetail(
                     .fillMaxWidth()
                     .testTag("vault-export-snapshot"),
             ) {
-                Text("Export this snapshot")
+                Text("Share this copy")
             }
         }
         if (stageRestore != null && canRestore) {
@@ -760,7 +760,7 @@ private fun VaultDetail(
                     .fillMaxWidth()
                     .testTag("vault-restore"),
             ) {
-                Text("Restore")
+                Text("Load this copy")
             }
         }
         val activate = onActivateImported
@@ -771,7 +771,7 @@ private fun VaultDetail(
                     .fillMaxWidth()
                     .testTag("vault-activate-imported"),
             ) {
-                Text("Use this save")
+                Text("Make this Hub's save")
             }
         }
         if (shown != null) {
@@ -782,7 +782,7 @@ private fun VaultDetail(
             if (!unordered.isNullOrBlank()) HubWrappedText(unordered)
             HubWrappedText(shown.message)
             if (shown.localBranch) {
-                Text("This phone is on a local lineage. The workstation pointer was not moved.")
+                Text("The current game stays Hub's save. This copy was not uploaded.")
             }
         }
         if (onProtect != null && onUnprotect != null) {
@@ -907,7 +907,7 @@ private fun VaultDetail(
                                 .fillMaxWidth()
                                 .testTag("vault-restore-branch"),
                         ) {
-                            Text("Restore on a new lineage")
+                            Text("Play this copy separately")
                         }
                     } else {
                         HubOutlinedButton(
@@ -916,7 +916,7 @@ private fun VaultDetail(
                                 .fillMaxWidth()
                                 .testTag("vault-restore-confirm"),
                         ) {
-                            Text("Confirm restore")
+                            Text("Load this copy")
                         }
                     }
                 }

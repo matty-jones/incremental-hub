@@ -21,6 +21,8 @@ data class ForceSavePrompt(
     val liveHash: String,
     val storedDetail: String,
     val storedHash: String,
+    val ahead: Boolean,
+    val relation: String,
 )
 
 enum class ManualSaveOutcome {

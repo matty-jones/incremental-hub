@@ -126,7 +126,7 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            text = "Shows Inspect Save, Safe Launch, and Recover from Snapshot on each game.",
+                            text = "Shows Preview save, Play without saving, and Load Hub's copy on each game.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp),

@@ -54,7 +54,6 @@ private val MinTouchTarget: Dp = 48.dp
 sealed class MenuAction {
     data object Resume : MenuAction()
     data object Save : MenuAction()
-    data object ForceSave : MenuAction()
     data object Vault : MenuAction()
     data object Reload : MenuAction()
     data object Display : MenuAction()
@@ -65,7 +64,6 @@ sealed class MenuAction {
 internal val sessionMenuActions: List<MenuAction> = listOf(
     MenuAction.Resume,
     MenuAction.Save,
-    MenuAction.ForceSave,
     MenuAction.Vault,
     MenuAction.Reload,
     MenuAction.Display,
@@ -77,7 +75,6 @@ internal val MenuAction.label: String
     get() = when (this) {
         is MenuAction.Resume -> "Resume"
         is MenuAction.Save -> "Save"
-        is MenuAction.ForceSave -> "Save the current game anyway"
         is MenuAction.Vault -> "Vault"
         is MenuAction.Reload -> "Reload"
         is MenuAction.Display -> "Display"
@@ -204,7 +201,7 @@ fun NativeMenu(
             }
             if (!saveBlockedReason.isNullOrBlank()) {
                 Text(
-                    text = saveBlockedReason,
+                    text = "Hub has not saved this game. Save keeps it. The previous copy stays in history.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -251,10 +248,8 @@ private fun MenuItems(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         actions.forEach { action ->
-            val blocked = action is MenuAction.Save && !saveBlockedReason.isNullOrBlank()
-            val enabled = isActionEnabled(action, state, saveBusy, saveBlocked = blocked)
+            val enabled = isActionEnabled(action, state, saveBusy)
             val disabledReason = when {
-                blocked -> saveBlockedReason
                 action is MenuAction.Vault && !enabled ->
                     "Vault opens during play and from recovery. It does not reload the game."
                 else -> null
@@ -276,17 +271,17 @@ internal fun isActionEnabled(
     action: MenuAction,
     state: SessionState,
     saveBusy: Boolean = false,
-    saveBlocked: Boolean = false,
 ): Boolean {
     return when (action) {
         is MenuAction.Resume -> state is SessionState.Playing ||
             state is SessionState.Background ||
             state is SessionState.Degraded
-        is MenuAction.Save -> state is SessionState.Playing && !saveBusy && !saveBlocked
-        is MenuAction.ForceSave -> state is SessionState.Playing ||
-            state is SessionState.Background ||
-            state is SessionState.Degraded ||
-            state is SessionState.RecoveryRequired
+        is MenuAction.Save -> !saveBusy && (
+            state is SessionState.Playing ||
+                state is SessionState.Background ||
+                state is SessionState.Degraded ||
+                state is SessionState.RecoveryRequired
+            )
         is MenuAction.Vault -> state is SessionState.Playing ||
             state is SessionState.Background ||
             state is SessionState.Degraded ||
@@ -308,7 +303,6 @@ private fun MenuItemRow(
     val icon = when (action) {
         is MenuAction.Resume -> Icons.Default.PlayArrow
         is MenuAction.Save -> Icons.Default.Save
-        is MenuAction.ForceSave -> Icons.Default.Save
         is MenuAction.Vault -> Icons.Default.Cloud
         is MenuAction.Reload -> Icons.Default.Refresh
         is MenuAction.Display -> Icons.Default.Settings

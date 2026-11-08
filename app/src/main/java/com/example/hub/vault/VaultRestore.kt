@@ -129,15 +129,15 @@ suspend fun assessVaultRestore(
     val propose = allowed && !requiresBranch && classification == ProgressionClass.ADVANCED
     val message = when {
         !allowed && requiresBranch ->
-            "This snapshot is behind the protected pointer. Restore it only on a new lineage. The current save was kept."
+            "This copy is behind the current game. Play it separately. The current game stays Hub's save."
         !allowed ->
-            "Confirm to restore this snapshot. Nothing has been written."
+            "Nothing has been written."
         requiresBranch ->
-            "This restore starts a new local lineage. The workstation pointer was not moved."
+            "This copy stays separate. The current game remains Hub's save."
         classification == ProgressionClass.ADVANCED ->
-            "This snapshot is ahead of the current save."
+            "This copy is ahead of the current game."
         else ->
-            "The workstation pointer and the high-water snapshot stay where they are."
+            "Hub's current save stays in place."
     }
     return VaultAssessment(
         snapshotId = recordId,

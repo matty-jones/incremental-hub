@@ -59,13 +59,13 @@ class LivePlayableSessionTest {
         composeRule.waitUntil(timeoutMillis = 90_000) {
             val opening = composeRule.onAllNodesWithText("Opening $gameId", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
-            val recovery = composeRule.onAllNodesWithText("Session Recovery Required")
+            val recovery = composeRule.onAllNodesWithText("This game was not opened")
                 .fetchSemanticsNodes().isNotEmpty()
             !opening || recovery
         }
         assertFalse(
             "recovery overlay for $gameId",
-            composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isNotEmpty(),
+            composeRule.onAllNodesWithText("This game was not opened").fetchSemanticsNodes().isNotEmpty(),
         )
 
         composeRule.onNodeWithContentDescription("Menu").performClick()
@@ -97,7 +97,7 @@ class LivePlayableSessionTest {
         composeRule.waitUntil(timeoutMillis = 20_000) {
             val sessionUi = composeRule.onAllNodesWithContentDescription("Menu").fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithText("Return to hub").fetchSemanticsNodes().isNotEmpty()
-            val recovery = composeRule.onAllNodesWithText("Session Recovery Required")
+            val recovery = composeRule.onAllNodesWithText("This game was not opened")
                 .fetchSemanticsNodes().isNotEmpty()
             sessionUi && !recovery
         }
@@ -118,7 +118,7 @@ class LivePlayableSessionTest {
         clickWhenEnabled("play-$gameId")
         composeRule.waitUntil(timeoutMillis = 90_000) {
             composeRule.onAllNodesWithContentDescription("Menu").fetchSemanticsNodes().isNotEmpty() &&
-                composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isEmpty()
+                composeRule.onAllNodesWithText("This game was not opened").fetchSemanticsNodes().isEmpty()
         }
         val resumed = runBlocking { dao.get(gameId) }!!
         assertTrue(validate(resumed.snapshotPayload ?: error("snapshot missing after resume")))

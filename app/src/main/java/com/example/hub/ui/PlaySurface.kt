@@ -205,8 +205,13 @@ fun PlaySurface(
                                         menuOpen = false
                                         controller.requestForeground()
                                     }
-                                    MenuAction.Save -> controller.requestCheckpoint()
-                                    MenuAction.ForceSave -> controller.requestForceSavePrompt()
+                                    MenuAction.Save -> {
+                                        if (state is SessionState.Playing && captureBlockReason.isNullOrBlank()) {
+                                            controller.requestCheckpoint()
+                                        } else {
+                                            controller.requestForceSavePrompt()
+                                        }
+                                    }
                                     MenuAction.Reload -> controller.requestReload()
                                     MenuAction.Vault -> {
                                         menuOpen = false
@@ -307,11 +312,9 @@ fun PlaySurface(
                             onRetry = { controller.retryRecovery() },
                             onSafeLaunch = { controller.requestSafeLaunch() },
                             onRecover = { controller.confirmRecover() },
-                            onStartOver = { controller.confirmNewLineage(confirmed = true, activate = true) },
                             onClose = { exitSession() },
                             onExport = { shareReport(context, controller.diagnosticReport()) },
                             onKeepWebView = { controller.keepWebViewSave() },
-                            onPromote = { controller.confirmPromoteLiveSave(confirmed = true) },
                             onRequestForceSave = { controller.requestForceSavePrompt() },
                             onOpenVault = {
                                 if (vaultCatalog != null) vaultOpen = true
@@ -328,7 +331,7 @@ fun PlaySurface(
                     if (forcePrompt != null) {
                         ForceSaveConfirmation(
                             prompt = forcePrompt,
-                            onConfirm = { controller.confirmForceSave(confirmed = true) },
+                            onConfirm = { controller.confirmKeepGame(confirmed = true) },
                             onCancel = { controller.confirmForceSave(confirmed = false) },
                         )
                     }

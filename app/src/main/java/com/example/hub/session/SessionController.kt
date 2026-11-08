@@ -476,7 +476,7 @@ class SessionController(
                 if (backups == 0) {
                     failOpenLocked(
                         gameId,
-                        "Safe Launch needs a diagnostic backup. Use Inspect first. The game was not loaded.",
+                        "Play without saving needs a preview copy first. The game was not opened.",
                     )
                     return
                 }
@@ -707,9 +707,7 @@ class SessionController(
             mutex.withLock {
                 if (_state.value !is SessionState.RecoveryRequired) return@withLock
                 val message =
-                    "Nothing resumed. The WebView save was left where it is. The game was not loaded, " +
-                        "no snapshot was captured, and the workstation was not synchronised. " +
-                        "Room and the live profile were not changed."
+                    "Nothing changed. The game was not opened, and neither copy was replaced."
                 _sessionError.value = message
                 _diagnostic.value = _diagnostic.value?.copy(note = message, webViewLeftUntouched = true)
             }
@@ -809,6 +807,35 @@ class SessionController(
      * progression order. Cadence and other automatic captures cannot call this.
      * An unconfirmed call writes nothing.
      */
+    /**
+     * Saves the game the user is looking at. When Hub already agrees it is ahead,
+     * the checked promotion path is used. Otherwise the confirmed override stores it.
+     * Cancelling writes nothing.
+     */
+    fun confirmKeepGame(confirmed: Boolean) {
+        if (!confirmed) {
+            confirmForceSave(false)
+            return
+        }
+        scope.launch {
+            try {
+                val recovery = _state.value is SessionState.RecoveryRequired ||
+                    _state.value is SessionState.Degraded
+                if (recovery && _forceSavePrompt.value?.ahead == true) promoteLiveSave()
+                else forceSaveConfirmed()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "keep game failed", e)
+                mutex.withLock {
+                    _forceSavePrompt.value = null
+                    _sessionError.value =
+                        "storage error. ${e.message ?: "This game was not saved."} Hub's copy was kept."
+                }
+            }
+        }
+    }
+
     fun confirmForceSave(confirmed: Boolean) {
         if (!confirmed) {
             scope.launch { mutex.withLock { cancelForcePromptLocked() } }
@@ -1329,14 +1356,13 @@ class SessionController(
             ?.capturedAtMillis
         val note = when {
             ambiguous ->
-                "The WebView save could not be ordered against Room. The game was not loaded. Both saves were kept."
+                "Hub cannot tell which copy is ahead, so the game was not opened. Both copies were kept."
             classifierRejects ->
-                "The WebView save is ${milestone!!.name.lowercase()} against the Room pointer. " +
-                    "It was not loaded. The Room pointer was kept."
+                "This game is ${plainProgress(milestone!!)} Hub's copy, so it was not opened. Hub's copy was kept."
             else -> diagnosticNote(outcome, comparison)
         }
         val consequence = if (ambiguous) {
-            "Recovering the Room snapshot would replace the live profile with the older pointer and drop this WebView save from the game. Both payloads stay pinned. Inspect a snapshot in a disposable profile before choosing it."
+            "Loading Hub's copy would replace this game. Both copies stay. Preview a copy below before loading it."
         } else {
             ""
         }
@@ -1887,7 +1913,7 @@ class SessionController(
             else -> false
         }
         val note = if (rolledBack) {
-            "Restore did not match the running game. The previous storage value was written back. The game was not loaded again."
+            "The running game did not match Hub's copy, so the game was put back."
         } else {
             "Rollback failed. Both restore candidates were kept. Manual intervention is required."
         }
@@ -2192,7 +2218,7 @@ class SessionController(
         if (_state.value !is SessionState.RecoveryRequired) return
         val backups = snapshotDao?.countPinned(gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0
         if (backups == 0) {
-            _sessionError.value = "Safe Launch needs a diagnostic backup. Use Inspect first. The game was not loaded."
+            _sessionError.value = "Play without saving needs a preview copy first. The game was not opened."
             return
         }
         launchMode = LaunchMode.SAFE
@@ -2447,9 +2473,8 @@ class SessionController(
         dead?.let { runCatching { it.destroy() } }
         _webViewGeneration.value = _webViewGeneration.value + 1
         val message =
-            "Snapshot #$sequence is loading in disposable profile $profileName. " +
-                "Use stays off until that profile loads the game and runtime verification passes. " +
-                "The live profile, Room, and the workstation were not changed."
+            "Preview of copy #$sequence is opening. Load stays off until the game matches this copy. " +
+                "The current game and Hub's save were not changed."
         _sessionError.value = message
         _diagnostic.value = _diagnostic.value?.copy(note = message)
         if (_state.value is SessionState.Playing) {
@@ -2474,8 +2499,8 @@ class SessionController(
                     if (_state.value is SessionState.Opening && _activeGameId.value == work.gameId) {
                         failInspection(
                             work.gameId,
-                            "The disposable profile did not load snapshot #${inspectSequence ?: "?"}. " +
-                                "Use stays off. The live profile and Room were not written.",
+                            "Copy #${inspectSequence ?: "?"} did not load. " +
+                                "Load stays off. The current game and Hub's save were not changed.",
                         )
                     }
                 }
@@ -2499,8 +2524,8 @@ class SessionController(
             } else {
                 failInspection(
                     work.gameId,
-                    "The disposable profile did not hold the stored snapshot bytes. " +
-                        "Use stays off. The live profile and Room were not written.",
+                    "The preview did not match this copy. " +
+                        "Load stays off. The current game and Hub's save were not changed.",
                 )
             }
         }
@@ -2544,8 +2569,8 @@ class SessionController(
             } else {
                 failInspection(
                     work.gameId,
-                    "Runtime verification did not accept snapshot #${sequence ?: "?"}. " +
-                        "Use stays off. The live profile and Room were not written.",
+                    "The game did not match copy #${sequence ?: "?"}. " +
+                        "Load stays off. The current game and Hub's save were not changed.",
                 )
             }
         }
@@ -2555,9 +2580,8 @@ class SessionController(
         _inspectedSequence.value = sequence
         val profileName = inspectionProfileName ?: "the inspection profile"
         val message =
-            "Snapshot #$sequence loaded in disposable profile $profileName and runtime verification passed. " +
-                "Use can overwrite the live profile after you confirm. " +
-                "Play has not resumed, and the workstation was not synchronised. Room was not changed."
+            "Copy #$sequence matches the game. Load can replace the current game after you confirm. " +
+                "Hub's save was not changed."
         openStep = OpenStep.DECIDE
         documentGate.phase = DocumentPhase.PEEK
         documentGate.payload = null
@@ -2606,12 +2630,12 @@ class SessionController(
         }
         if (ambiguousLive && sequence == null) {
             _sessionError.value =
-                "Restore refused. The WebView save could not be ordered against Room. Both saves were kept."
+                "Load refused. Hub cannot tell which copy is ahead. Both copies were kept."
             return
         }
         if (sequence != null && _inspectedSequence.value != sequence) {
             _sessionError.value =
-                "Restore refused. Inspect snapshot #$sequence in a disposable profile before replacing the live save."
+                "Load refused. Preview copy #$sequence before replacing the game."
             return
         }
         val stored = if (sequence == null) {
@@ -2754,25 +2778,31 @@ class SessionController(
             .toString()
     }
 
+    private fun plainProgress(milestone: ProgressionClass): String = when (milestone) {
+        ProgressionClass.REGRESSED -> "behind"
+        ProgressionClass.INCOMPARABLE -> "not comparable with"
+        ProgressionClass.INVALID -> "not a valid save against"
+        else -> "different from"
+    }
+
     private fun diagnosticNote(outcome: PeekOutcome, comparison: SaveComparison): String {
         if (outcome is PeekOutcome.Failed) {
-            return "Inspection inconclusive. The bootstrap page did not run, so the game was not loaded. " +
-                "A service worker may have intercepted the request. Storage was not changed."
+            return "Hub could not read the save, so the game was not opened. Nothing was changed."
         }
         if (launchMode == LaunchMode.INSPECT) {
-            return "Inspect read storage without loading the game."
+            return "Preview only. The game was not opened."
         }
         if (launchMode == LaunchMode.RECOVER) {
-            return "Recover from Snapshot read storage without loading the game."
+            return "Hub read its copy and did not open the game."
         }
         return when (comparison) {
             SaveComparison.LIVE_BEHIND ->
-                "Live storage is behind the saved snapshot. The game was not loaded."
+                "This game looks behind Hub's copy, so it was not opened."
             SaveComparison.LIVE_MISSING ->
-                "Live storage has no save key, and a snapshot exists. The game was not loaded."
+                "This game has no save, and Hub has a copy. The game was not opened."
             SaveComparison.INCONCLUSIVE ->
-                "Storage could not be compared safely. The game was not loaded."
-            else -> "Resume held. The game was not loaded."
+                "Hub cannot tell which copy is ahead, so the game was not opened."
+            else -> "The game was not opened."
         }
     }
 
@@ -3128,7 +3158,7 @@ class SessionController(
     private fun captureBlockDetail(): String {
         incidentDetail?.let { return it }
         return when (launchMode) {
-            LaunchMode.SAFE -> "capture suppressed because Safe Launch does not take Hub saves"
+            LaunchMode.SAFE -> "Hub is not saving this session."
             LaunchMode.INSPECT -> "capture suppressed because Inspect is read-only"
             LaunchMode.RECOVER, LaunchMode.RESUME ->
                 "capture suppressed because restore is unfinished"
@@ -3600,12 +3630,24 @@ class SessionController(
         deliverAccepted(gameId, commit)
     }
 
-    private fun forcePrompt(
+    private suspend fun forcePrompt(
         gameId: String,
         adapter: GameAdapter,
         payload: String,
         stored: String?,
     ): ForceSavePrompt {
+        val verdict = classifyQuiet(adapter, payload, stored)
+        val ahead = promotionRefusal(gameId, adapter, payload) == null
+        val relation = if (ahead) {
+            "Hub agrees this game is ahead."
+        } else {
+            when (verdict) {
+                ProgressionClass.REGRESSED -> "Hub thinks this game is behind its saved copy."
+                ProgressionClass.EQUAL -> "This matches Hub's saved copy."
+                ProgressionClass.ADVANCED -> "Hub thinks this game is behind a newer saved copy."
+                else -> "Hub cannot tell which copy is ahead."
+            }
+        }
         return ForceSavePrompt(
             gameId = gameId,
             profileName = _activeProfileName.value ?: "hub-game-$gameId",
@@ -3613,6 +3655,8 @@ class SessionController(
             liveHash = PayloadDigest.sha256(payload),
             storedDetail = adapter.summarize(stored).detail,
             storedHash = PayloadDigest.sha256OrAbsent(stored),
+            ahead = ahead,
+            relation = relation,
         )
     }
 
@@ -3752,6 +3796,7 @@ class SessionController(
     }
 
     private fun refuseLive(message: String) {
+        _forceSavePrompt.value = null
         _sessionError.value = message
     }
 

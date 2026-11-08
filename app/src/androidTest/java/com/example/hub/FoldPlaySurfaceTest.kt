@@ -120,8 +120,7 @@ class FoldPlaySurfaceTest {
             val opening = composeRule.onAllNodesWithText("Opening shark-incremental", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
             val menu = composeRule.onAllNodesWithContentDescription("Menu").fetchSemanticsNodes().isNotEmpty()
-            val recovery = composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithText("Save diagnostics").fetchSemanticsNodes().isNotEmpty()
+            val recovery = composeRule.onAllNodesWithText("This game was not opened").fetchSemanticsNodes().isNotEmpty()
             detail = "menu=$menu opening=$opening recovery=$recovery"
             if (earlyLog.isEmpty() && System.currentTimeMillis() - started > 2_000) {
                 earlyLog = shell("logcat -d -s HubNavigation:D SessionController:D FoldPlaySurfaceTest:I AndroidRuntime:E")
@@ -130,9 +129,7 @@ class FoldPlaySurfaceTest {
             if (menu && !opening) break
             Thread.sleep(200)
         }
-        if (composeRule.onAllNodesWithText("Session Recovery Required").fetchSemanticsNodes().isNotEmpty() ||
-            composeRule.onAllNodesWithText("Save diagnostics").fetchSemanticsNodes().isNotEmpty()
-        ) {
+        if (composeRule.onAllNodesWithText("This game was not opened").fetchSemanticsNodes().isNotEmpty()) {
             val note = shell("logcat -d -s RecoveryOverlay:D SessionController:E")
             throw AssertionError("recovery overlay\n${note.take(1500)}")
         }
