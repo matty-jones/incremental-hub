@@ -524,7 +524,9 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
         if (url.contains("trimps.github.io")) webView.evaluateJavascript(TrimpsLayout.injectionScript(), null)
         if (wantsDocumentLayout(url)) {
             val layoutUrl = url
-            webView.evaluateJavascript(DocumentLayout.injectionScript(expectW)) { raw ->
+            val metrics = if (isSharkUrl(url)) SharkLayout.STABLE_METRICS else ""
+            val line = if (isSharkUrl(url)) SharkLayout.STABLE_LINE else ""
+            webView.evaluateJavascript(DocumentLayout.injectionScript(expectW, metrics, line)) { raw ->
                 val current = runCatching { webView.url }.getOrNull()
                 if (unwrapJsResult(raw) == DocumentLayout.MARKER && current == layoutUrl) {
                     slot.layoutAppliedForUrl = layoutUrl

@@ -182,6 +182,37 @@ class GameplayReliabilityTest {
         assertTrue(script.contains("function armWait()"))
         assertFalse(script.contains("}).observe(app,"))
         assertFalse(script.contains("if (window.__hubLayoutFit) { window.__hubLayoutFit(); return"))
+        assertFalse(script.contains(DocumentLayout.METRIC_STYLE_ID))
+    }
+
+    @Test
+    fun stableMetricRegionReservesSpaceWithoutWatchingText() {
+        val plain = DocumentLayout.injectionScript(411)
+        val script = DocumentLayout.injectionScript(
+            411,
+            SharkLayout.STABLE_METRICS,
+            SharkLayout.STABLE_LINE,
+        )
+        assertFalse(plain.contains(DocumentLayout.METRIC_STYLE_ID))
+        assertEquals(plain.split("MutationObserver").size, script.split("MutationObserver").size)
+        val style = script.indexOf(DocumentLayout.METRIC_STYLE_ID)
+        val installed = script.indexOf("if (window.__hubLayoutInstalled)")
+        assertTrue(style in 0 until installed)
+        assertTrue(script.contains(SharkLayout.STABLE_METRICS))
+        assertTrue(script.contains("--hub-metric-line: ${SharkLayout.STABLE_LINE}"))
+        assertTrue(script.contains("min-height: calc(2 * var(--hub-metric-line) * 1.3)"))
+        assertTrue(script.contains("min-height: calc(3 * var(--hub-metric-line) * 1.3)"))
+        assertTrue(script.contains("@media (max-width: 700px)"))
+        assertTrue(script.contains("overflow-wrap: anywhere"))
+        assertTrue(script.contains("box-sizing: border-box"))
+        assertFalse(script.contains("max-height"))
+        assertFalse(script.contains("characterData"))
+        assertFalse(script.contains("save("))
+        assertFalse(script.contains("localStorage"))
+        assertFalse(script.contains("location.reload"))
+        assertEquals(5, SharkLayout.VERSION)
+        assertFalse(SharkLayout.injectionScript().contains(DocumentLayout.METRIC_STYLE_ID))
+        assertFalse(SharkLayout.injectionScript().contains("#fish-div"))
     }
 
     @Test

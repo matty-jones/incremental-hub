@@ -13,6 +13,12 @@ object SharkLayout {
     const val VERSION = 5
     const val STYLE_ID = "hub-shark-layout-v5"
 
+    /** Sentences whose gain swaps between ordinary notation and OoMs. */
+    const val STABLE_METRICS = "#fish-div,#antimatter-div,#god-fish-div"
+
+    /** The inline heading is 28px on the 16px body. */
+    const val STABLE_LINE = "1.75em"
+
     val css: String = """
         #offline {
           position: fixed !important;

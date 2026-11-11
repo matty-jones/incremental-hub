@@ -1,18 +1,29 @@
 package com.example.hub.games
 
+import org.json.JSONObject
+
 /**
  * Fits a game document to the live viewport.
  *
  * Independent rows and grids wrap. Boards whose columns are the mechanic
  * keep their column count and scale down. A box that still sticks out can
  * scroll on its own. The document is not reloaded and storage is not read.
+ *
+ * [stableMetrics] reserves a block for sentences whose text length changes.
+ * The reserve is one stylesheet. It does not watch text and it does not save.
  */
 object DocumentLayout {
     const val MARKER = "hub-layout-fit"
+    const val METRIC_STYLE_ID = "hub-stable-metrics"
 
-    fun injectionScript(limitCssPx: Int = 0): String {
+    fun injectionScript(
+        limitCssPx: Int = 0,
+        stableMetrics: String = "",
+        stableLine: String = "",
+    ): String {
         val limit = limitCssPx.coerceAtLeast(0)
         return "(function(){" +
+            stableMetricInstaller(stableMetrics, stableLine) +
             "window.__hubLayoutLimit = $limit;" +
             "if (window.__hubLayoutInstalled) {" +
             " if (window.__hubLayoutFit) window.__hubLayoutFit();" +
@@ -353,5 +364,33 @@ object DocumentLayout {
             "if (ready === 'no-body' && (!document.body || document.body.nodeType !== 1)) armWait();" +
             "return ready;" +
             "})()"
+    }
+
+    private fun stableMetricInstaller(selectors: String, line: String): String {
+        if (selectors.isBlank()) return ""
+        val css = JSONObject.quote(stableMetricCss(selectors, line))
+        val id = METRIC_STYLE_ID
+        return "var hubMetricNode=document.getElementById('$id');" +
+            "if(!hubMetricNode){hubMetricNode=document.createElement('style');" +
+            "hubMetricNode.id='$id';" +
+            "(document.head||document.documentElement).appendChild(hubMetricNode);}" +
+            "if(hubMetricNode.textContent!==$css)hubMetricNode.textContent=$css;"
+    }
+
+    private fun stableMetricCss(selectors: String, line: String): String {
+        val size = line.trim().ifBlank { "1.2em" }
+        return """
+            $selectors {
+              --hub-metric-line: $size;
+              box-sizing: border-box;
+              overflow-wrap: anywhere;
+              min-height: calc(2 * var(--hub-metric-line) * 1.3);
+            }
+            @media (max-width: 700px) {
+              $selectors {
+                min-height: calc(3 * var(--hub-metric-line) * 1.3);
+              }
+            }
+        """.trimIndent()
     }
 }
