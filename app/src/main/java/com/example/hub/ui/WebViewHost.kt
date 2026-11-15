@@ -116,8 +116,10 @@ fun WebViewHost(
                         mode = pageScaleMode,
                         presentationEpoch = presentationEpoch,
                         appliedTextZoom = textZoomPercent,
+                        gameId = gameId,
                     )
                     tag = slot
+                    bindLayoutBridge(this, slot)
                     ensureLayoutListener(this)
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -248,6 +250,8 @@ fun WebViewHost(
                 presentationEpoch = presentationEpoch,
             ).also { webView.tag = it }
             ensureLayoutListener(webView)
+            slot.gameId = gameId
+            bindLayoutBridge(webView, slot)
             slot.textZoomPercent = textZoomPercent
             slot.pageZoomPercent = pageZoomPercent
             slot.mode = pageScaleMode
@@ -526,7 +530,17 @@ private fun reconcilePresentation(webView: WebView, slot: Slot) {
             val layoutUrl = url
             val metrics = if (isSharkUrl(url)) SharkLayout.STABLE_METRICS else ""
             val line = if (isSharkUrl(url)) SharkLayout.STABLE_LINE else ""
-            webView.evaluateJavascript(DocumentLayout.injectionScript(expectW, metrics, line)) { raw ->
+            val saved = LayoutReservationStore(webView.context).read(slot.gameId)
+            webView.evaluateJavascript(
+                DocumentLayout.injectionScript(
+                    expectW,
+                    metrics,
+                    line,
+                    saved,
+                    slot.textZoomPercent,
+                    zoomLiteral(slot.pageZoomPercent),
+                ),
+            ) { raw ->
                 val current = runCatching { webView.url }.getOrNull()
                 if (unwrapJsResult(raw) == DocumentLayout.MARKER && current == layoutUrl) {
                     slot.layoutAppliedForUrl = layoutUrl
@@ -757,7 +771,21 @@ private class Slot(
     var lastAck: PresentationAck? = null,
     var onAck: ((PresentationAck) -> Unit)? = null,
     var listener: View.OnLayoutChangeListener? = null,
+    var gameId: String = "",
+    var layoutBridge: LayoutReservationBridge? = null,
 )
+
+private fun bindLayoutBridge(webView: WebView, slot: Slot) {
+    val existing = slot.layoutBridge
+    if (existing != null) {
+        existing.gameId = slot.gameId
+        return
+    }
+    val bridge = LayoutReservationBridge(LayoutReservationStore(webView.context))
+    bridge.gameId = slot.gameId
+    slot.layoutBridge = bridge
+    webView.addJavascriptInterface(bridge, "hubLayout")
+}
 
 private const val MAX_PRESENTATION_RETRIES = 6
 private const val MAX_VIEWPORT_POLLS = 10
