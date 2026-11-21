@@ -12,6 +12,42 @@ import java.util.Base64
 class SharkProgressTest {
 
     @Test
+    fun workstationTowerMatchesLayerObjectAndIdenticalBytesNeedNoOrder() {
+        val shark = "(e^66)3021034938.3367715"
+        val fish = "(e^67)3022000185.462542"
+        val parsed = SharkProgress.parseDecimal(shark)!!
+        assertEquals(66, parsed.tower)
+        assertEquals(BigInteger.valueOf(9), parsed.exponent)
+        val layered = SharkProgress.parseDecimal(
+            JSONObject().put("sign", 1).put("mag", "3021034938.3367715").put("layer", 66),
+        )
+        assertEquals(parsed, layered)
+        val beyondInt = SharkProgress.parseDecimal("1.7304124971475363e5231664430")!!
+        assertEquals("5231664430", beyondInt.exponent.toString())
+        assertEquals(1, beyondInt.tower)
+
+        val live = encode(towerPlayer(shark, fish, feature = 27))
+        assertEquals(SaveStanding.PROGRESSED, SharkProgress.summarize(live).standing)
+        assertEquals(SaveComparison.MATCH, SharkProgress.compare(live, live))
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(live, live))
+
+        val unorderable = encode(towerPlayer(shark, JSONObject().put("mant", "x"), feature = 27))
+        val report = SharkProgress.diagnosePayload(unorderable)
+        assertEquals(SharkParseKind.DECIMAL, report.kind)
+        assertEquals("total_fish", report.field)
+        assertEquals(SaveStanding.UNORDERABLE, SharkProgress.summarize(unorderable).standing)
+        assertEquals(SaveComparison.MATCH, SharkProgress.compare(unorderable, unorderable))
+        assertEquals(ProgressionClass.EQUAL, SharkProgress.classifyCapture(unorderable, unorderable))
+        assertEquals(ProgressionClass.UNORDERED, SharkProgress.classifyCapture(unorderable, live))
+        assertEquals(SaveComparison.INCONCLUSIVE, SharkProgress.compare(unorderable, live))
+
+        val regressed = encode(towerPlayer(shark, fish, feature = 0))
+        assertEquals(ProgressionClass.REGRESSED, SharkProgress.classifyCapture(regressed, live))
+        assertEquals(ProgressionClass.INVALID, SharkProgress.classifyCapture("not-a-save", live))
+        assertEquals(SaveComparison.INCONCLUSIVE, SharkProgress.compare("not-a-save", "not-a-save"))
+    }
+
+    @Test
     fun freshVersionThreeSaveIsNotProgress() {
         val summary = SharkProgress.summarize(encode(fresh()))
         assertEquals(SaveStanding.FRESH, summary.standing)
@@ -321,6 +357,19 @@ class SharkProgressTest {
 
     private fun encode(json: JSONObject): String =
         Base64.getEncoder().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+
+    private fun towerPlayer(shark: Any, fish: Any, feature: Int): JSONObject {
+        return JSONObject()
+            .put("VERSION", 3)
+            .put("feature", feature)
+            .put("totalTimePlayed", 1000)
+            .put("shark_level", shark)
+            .put("total_fish", fish)
+            .put("prestige", JSONObject().put("times", 1))
+            .put("core", JSONObject().put("times", 1))
+            .put("humanoid", JSONObject().put("times", 0))
+            .put("singularity", JSONObject().put("first", true).put("best_bh", "8"))
+    }
 
     private fun milestoneSave(
         fish: Any,

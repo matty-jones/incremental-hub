@@ -13,6 +13,7 @@ import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
 import com.example.hub.games.DocumentLayout
 import com.example.hub.games.SharkIncrementalAdapter
+import com.example.hub.games.SharkLayout
 import com.example.hub.ui.installSharkDocumentStart
 import com.example.hub.ui.prepareSharkViewport
 import com.example.hub.ui.sharkDocumentStartScript
@@ -109,6 +110,77 @@ class DocumentLayoutReadinessTest {
     }
 
     @Test
+    fun missingDocumentElementDoesNotThrowAndLaterInstalls() {
+        val console = Collections.synchronizedList(mutableListOf<String>())
+        val layout = DocumentLayout.injectionScript(
+            411,
+            SharkLayout.STABLE_METRICS,
+            SharkLayout.STABLE_LINE,
+        )
+        val shark = SharkLayout.injectionScript()
+        ActivityScenario.launch(WebViewProbeActivity::class.java).use { scenario ->
+            val web = addPage(scenario, console, 411, 800)
+            val early = json(
+                eval(
+                    web,
+                    "(function(){" +
+                        " var html = document.documentElement;" +
+                        " if (html && html.parentNode) html.parentNode.removeChild(html);" +
+                        " var layoutResult = 'threw'; var sharkResult = 'threw';" +
+                        " try { layoutResult = $layout; } catch (e) { layoutResult = String(e); }" +
+                        " try { sharkResult = $shark; } catch (e) { sharkResult = String(e); }" +
+                        " return JSON.stringify({gone:!document.documentElement," +
+                        " layout:String(layoutResult), shark:String(sharkResult)," +
+                        " metric:!!document.getElementById('${DocumentLayout.METRIC_STYLE_ID}')," +
+                        " style:!!document.getElementById('${SharkLayout.STYLE_ID}')});" +
+                        "})()",
+                ),
+            )
+            assertTrue("documentElement was still present: $early", early.getBoolean("gone"))
+            assertEquals("no-body", early.getString("layout"))
+            assertEquals("no-parent", early.getString("shark"))
+            assertEquals(false, early.getBoolean("metric"))
+            assertEquals(false, early.getBoolean("style"))
+            assertEquals(null, observeFault(console))
+
+            eval(
+                web,
+                "(function(){" +
+                    " var html = document.createElement('html');" +
+                    " var head = document.createElement('head');" +
+                    " var body = document.createElement('body');" +
+                    " html.appendChild(head); html.appendChild(body);" +
+                    " document.appendChild(html);" +
+                    " return 'rebuilt'; })()",
+            )
+            val fitted = json(
+                eval(
+                    web,
+                    "(function(){" +
+                        " var layoutResult = $layout;" +
+                        " var again = $layout;" +
+                        " var sharkResult = $shark;" +
+                        " return JSON.stringify({layout:layoutResult, again:again, shark:sharkResult," +
+                        " metric:!!document.getElementById('${DocumentLayout.METRIC_STYLE_ID}')," +
+                        " style:!!document.getElementById('${SharkLayout.STYLE_ID}')," +
+                        " installs:window.__hubLayoutInstalls||0," +
+                        " fit:typeof window.__hubLayoutFit});" +
+                        "})()",
+                ),
+            )
+            assertEquals(DocumentLayout.MARKER, fitted.getString("layout"))
+            assertEquals(DocumentLayout.MARKER, fitted.getString("again"))
+            assertEquals(SharkLayout.STYLE_ID, fitted.getString("shark"))
+            assertEquals(true, fitted.getBoolean("metric"))
+            assertEquals(true, fitted.getBoolean("style"))
+            assertEquals(1, fitted.getInt("installs"))
+            assertEquals("function", fitted.getString("fit"))
+            assertEquals(null, observeFault(console))
+            scenario.onActivity { web.destroy() }
+        }
+    }
+
+    @Test
     fun sharkColdLaunchesReachReadyAtBothWidths() {
         coldLaunch(411, 800)
         coldLaunch(840, 700)
@@ -134,12 +206,14 @@ class DocumentLayoutReadinessTest {
                         if (!url.contains("shark-incremental")) return
                         starts.incrementAndGet()
                         view.evaluateJavascript(sharkDocumentStartScript(), null)
-                        view.evaluateJavascript(DocumentLayout.injectionScript(width), null)
+                        view.evaluateJavascript(SharkLayout.injectionScript(), null)
+                        view.evaluateJavascript(layoutScript(width), null)
                     }
 
                     override fun onPageFinished(view: WebView, url: String) {
                         if (!url.contains("shark-incremental")) return
-                        view.evaluateJavascript(DocumentLayout.injectionScript(width), null)
+                        view.evaluateJavascript(SharkLayout.injectionScript(), null)
+                        view.evaluateJavascript(layoutScript(width), null)
                         finished.countDown()
                     }
                 }
@@ -241,9 +315,14 @@ class DocumentLayoutReadinessTest {
 
     private fun json(raw: String): JSONObject = JSONObject(raw)
 
+    private fun layoutScript(width: Int): String =
+        DocumentLayout.injectionScript(width, SharkLayout.STABLE_METRICS, SharkLayout.STABLE_LINE)
+
     private fun observeFault(console: List<String>): String? =
         console.firstOrNull {
-            it.contains("not of type 'Node'") || it.contains("Failed to execute 'observe'")
+            it.contains("not of type 'Node'") ||
+                it.contains("Failed to execute 'observe'") ||
+                it.contains("reading 'appendChild'")
         }
 
     companion object {

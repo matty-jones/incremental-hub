@@ -1304,7 +1304,9 @@ class SessionController(
         val comparison = when {
             outcome is PeekOutcome.Failed -> SaveComparison.INCONCLUSIVE
             candidates.isEmpty() -> SaveComparison.NO_SNAPSHOT
-            stored == null && liveSummary.standing != SaveStanding.PROGRESSED -> SaveComparison.INCONCLUSIVE
+            stored == null &&
+                liveSummary.standing != SaveStanding.PROGRESSED &&
+                liveSummary.standing != SaveStanding.UNORDERABLE -> SaveComparison.INCONCLUSIVE
             else -> work.adapter.compare(livePayload, stored)
         }
         val milestone = if (!livePayload.isNullOrBlank() && !stored.isNullOrBlank()) {
@@ -1315,10 +1317,13 @@ class SessionController(
         val classifierRejects = milestone == ProgressionClass.REGRESSED ||
             milestone == ProgressionClass.INCOMPARABLE ||
             milestone == ProgressionClass.INVALID
+        val sharkUnordered = work.gameId == "shark-incremental" &&
+            milestone == ProgressionClass.UNORDERED
         val sharkResume = work.gameId == "shark-incremental" &&
             (
                 milestone == ProgressionClass.EQUAL ||
                     milestone == ProgressionClass.ADVANCED ||
+                    sharkUnordered ||
                     (milestone == null && comparison == SaveComparison.NO_SNAPSHOT)
                 )
         val shouldPlay = launchMode == LaunchMode.RESUME &&
@@ -1340,7 +1345,7 @@ class SessionController(
         val storedSummary = work.adapter.summarize(stored)
         val backupReady = (snapshotDao?.countPinned(work.gameId, SnapshotReasons.DIAGNOSTIC_BACKUP) ?: 0) > 0
         val liveNonEmpty = !livePayload.isNullOrBlank()
-        val ambiguous = liveNonEmpty &&
+        val ambiguous = liveNonEmpty && !sharkUnordered &&
             (
                 comparison == SaveComparison.INCONCLUSIVE ||
                     milestone == ProgressionClass.INCOMPARABLE ||
@@ -1355,6 +1360,8 @@ class SessionController(
             ?.lastOrNull { it.reason == SnapshotReasons.DIAGNOSTIC_BACKUP && it.payload == livePayload }
             ?.capturedAtMillis
         val note = when {
+            shouldPlay && milestone == ProgressionClass.UNORDERED ->
+                "Hub cannot order this save, so it was opened without replacing the protected copy."
             ambiguous ->
                 "Hub cannot tell which copy is ahead, so the game was not opened. Both copies were kept."
             classifierRejects ->
@@ -3757,6 +3764,8 @@ class SessionController(
         }
     }
 
+    private enum class AcceptedResume { NONE, START_LOAD, CONFIRM_READY }
+
     private suspend fun deliverAccepted(gameId: String, commit: CaptureCommit) {
         if (commit.sync) {
             commit.instance?.let { saved ->
@@ -3767,31 +3776,72 @@ class SessionController(
                 }
             }
         }
-        mutex.withLock {
-            if (_activeGameId.value != gameId) return@withLock
+        val action = mutex.withLock {
+            if (_activeGameId.value != gameId) return@withLock AcceptedResume.NONE
             pendingLiveReturn = null
             promotionPayload = null
             _forceSavePrompt.value = null
-            resumeAfterAcceptedSave(gameId, commit.message)
+            resumeActionAfterAcceptedSave(gameId, commit.message)
+        }
+        when (action) {
+            AcceptedResume.NONE -> Unit
+            AcceptedResume.START_LOAD -> mutex.withLock {
+                if (_activeGameId.value == gameId && _state.value is SessionState.Opening) {
+                    beginGameLoadLocked()
+                }
+            }
+            AcceptedResume.CONFIRM_READY -> {
+                val ready = gameReadyNow()
+                mutex.withLock {
+                    if (_activeGameId.value != gameId) return@withLock
+                    if (_state.value !is SessionState.Opening) return@withLock
+                    if (ready && gameDocumentLoaded()) {
+                        transitionTo(SessionState.Playing, gameId)
+                    } else {
+                        if (openStep == OpenStep.LOAD_GAME) openStep = OpenStep.DECIDE
+                        beginGameLoadLocked()
+                    }
+                }
+            }
         }
     }
 
-    private suspend fun resumeAfterAcceptedSave(gameId: String, message: String?) {
+    /**
+     * Accepting a save does not make the game playable. Playing is entered
+     * only after a game document has loaded and the adapter reports ready.
+     */
+    private suspend fun resumeActionAfterAcceptedSave(gameId: String, message: String?): AcceptedResume {
         incidentDetail = null
         setCaptureSuppressed(false)
         _sessionError.value = message
         when (val state = _state.value) {
-            is SessionState.RecoveryRequired, is SessionState.Degraded -> {
-                if (state is SessionState.Degraded) {
-                    transitionTo(SessionState.RecoveryRequired, gameId)
-                }
-                transitionTo(SessionState.Opening, gameId)
-                transitionTo(SessionState.Playing, gameId)
+            is SessionState.Playing -> {
+                if (captureJob?.isActive != true) startCaptureCadence()
+                return AcceptedResume.NONE
             }
-            is SessionState.Opening, is SessionState.Background ->
-                transitionTo(SessionState.Playing, gameId)
-            is SessionState.Playing -> if (captureJob?.isActive != true) startCaptureCadence()
-            else -> Unit
+            is SessionState.Degraded -> {
+                transitionTo(SessionState.RecoveryRequired, gameId)
+                transitionTo(SessionState.Opening, gameId)
+            }
+            is SessionState.RecoveryRequired, is SessionState.Background ->
+                transitionTo(SessionState.Opening, gameId)
+            is SessionState.Opening -> Unit
+            else -> return AcceptedResume.NONE
+        }
+        return if (gameDocumentLoaded()) AcceptedResume.CONFIRM_READY else AcceptedResume.START_LOAD
+    }
+
+    private fun gameDocumentLoaded(): Boolean =
+        documentGate.phase == DocumentPhase.GAME && gameDocumentLoads > 0
+
+    private suspend fun gameReadyNow(): Boolean {
+        val view = webView ?: return false
+        val adapter = activeAdapter ?: return false
+        return try {
+            readinessCheck?.invoke(view, adapter) ?: adapter.awaitReady(view, 30_000L)
+        } catch (e: Exception) {
+            Log.e(TAG, "resume readiness failed", e)
+            false
         }
     }
 

@@ -75,7 +75,6 @@ class SharkIncrementalAdapter : GameAdapter {
             "(function(){ if (typeof player === 'undefined' || player === null) return null;" +
                 " function mag(v){ if (v == null) return null;" +
                 " if (typeof v === 'number' || typeof v === 'string') return v;" +
-                " if (typeof v === 'object' && v.s != null && v.e != null) return {s:v.s, e:v.e};" +
                 " if (typeof v.toString === 'function') return String(v); return null; }" +
                 " return JSON.stringify({" +
                 " VERSION: player.VERSION," +

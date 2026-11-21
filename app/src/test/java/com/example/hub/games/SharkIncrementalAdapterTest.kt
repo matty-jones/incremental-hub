@@ -70,6 +70,8 @@ class SharkIncrementalAdapterTest {
     fun `read script flushes save and write script quotes payload`() {
         assertFalse(SharkIncrementalAdapter.JS_PEEK_SAVE.contains("save("))
         assertFalse(SharkIncrementalAdapter.JS_RUNTIME_PROGRESS.contains("save("))
+        assertTrue(SharkIncrementalAdapter.JS_RUNTIME_PROGRESS.contains("String(v)"))
+        assertFalse(SharkIncrementalAdapter.JS_RUNTIME_PROGRESS.contains("v.s"))
         assertFalse(SharkIncrementalAdapter.JS_UI_READY.contains("save("))
         assertTrue(SharkIncrementalAdapter.JS_UI_READY.contains("app"))
         assertTrue(SharkIncrementalAdapter.JS_UI_READY.contains("getBoundingClientRect"))

@@ -15,6 +15,12 @@ enum class SaveStanding {
     INVALID,
     FRESH,
     PROGRESSED,
+
+    /**
+     * The payload decoded and passed basic validation, but a progression
+     * field cannot be ranked. This is not a corrupt save.
+     */
+    UNORDERABLE,
 }
 
 /**

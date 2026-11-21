@@ -8,7 +8,7 @@ object TrimpsLayout {
     fun injectionScript(): String =
         "(function(){" +
             "var head=document.head||document.documentElement;" +
-            "if(!head) return;" +
+            "if(!head||head.nodeType!==1) return;" +
             "var meta=document.querySelector('meta[name=\"viewport\"]');" +
             "if(!meta){meta=document.createElement('meta');meta.setAttribute('name','viewport');head.appendChild(meta);}" +
             "if(!meta.getAttribute('content')) meta.setAttribute('content','width=device-width, initial-scale=1');" +

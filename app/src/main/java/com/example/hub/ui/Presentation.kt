@@ -114,7 +114,8 @@ fun presentationScript(
         " if (typeof maybeFitToWidth === 'function' && !window.__hubOriginalFit) window.__hubOriginalFit = maybeFitToWidth;" +
         " if (mode === 'readable') {" +
         " if (!node) { node = document.createElement('style'); node.id = '$FE_PRESENTATION_STYLE_ID';" +
-        " (document.head || root).appendChild(node); }" +
+        " var parent = document.head || root;" +
+        " if (parent && parent.nodeType === 1) parent.appendChild(node); }" +
         " node.textContent = css;" +
         " root.style.zoom = '';" +
         " root.style.setProperty('--hub-screen', ((screen && screen.width) || window.innerWidth) + 'px');" +
@@ -184,8 +185,9 @@ fun sharkDocumentStartScript(): String =
         " var root = document.documentElement;" +
         " if (!root) return 'no-root';" +
         " var head = document.head;" +
-        " if (!head) {" +
+        " if (!head || head.nodeType !== 1) {" +
         " head = document.createElement('head');" +
+        " if (!root || root.nodeType !== 1) return 'no-head';" +
         " root.insertBefore(head, root.firstChild);" +
         " }" +
         " var meta = document.querySelector('meta[name=\"viewport\"]');" +
@@ -210,7 +212,7 @@ fun viewportUnlockScript(): String =
         " if (root) root.style.zoom = '';" +
         " if (body) body.style.zoom = '';" +
         " var head = document.head || root;" +
-        " if (!head) return 'no-head';" +
+        " if (!head || head.nodeType !== 1) return 'no-head';" +
         " var meta = document.querySelector('meta[name=\"viewport\"]');" +
         " if (!meta) { meta = document.createElement('meta'); meta.setAttribute('name', 'viewport'); head.appendChild(meta); }" +
         " var next = 'width=device-width, initial-scale=1';" +

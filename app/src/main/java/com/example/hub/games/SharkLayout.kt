@@ -81,13 +81,15 @@ object SharkLayout {
 
     fun injectionScript(): String {
         val quoted = JSONObject.quote(css)
-        return "(function(){ var id = '$STYLE_ID'; var css = $quoted;" +
+        return "(function(){ try { var id = '$STYLE_ID'; var css = $quoted;" +
+            " var parent = document.head || document.documentElement;" +
+            " if (!parent || parent.nodeType !== 1) return 'no-parent';" +
             " ['hub-shark-layout-v2','hub-shark-layout-v3','hub-shark-layout-v4'].forEach(function(old){" +
             " var stale = document.getElementById(old);" +
             " if (stale && stale.parentNode) stale.parentNode.removeChild(stale); });" +
             " var node = document.getElementById(id);" +
-            " if (!node) { node = document.createElement('style'); node.id = id;" +
-            " (document.head || document.documentElement).appendChild(node); }" +
-            " if (node.textContent !== css) node.textContent = css; return id; })()"
+            " if (!node) { node = document.createElement('style'); node.id = id; parent.appendChild(node); }" +
+            " if (node.textContent !== css) node.textContent = css; return id;" +
+            " } catch (e) { return 'no-parent'; } })()"
     }
 }

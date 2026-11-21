@@ -387,11 +387,15 @@ object DocumentLayout {
         if (selectors.isBlank()) return ""
         val css = JSONObject.quote(stableMetricCss(selectors, line))
         val id = METRIC_STYLE_ID
-        return "var hubMetricNode=document.getElementById('$id');" +
+        return "try{" +
+            "var hubMetricNode=document.getElementById('$id');" +
             "if(!hubMetricNode){hubMetricNode=document.createElement('style');" +
             "hubMetricNode.id='$id';" +
-            "(document.head||document.documentElement).appendChild(hubMetricNode);}" +
-            "if(hubMetricNode.textContent!==$css)hubMetricNode.textContent=$css;"
+            "var hubMetricParent=document.head||document.documentElement;" +
+            "if(!hubMetricParent||hubMetricParent.nodeType!==1)hubMetricNode=null;" +
+            "else hubMetricParent.appendChild(hubMetricNode);}" +
+            "if(hubMetricNode&&hubMetricNode.textContent!==$css)hubMetricNode.textContent=$css;" +
+            "}catch(e){}"
     }
 
     private fun stableMetricCss(selectors: String, line: String): String {

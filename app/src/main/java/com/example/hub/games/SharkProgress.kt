@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.math.RoundingMode
 import java.util.Base64
 
 /**
@@ -143,16 +144,19 @@ data class SharkProgress(
             }
             val report = diagnosePayload(payload)
             val progress = report.progress
-            if (progress == null || progress.version < SharkIncrementalAdapter.MIN_VERSION) {
-                return SaveSummary(
-                    SaveStanding.INVALID,
-                    progress?.version,
-                    report.detail,
-                    payload.length,
-                )
+            if (progress != null && progress.version >= SharkIncrementalAdapter.MIN_VERSION) {
+                val standing = if (progress.fresh) SaveStanding.FRESH else SaveStanding.PROGRESSED
+                return SaveSummary(standing, progress.version, progress.detail(), payload.length)
             }
-            val standing = if (progress.fresh) SaveStanding.FRESH else SaveStanding.PROGRESSED
-            return SaveSummary(standing, progress.version, progress.detail(), payload.length)
+            if (report.kind == SharkParseKind.DECIMAL) {
+                return SaveSummary(SaveStanding.UNORDERABLE, null, report.detail, payload.length)
+            }
+            return SaveSummary(
+                SaveStanding.INVALID,
+                progress?.version,
+                report.detail,
+                payload.length,
+            )
         }
 
         /**
@@ -174,18 +178,40 @@ data class SharkProgress(
         fun classifyCapture(candidate: String?, reference: String?): ProgressionClass {
             if (candidate.isNullOrBlank()) return ProgressionClass.INVALID
             val report = diagnosePayload(candidate)
+            if (report.kind == SharkParseKind.BASE64 || report.kind == SharkParseKind.JSON) {
+                return ProgressionClass.INVALID
+            }
+            if (report.kind == SharkParseKind.INVALID_GAME && report.field == "VERSION") {
+                return ProgressionClass.INVALID
+            }
+            if (!reference.isNullOrBlank() && candidate == reference && !blocksByteEquality(report)) {
+                return ProgressionClass.EQUAL
+            }
             val current = report.progress
             if (current == null || current.version < SharkIncrementalAdapter.MIN_VERSION) {
+                if (report.kind == SharkParseKind.DECIMAL) return ProgressionClass.UNORDERED
                 val preserve = report.kind == SharkParseKind.MISSING_FIELD ||
-                    report.kind == SharkParseKind.DECIMAL ||
                     (report.kind == SharkParseKind.INVALID_GAME && report.field != "VERSION")
                 return if (preserve) ProgressionClass.INCOMPARABLE else ProgressionClass.INVALID
             }
             if (reference.isNullOrBlank()) return ProgressionClass.ADVANCED
-            val stored = parsePayload(reference) ?: return ProgressionClass.INCOMPARABLE
-            if (stored.version < SharkIncrementalAdapter.MIN_VERSION) return ProgressionClass.INCOMPARABLE
-            if (candidate == reference) return ProgressionClass.EQUAL
+            val storedReport = diagnosePayload(reference)
+            val stored = storedReport.progress
+            if (stored == null || stored.version < SharkIncrementalAdapter.MIN_VERSION) {
+                return if (storedReport.kind == SharkParseKind.DECIMAL) {
+                    ProgressionClass.UNORDERED
+                } else {
+                    ProgressionClass.INCOMPARABLE
+                }
+            }
             return orderMilestones(current, stored)
+        }
+
+        /** Corrupt bytes are not a match, even when the two strings are identical. */
+        private fun blocksByteEquality(report: SharkParseReport): Boolean {
+            return report.kind == SharkParseKind.BASE64 ||
+                report.kind == SharkParseKind.JSON ||
+                report.kind == SharkParseKind.INVALID_GAME
         }
 
         /**
@@ -232,11 +258,20 @@ data class SharkProgress(
         }
 
         fun compare(livePayload: String?, storedPayload: String?): SaveComparison {
+            if (!livePayload.isNullOrBlank() && livePayload == storedPayload &&
+                !blocksByteEquality(diagnosePayload(livePayload))
+            ) {
+                return SaveComparison.MATCH
+            }
             val storedSummary = summarize(storedPayload)
             if (storedSummary.standing == SaveStanding.ABSENT) return SaveComparison.NO_SNAPSHOT
             val liveSummary = summarize(livePayload)
             if (liveSummary.standing == SaveStanding.ABSENT) return SaveComparison.LIVE_MISSING
-            if (liveSummary.standing == SaveStanding.INVALID || storedSummary.standing == SaveStanding.INVALID) {
+            if (liveSummary.standing == SaveStanding.INVALID ||
+                storedSummary.standing == SaveStanding.INVALID ||
+                liveSummary.standing == SaveStanding.UNORDERABLE ||
+                storedSummary.standing == SaveStanding.UNORDERABLE
+            ) {
                 return SaveComparison.INCONCLUSIVE
             }
             val live = parsePayload(livePayload) ?: return SaveComparison.INCONCLUSIVE
@@ -505,19 +540,75 @@ data class SharkProgress(
 
         fun parseDecimal(value: Any?): DecimalRank? = when (value) {
             null, JSONObject.NULL -> null
-            is JSONObject -> {
-                if (!value.has("s") || !value.has("e") || value.isNull("s") || value.isNull("e")) null
-                else {
-                    val sign = value.optInt("s")
-                    if (sign == 0) DecimalRank(0, BigInteger.ZERO)
-                    else {
-                        val exponent = exponentRank(value.opt("e")) ?: return null
-                        DecimalRank(sign.coerceIn(-1, 1), exponent.exponent, exponent.tower)
-                    }
-                }
-            }
+            is JSONObject -> parseDecimalObject(value)
             is Number -> if (isNan(value)) null else runCatching { rankOf(BigDecimal(value.toString())) }.getOrNull()
             is String -> rankString(value)
+            else -> null
+        }
+
+        /**
+         * `{s, e}` is break_infinity. `{sign, mag, layer}` is break_eternity.
+         * The layer object is ranked as the same string `toString()` would save.
+         */
+        private fun parseDecimalObject(value: JSONObject): DecimalRank? {
+            if (value.has("sign") && value.has("mag") && value.has("layer") &&
+                !value.isNull("sign") && !value.isNull("mag") && !value.isNull("layer")
+            ) {
+                return rankLayeredDecimal(value)
+            }
+            if (!value.has("s") || !value.has("e") || value.isNull("s") || value.isNull("e")) return null
+            val sign = value.optInt("s")
+            if (sign == 0) return DecimalRank(0, BigInteger.ZERO)
+            val exponent = exponentRank(value.opt("e")) ?: return null
+            return DecimalRank(sign.coerceIn(-1, 1), exponent.exponent, exponent.tower)
+        }
+
+        private fun rankLayeredDecimal(value: JSONObject): DecimalRank? {
+            val sign = intField(value, "sign") ?: return null
+            val layer = intField(value, "layer") ?: return null
+            if (layer < 0 || layer > 1_000_000) return null
+            val magText = magnitudeText(value.opt("mag")) ?: return null
+            if (magText.equals("NaN", ignoreCase = true)) return null
+            if (sign == 0 || magText == "0" || magText == "-0") return DecimalRank(0, BigInteger.ZERO)
+            val coerced = sign.coerceIn(-1, 1)
+            if (layer == 0) {
+                val literal = if (coerced < 0 && !magText.startsWith("-")) "-$magText" else magText
+                return rankString(literal)
+            }
+            if (layer == 1) {
+                val mag = runCatching { BigDecimal(magText) }.getOrNull() ?: return null
+                val exponent = mag.setScale(0, RoundingMode.FLOOR).toBigInteger()
+                return DecimalRank(coerced, exponent, 1)
+            }
+            val body = if (magText.startsWith("+")) magText.drop(1) else magText
+            val prefix = if (coerced < 0) "-" else ""
+            val literal = if (layer <= 5) {
+                prefix + "e".repeat(layer) + body
+            } else {
+                prefix + "(e^$layer)" + body
+            }
+            return rankString(literal)
+        }
+
+        private fun intField(json: JSONObject, key: String): Int? {
+            if (!json.has(key) || json.isNull(key)) return null
+            return when (val raw = json.opt(key)) {
+                is Number -> raw.toInt()
+                is String -> raw.toIntOrNull()
+                else -> null
+            }
+        }
+
+        private fun magnitudeText(raw: Any?): String? = when (raw) {
+            null, JSONObject.NULL -> null
+            is String -> raw.trim().ifEmpty { null }
+            is Number -> {
+                if (isNan(raw) || (raw is Double && raw.isInfinite()) || (raw is Float && raw.isInfinite())) {
+                    null
+                } else {
+                    runCatching { BigDecimal(raw.toString()).stripTrailingZeros().toPlainString() }.getOrNull()
+                }
+            }
             else -> null
         }
 

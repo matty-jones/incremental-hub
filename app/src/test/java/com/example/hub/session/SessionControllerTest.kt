@@ -2494,6 +2494,85 @@ class SessionControllerTest {
     }
 
     @Test
+    fun identicalExtremeTowerSaveLoadsOnceAndPlays() = runTest {
+        val payload = towerSave("(e^66)3021034938.3367715", "(e^67)3022000185.462542")
+        dao.upsert(progressedInstance(payload, playedAt = 50L))
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(payload) },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.Playing, session.state.value)
+        assertTrue(session.gameDocumentLoads >= 1)
+        assertEquals(DocumentPhase.GAME, session.documentGate.phase)
+        assertEquals(payload, dao.get("shark-incremental")!!.snapshotPayload)
+        session.forceCloseForTest()
+    }
+
+    @Test
+    fun intactUnorderableSaveOpensAndASecondLaunchStaysOpen() = runTest {
+        val stored = towerSave("(e^66)3021034938.3367715", "(e^67)3022000185.462542")
+        val live = towerSave("(e^66)3021034938.3367715", JSONObject().put("mant", "x"))
+        dao.upsert(progressedInstance(stored, playedAt = 50L))
+        val first = launchShark(live)
+        assertEquals(SessionState.Playing, first.state.value)
+        assertTrue(first.gameDocumentLoads >= 1)
+        assertEquals(DocumentPhase.GAME, first.documentGate.phase)
+        assertEquals(stored, dao.get("shark-incremental")!!.snapshotPayload)
+        first.forceCloseForTest()
+
+        val second = launchShark(live)
+        assertEquals(SessionState.Playing, second.state.value)
+        assertEquals(stored, dao.get("shark-incremental")!!.snapshotPayload)
+        second.forceCloseForTest()
+    }
+
+    @Test
+    fun corruptSharkPayloadStaysInRecovery() = runTest {
+        dao.upsert(progressedInstance(progressedSharkPayload(), playedAt = 10L))
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value("not-a-save") },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        assertEquals(SessionState.RecoveryRequired, session.state.value)
+        assertEquals(0, session.gameDocumentLoads)
+        assertEquals(DocumentPhase.PEEK, session.documentGate.phase)
+        session.forceCloseForTest()
+    }
+
+    private suspend fun launchShark(live: String): SessionController {
+        val session = controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
+            peek = { _, _ -> PeekOutcome.Value(live) },
+        )
+        session.open("shark-incremental")
+        session.registerWebView(WebView(ApplicationProvider.getApplicationContext()))
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
+        return session
+    }
+
+    private fun towerSave(shark: Any, fish: Any): String {
+        val json = JSONObject()
+            .put("VERSION", 3)
+            .put("feature", 27)
+            .put("totalTimePlayed", 1000)
+            .put("shark_level", shark)
+            .put("total_fish", fish)
+            .put("prestige", JSONObject().put("times", 1))
+            .put("core", JSONObject().put("times", 1))
+            .put("humanoid", JSONObject().put("times", 0))
+            .put("singularity", JSONObject().put("first", true).put("best_bh", "8"))
+        return Base64.getEncoder().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    @Test
     fun confirmedPromotionMovesTheBlackHoleSaveAndResumesCapture() = runTest {
         val before = sharkResource("before-black-hole.b64")
         val after = sharkResource("after-black-hole.b64")
@@ -2513,6 +2592,10 @@ class SessionControllerTest {
         val stored = dao.get("shark-incremental")!!
         assertEquals(after, stored.snapshotPayload)
         assertNull(stored.captureIncident)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertTrue(session.gameDocumentLoads >= 1)
+        assertEquals(DocumentPhase.GAME, session.documentGate.phase)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
         assertEquals(SessionState.Playing, session.state.value)
         assertEquals(after, snapshots.getById(stored.highWaterSnapshotId!!)!!.payload)
         assertTrue(snapshots.history("shark-incremental").any { it.payload == before })
@@ -2588,6 +2671,7 @@ class SessionControllerTest {
         val synced = mutableListOf<String?>()
         val session = controllerWithoutDocumentHook(
             documentReady = { true },
+            readiness = { _, _ -> true },
             capture = { _, _ -> payload },
             peek = { _, _ -> PeekOutcome.Value(payload) },
             snapshots = snapshots,
@@ -2609,6 +2693,10 @@ class SessionControllerTest {
         val stored = dao.get("shark-incremental")!!
         assertEquals(regressed, stored.snapshotPayload)
         assertNull(stored.captureIncident)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertTrue(session.gameDocumentLoads >= 1)
+        assertEquals(DocumentPhase.GAME, session.documentGate.phase)
+        session.onMainFrameFinished("https://mrredshark77.github.io/shark-incremental/")
         assertEquals(SessionState.Playing, session.state.value)
         assertTrue(snapshots.history("shark-incremental").any { it.payload == kept && it.pinned })
         assertTrue(synced.contains(regressed))
@@ -2632,6 +2720,7 @@ class SessionControllerTest {
         val synced = mutableListOf<String?>()
         val session = controllerWithoutDocumentHook(
             documentReady = { true },
+            readiness = { _, _ -> true },
             capture = { _, _ -> payload },
             peek = { _, _ -> PeekOutcome.Value(payload) },
             snapshots = snapshots,
@@ -2648,6 +2737,10 @@ class SessionControllerTest {
         session.confirmForceSave(confirmed = true)
         assertEquals("beta-save", dao.get("opaque-game")!!.snapshotPayload)
         assertNull(dao.get("opaque-game")!!.captureIncident)
+        assertEquals(SessionState.Opening, session.state.value)
+        assertTrue(session.gameDocumentLoads >= 1)
+        assertEquals(DocumentPhase.GAME, session.documentGate.phase)
+        session.onMainFrameFinished("https://example.test/opaque/")
         assertEquals(SessionState.Playing, session.state.value)
         assertTrue(snapshots.history("opaque-game").any { it.payload == "alpha-save" && it.pinned })
         assertTrue(synced.contains("beta-save"))
@@ -4082,6 +4175,7 @@ class SessionControllerTest {
         runtimeOk: () -> Boolean,
     ): SessionController {
         return controllerWithoutDocumentHook(
+            readiness = { _, _ -> true },
             capture = { _, _ -> live },
             peek = { _, _ -> PeekOutcome.Value(live) },
             runtime = { _, _, _ -> runtimeOk() },
