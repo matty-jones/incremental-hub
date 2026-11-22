@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.hub"
         minSdk = 30
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.1.34"
+        versionCode = 36
+        versionName = "0.1.35"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BASE_URL", "\"http://192.168.86.3:8006/\"")
