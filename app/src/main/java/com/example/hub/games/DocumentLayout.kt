@@ -151,78 +151,7 @@ object DocumentLayout {
             " }" +
             " table.setAttribute('data-hub-fit', 'table');" +
             "}" +
-            "function zoomText(value) {" +
-            " if (!value || value === 'normal') return '';" +
-            " var n = parseFloat(value);" +
-            " if (!(n > 0) || n >= 0.999) return '';" +
-            " return String(Math.round(n * 1000) / 1000);" +
-            "}" +
-            "function scale(el) {" +
-            " if (hidden(el)) return;" +
-            " var parent = el.parentElement;" +
-            " var avail = parent ? parent.clientWidth : visibleWidth();" +
-            " var visible = visibleWidth();" +
-            " if (visible > 0) avail = Math.min(avail || visible, visible);" +
-            " if (!(avail > 8)) return;" +
-            " var previous = zoomText(el.style.zoom);" +
-            " var zoomNow = parseFloat(previous);" +
-            " if (!(zoomNow > 0)) zoomNow = 1;" +
-            " var inset = 0;" +
-            " if (parent) {" +
-            " var bounds = el.getBoundingClientRect();" +
-            " var host = parent.getBoundingClientRect();" +
-            " inset = (bounds.left - host.left) / zoomNow;" +
-            " }" +
-            " if (!(inset > 0) || inset >= avail) inset = 0;" +
-            " var apparent = el.scrollWidth;" +
-            " var storedApparent = parseFloat(el.getAttribute('data-hub-apparent') || '');" +
-            " var geo = Math.round(avail) + ':' + Math.round(inset);" +
-            " var storedRoom = el.getAttribute('data-hub-room') || '';" +
-            " var storedGeo = storedRoom.split(':').slice(0, 2).join(':');" +
-            " if (el.getAttribute('data-hub-fit') === 'zoom' && geo === storedGeo &&" +
-            " Math.abs(apparent - storedApparent) <= 1) {" +
-            " el.removeAttribute('data-hub-dirty');" +
-            " return;" +
-            " }" +
-            " var needed = zoomNow < 0.999 ? apparent / zoomNow : apparent;" +
-            " var dirty = el.getAttribute('data-hub-dirty') === '1';" +
-            " if (!(needed > 8)) {" +
-            " if (dirty) el.removeAttribute('data-hub-dirty');" +
-            " return;" +
-            " }" +
-            " var room = avail - inset;" +
-            " var zoom = Math.min(1, (room - 4) / needed);" +
-            " var next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
-            " var signature = Math.round(avail) + ':' + Math.round(inset) + ':' + Math.round(needed);" +
-            " if (!dirty && el.getAttribute('data-hub-fit') === 'zoom' &&" +
-            " el.getAttribute('data-hub-room') === signature && previous === next) return;" +
-            " /* Assigning the same zoom again resets scroll anchoring on mobile WebView. */" +
-            " if (zoomNow < 0.999 && previous !== next) {" +
-            " el.style.zoom = '1';" +
-            " var measured = el.scrollWidth;" +
-            " if (!(measured > 8)) {" +
-            " el.style.zoom = previous;" +
-            " el.removeAttribute('data-hub-dirty');" +
-            " return;" +
-            " }" +
-            " needed = measured;" +
-            " room = avail - inset;" +
-            " zoom = Math.min(1, (room - 4) / needed);" +
-            " next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';" +
-            " signature = Math.round(avail) + ':' + Math.round(inset) + ':' + Math.round(needed);" +
-            " }" +
-            " el.setAttribute('data-hub-fit', 'zoom');" +
-            " el.setAttribute('data-hub-room', signature);" +
-            " el.removeAttribute('data-hub-dirty');" +
-            " if (previous === next) {" +
-            " if (zoomText(el.style.zoom) !== previous) el.style.zoom = previous;" +
-            " el.setAttribute('data-hub-apparent', String(Math.round(el.scrollWidth)));" +
-            " return;" +
-            " }" +
-            " window.__hubZoomWrites = (window.__hubZoomWrites || 0) + 1;" +
-            " el.style.zoom = next;" +
-            " el.setAttribute('data-hub-apparent', String(Math.round(el.scrollWidth)));" +
-            "}" +
+            spatialScaler() +
             "function spill(el) {" +
             " if (!el || el === document.body || el === document.documentElement) return;" +
             " if (inSpatial(el)) return;" +
@@ -303,6 +232,11 @@ object DocumentLayout {
             " (node.closest ? node.closest(SPATIAL) : null);" +
             " if (board) board.setAttribute('data-hub-dirty', '1');" +
             "}" +
+            "function elementChange(list) {" +
+            " if (!list) return false;" +
+            " for (var i = 0; i < list.length; i++) if (list[i] && list[i].nodeType === 1) return true;" +
+            " return false;" +
+            "}" +
             "var appObs = new MutationObserver(function(records){" +
             " var structural = false;" +
             " for (var i = 0; i < records.length; i++) {" +
@@ -312,7 +246,9 @@ object DocumentLayout {
             " for (var n = 0; n < arrived.length; n++) {" +
             " if (arrived[n].nodeType === 1 && window.__hubStableQueue) window.__hubStableQueue(); }" +
             " if (target.closest && target.closest(SPATIAL)) {" +
+            " if (elementChange(records[i].addedNodes) || elementChange(records[i].removedNodes)) {" +
             " markBoard(target); structural = true; break; }" +
+            " continue; }" +
             " if (target.matches && target.matches('[id' + '$=' + '\"-tab\"]')) {" +
             " structural = true; break; }" +
             " var added = records[i].addedNodes;" +
@@ -381,6 +317,82 @@ object DocumentLayout {
             "if (ready === 'no-body' && (!document.body || document.body.nodeType !== 1)) armWait();" +
             "return ready;" +
             "})()"
+    }
+
+    private fun spatialScaler(): String {
+        val measure = StringBuilder()
+        measure.append("function zoomText(value) {")
+        measure.append(" if (!value || value === 'normal') return '';")
+        measure.append(" var n = parseFloat(value);")
+        measure.append(" if (!(n > 0) || n >= 0.999) return '';")
+        measure.append(" return String(Math.round(n * 1000) / 1000);")
+        measure.append("}")
+        measure.append("function roughAvail(el) {")
+        measure.append(" var parent = el.parentElement;")
+        measure.append(" var avail = parent ? parent.clientWidth : 0;")
+        measure.append(" var visible = visibleWidth();")
+        measure.append(" if (visible > 0) avail = Math.min(avail || visible, visible);")
+        measure.append(" return avail;")
+        measure.append("}")
+        measure.append("function fittedAvail(el, rough) {")
+        measure.append(" var zoomNow = parseFloat(zoomText(el.style.zoom));")
+        measure.append(" if (!(zoomNow > 0)) zoomNow = 1;")
+        measure.append(" var parent = el.parentElement;")
+        measure.append(" var parentW = parent ? parent.clientWidth : 0;")
+        measure.append(" var stored = parseFloat(el.getAttribute('data-hub-avail') || '');")
+        measure.append(" var visible = visibleWidth();")
+        measure.append(" if (zoomNow < 0.999 && parentW > 0) {")
+        measure.append(" var boardW = el.getBoundingClientRect().width;")
+        measure.append(" if (boardW > 8 && parentW <= boardW + 2) {")
+        measure.append(" var kept = stored > 8 ? stored : visible;")
+        measure.append(" if (visible > 0) kept = Math.min(kept || visible, visible);")
+        measure.append(" return kept; } }")
+        measure.append(" return rough;")
+        measure.append("}")
+        val apply = StringBuilder()
+        apply.append("function scale(el) {")
+        apply.append(" if (hidden(el)) return;")
+        apply.append(" var fitted = el.getAttribute('data-hub-fit') === 'zoom';")
+        apply.append(" var dirty = el.getAttribute('data-hub-dirty') === '1';")
+        apply.append(" var rough = roughAvail(el);")
+        apply.append(" if (!(rough > 8)) return;")
+        apply.append(" var roughKey = String(Math.round(rough));")
+        apply.append(" if (fitted && !dirty && el.getAttribute('data-hub-avail') === roughKey) return;")
+        apply.append(" var avail = fittedAvail(el, rough);")
+        apply.append(" if (!(avail > 8)) return;")
+        apply.append(" var availKey = String(Math.round(avail));")
+        apply.append(" if (fitted && !dirty && el.getAttribute('data-hub-avail') === availKey) return;")
+        apply.append(" var previous = zoomText(el.style.zoom);")
+        apply.append(" if (previous) el.style.zoom = '1';")
+        apply.append(" var needed = el.scrollWidth;")
+        apply.append(" var inset = 0;")
+        apply.append(" var parent = el.parentElement;")
+        apply.append(" if (parent) {")
+        apply.append(" var bounds = el.getBoundingClientRect();")
+        apply.append(" var host = parent.getBoundingClientRect();")
+        apply.append(" inset = bounds.left - host.left;")
+        apply.append(" }")
+        apply.append(" if (!(inset > 0) || inset >= avail) inset = 0;")
+        apply.append(" if (!(needed > 8)) {")
+        apply.append(" if (previous) el.style.zoom = previous;")
+        apply.append(" el.removeAttribute('data-hub-dirty');")
+        apply.append(" return;")
+        apply.append(" }")
+        apply.append(" var zoom = Math.min(1, (avail - inset - 4) / needed);")
+        apply.append(" var next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';")
+        apply.append(" el.setAttribute('data-hub-fit', 'zoom');")
+        apply.append(" el.setAttribute('data-hub-avail', availKey);")
+        apply.append(" el.setAttribute('data-hub-room', availKey + ':' + Math.round(inset) + ':' + Math.round(needed));")
+        apply.append(" el.setAttribute('data-hub-apparent', String(Math.round(needed)));")
+        apply.append(" el.removeAttribute('data-hub-dirty');")
+        apply.append(" if (previous === next) {")
+        apply.append(" if (zoomText(el.style.zoom) !== previous) el.style.zoom = previous;")
+        apply.append(" return;")
+        apply.append(" }")
+        apply.append(" window.__hubZoomWrites = (window.__hubZoomWrites || 0) + 1;")
+        apply.append(" el.style.zoom = next;")
+        apply.append("}")
+        return measure.toString() + apply.toString()
     }
 
     private fun stableMetricInstaller(selectors: String, line: String): String {
