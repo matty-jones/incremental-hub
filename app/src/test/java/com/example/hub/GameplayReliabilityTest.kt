@@ -193,6 +193,33 @@ class GameplayReliabilityTest {
     }
 
     @Test
+    fun spatialBoardFitsOrPansFromItsChildExtent() {
+        val script = DocumentLayout.injectionScript(411)
+        val guard = script.indexOf("el.getAttribute('data-hub-avail') === roughKey) return")
+        val probe = script.indexOf("el.style.zoom = '1'")
+        val pan = script.indexOf("applyPan(el, pan);")
+        val writes = script.indexOf("window.__hubZoomWrites")
+        assertTrue(guard in 0 until probe)
+        assertTrue(pan in probe until writes)
+        assertTrue(script.contains("function boardExtent(el)"))
+        assertTrue(script.contains("box.right > right"))
+        assertTrue(script.contains("function comfortFloor(el)"))
+        assertTrue(script.contains("Math.min(48, side)"))
+        assertTrue(script.contains("needed <= room + 16"))
+        assertTrue(script.contains("el.style.boxSizing = 'border-box'"))
+        assertTrue(script.contains("bounds.left - host.left"))
+        assertTrue(script.contains("overflowX = 'auto'"))
+        assertTrue(script.contains("maxWidth = '100%'"))
+        assertTrue(script.contains("overscrollBehaviorX = 'contain'"))
+        assertTrue(script.contains("setAttribute('data-hub-pan-host', 'wrap')"))
+        assertTrue(script.contains("setAttribute('data-hub-pan-host', '1')"))
+        assertTrue(script.contains("previous === next"))
+        assertFalse(script.contains("localStorage"))
+        assertFalse(script.contains("location.reload"))
+        assertFalse(script.contains("save("))
+    }
+
+    @Test
     fun stableMetricRegionReservesSpaceWithoutWatchingText() {
         val plain = DocumentLayout.injectionScript(411)
         val script = DocumentLayout.injectionScript(

@@ -6,8 +6,11 @@ import org.json.JSONObject
  * Fits a game document to the live viewport.
  *
  * Independent rows and grids wrap. Boards whose columns are the mechanic
- * keep their column count and scale down. A box that still sticks out can
- * scroll on its own. The document is not reloaded and storage is not read.
+ * keep their column count. They scale down while each control stays at
+ * least its current size or 48 CSS pixels, whichever is smaller, and pan
+ * inside the widget when that scale still overflows. A box that still
+ * sticks out can scroll on its own. The document is not reloaded and
+ * storage is not read.
  *
  * [stableMetrics] is a stylesheet floor for a few known sentences.
  * Recurring jumps elsewhere are reserved by one layout-shift observer.
@@ -319,81 +322,152 @@ object DocumentLayout {
             "})()"
     }
 
-    private fun spatialScaler(): String {
-        val measure = StringBuilder()
-        measure.append("function zoomText(value) {")
-        measure.append(" if (!value || value === 'normal') return '';")
-        measure.append(" var n = parseFloat(value);")
-        measure.append(" if (!(n > 0) || n >= 0.999) return '';")
-        measure.append(" return String(Math.round(n * 1000) / 1000);")
-        measure.append("}")
-        measure.append("function roughAvail(el) {")
-        measure.append(" var parent = el.parentElement;")
-        measure.append(" var avail = parent ? parent.clientWidth : 0;")
-        measure.append(" var visible = visibleWidth();")
-        measure.append(" if (visible > 0) avail = Math.min(avail || visible, visible);")
-        measure.append(" return avail;")
-        measure.append("}")
-        measure.append("function fittedAvail(el, rough) {")
-        measure.append(" var zoomNow = parseFloat(zoomText(el.style.zoom));")
-        measure.append(" if (!(zoomNow > 0)) zoomNow = 1;")
-        measure.append(" var parent = el.parentElement;")
-        measure.append(" var parentW = parent ? parent.clientWidth : 0;")
-        measure.append(" var stored = parseFloat(el.getAttribute('data-hub-avail') || '');")
-        measure.append(" var visible = visibleWidth();")
-        measure.append(" if (zoomNow < 0.999 && parentW > 0) {")
-        measure.append(" var boardW = el.getBoundingClientRect().width;")
-        measure.append(" if (boardW > 8 && parentW <= boardW + 2) {")
-        measure.append(" var kept = stored > 8 ? stored : visible;")
-        measure.append(" if (visible > 0) kept = Math.min(kept || visible, visible);")
-        measure.append(" return kept; } }")
-        measure.append(" return rough;")
-        measure.append("}")
-        val apply = StringBuilder()
-        apply.append("function scale(el) {")
-        apply.append(" if (hidden(el)) return;")
-        apply.append(" var fitted = el.getAttribute('data-hub-fit') === 'zoom';")
-        apply.append(" var dirty = el.getAttribute('data-hub-dirty') === '1';")
-        apply.append(" var rough = roughAvail(el);")
-        apply.append(" if (!(rough > 8)) return;")
-        apply.append(" var roughKey = String(Math.round(rough));")
-        apply.append(" if (fitted && !dirty && el.getAttribute('data-hub-avail') === roughKey) return;")
-        apply.append(" var avail = fittedAvail(el, rough);")
-        apply.append(" if (!(avail > 8)) return;")
-        apply.append(" var availKey = String(Math.round(avail));")
-        apply.append(" if (fitted && !dirty && el.getAttribute('data-hub-avail') === availKey) return;")
-        apply.append(" var previous = zoomText(el.style.zoom);")
-        apply.append(" if (previous) el.style.zoom = '1';")
-        apply.append(" var needed = el.scrollWidth;")
-        apply.append(" var inset = 0;")
-        apply.append(" var parent = el.parentElement;")
-        apply.append(" if (parent) {")
-        apply.append(" var bounds = el.getBoundingClientRect();")
-        apply.append(" var host = parent.getBoundingClientRect();")
-        apply.append(" inset = bounds.left - host.left;")
-        apply.append(" }")
-        apply.append(" if (!(inset > 0) || inset >= avail) inset = 0;")
-        apply.append(" if (!(needed > 8)) {")
-        apply.append(" if (previous) el.style.zoom = previous;")
-        apply.append(" el.removeAttribute('data-hub-dirty');")
-        apply.append(" return;")
-        apply.append(" }")
-        apply.append(" var zoom = Math.min(1, (avail - inset - 4) / needed);")
-        apply.append(" var next = zoom < 0.999 ? String(Math.round(zoom * 1000) / 1000) : '';")
-        apply.append(" el.setAttribute('data-hub-fit', 'zoom');")
-        apply.append(" el.setAttribute('data-hub-avail', availKey);")
-        apply.append(" el.setAttribute('data-hub-room', availKey + ':' + Math.round(inset) + ':' + Math.round(needed));")
-        apply.append(" el.setAttribute('data-hub-apparent', String(Math.round(needed)));")
-        apply.append(" el.removeAttribute('data-hub-dirty');")
-        apply.append(" if (previous === next) {")
-        apply.append(" if (zoomText(el.style.zoom) !== previous) el.style.zoom = previous;")
-        apply.append(" return;")
-        apply.append(" }")
-        apply.append(" window.__hubZoomWrites = (window.__hubZoomWrites || 0) + 1;")
-        apply.append(" el.style.zoom = next;")
-        apply.append("}")
-        return measure.toString() + apply.toString()
-    }
+    private fun spatialScaler(): String = """
+        function zoomText(value) {
+          if (!value || value === 'normal') return '';
+          var n = parseFloat(value);
+          if (!(n > 0) || n >= 0.999) return '';
+          return String(Math.round(n * 1000) / 1000);
+        }
+        function roughAvail(el) {
+          var parent = el.parentElement;
+          var avail = parent ? parent.clientWidth : 0;
+          var visible = visibleWidth();
+          if (visible > 0) avail = Math.min(avail || visible, visible);
+          return avail;
+        }
+        function fittedAvail(el, rough) {
+          var zoomNow = parseFloat(zoomText(el.style.zoom));
+          if (!(zoomNow > 0)) zoomNow = 1;
+          var parent = el.parentElement;
+          var parentW = parent ? parent.clientWidth : 0;
+          var stored = parseFloat(el.getAttribute('data-hub-avail') || '');
+          var visible = visibleWidth();
+          if (zoomNow < 0.999 && parentW > 0) {
+            var boardW = el.getBoundingClientRect().width;
+            if (boardW > 8 && parentW <= boardW + 2) {
+              var kept = stored > 8 ? stored : visible;
+              if (visible > 0) kept = Math.min(kept || visible, visible);
+              return kept;
+            }
+          }
+          return rough;
+        }
+        function boardExtent(el) {
+          var rect = el.getBoundingClientRect();
+          var left = rect.left;
+          var right = rect.right;
+          var kids = el.children;
+          for (var i = 0; i < kids.length; i++) {
+            var kid = kids[i];
+            if (!kid || kid.nodeType !== 1 || hidden(kid)) continue;
+            var box = kid.getBoundingClientRect();
+            if (box.width < 1 && box.height < 1) continue;
+            if (box.left < left) left = box.left;
+            if (box.right > right) right = box.right;
+          }
+          return right - left;
+        }
+        function comfortFloor(el) {
+          var floor = 0;
+          var controls = el.querySelectorAll('button, a, input, [onclick]');
+          for (var i = 0; i < controls.length; i++) {
+            var control = controls[i];
+            if (!control || hidden(control)) continue;
+            var box = control.getBoundingClientRect();
+            var side = Math.min(box.width, box.height);
+            if (!(side > 0)) continue;
+            var limit = Math.min(48, side);
+            var need = limit / side;
+            if (need > floor) floor = need;
+          }
+          return floor;
+        }
+        function applyPan(el, on) {
+          var parent = el.parentElement;
+          if (!on) {
+            el.removeAttribute('data-hub-pan');
+            if (!parent) return;
+            var mark = parent.getAttribute('data-hub-pan-host');
+            if (!mark) return;
+            parent.style.overflowX = '';
+            parent.style.maxWidth = '';
+            parent.style.overscrollBehaviorX = '';
+            if (mark !== 'wrap') parent.removeAttribute('data-hub-pan-host');
+            return;
+          }
+          var host = parent;
+          if (!host || host === document.body || host === document.documentElement) {
+            var wrap = document.createElement('div');
+            wrap.setAttribute('data-hub-pan-host', 'wrap');
+            if (host) host.insertBefore(wrap, el);
+            wrap.appendChild(el);
+            host = wrap;
+          }
+          host.style.overflowX = 'auto';
+          host.style.maxWidth = '100%';
+          host.style.overscrollBehaviorX = 'contain';
+          if (!host.getAttribute('data-hub-pan-host')) host.setAttribute('data-hub-pan-host', '1');
+          el.setAttribute('data-hub-pan', '1');
+        }
+        function scale(el) {
+          if (hidden(el)) return;
+          var fitted = el.getAttribute('data-hub-fit') === 'zoom';
+          var dirty = el.getAttribute('data-hub-dirty') === '1';
+          var rough = roughAvail(el);
+          if (!(rough > 8)) return;
+          var roughKey = String(Math.round(rough));
+          if (fitted && !dirty && el.getAttribute('data-hub-avail') === roughKey) return;
+          var avail = fittedAvail(el, rough);
+          if (!(avail > 8)) return;
+          var availKey = String(Math.round(avail));
+          if (fitted && !dirty && el.getAttribute('data-hub-avail') === availKey) return;
+          var previous = zoomText(el.style.zoom);
+          if (previous) el.style.zoom = '1';
+          var priorWidth = el.style.width;
+          el.style.width = '';
+          var needed = boardExtent(el);
+          var inset = 0;
+          var parent = el.parentElement;
+          if (parent) {
+            var bounds = el.getBoundingClientRect();
+            var host = parent.getBoundingClientRect();
+            inset = bounds.left - host.left;
+          }
+          if (!(inset > 0) || inset >= avail) inset = 0;
+          if (!(needed > 8)) {
+            if (previous) el.style.zoom = previous;
+            if (priorWidth) el.style.width = priorWidth;
+            el.removeAttribute('data-hub-dirty');
+            return;
+          }
+          var room = avail - inset;
+          var fitsAlready = needed <= room + 16;
+          var budget = room - 4;
+          var fitZoom = budget > 0 ? Math.min(1, budget / needed) : 0;
+          var floor = comfortFloor(el);
+          var chosen = fitsAlready ? 1 : Math.min(1, Math.max(fitZoom, floor));
+          if (!(chosen > 0)) chosen = 1;
+          var next = chosen < 0.999 ? String(Math.round(chosen * 1000) / 1000) : '';
+          var zoomNum = next ? parseFloat(next) : 1;
+          var pan = !fitsAlready && needed * zoomNum > room + 1;
+          var widthPx = String(Math.round(needed));
+          el.setAttribute('data-hub-fit', 'zoom');
+          el.setAttribute('data-hub-avail', availKey);
+          el.setAttribute('data-hub-room', availKey + ':' + Math.round(inset) + ':' + Math.round(needed));
+          el.setAttribute('data-hub-apparent', String(Math.round(needed)));
+          el.removeAttribute('data-hub-dirty');
+          el.style.boxSizing = 'border-box';
+          el.style.width = widthPx + 'px';
+          applyPan(el, pan);
+          if (previous === next) {
+            if (zoomText(el.style.zoom) !== previous) el.style.zoom = previous;
+            return;
+          }
+          window.__hubZoomWrites = (window.__hubZoomWrites || 0) + 1;
+          el.style.zoom = next;
+        }
+    """.trimIndent()
 
     private fun stableMetricInstaller(selectors: String, line: String): String {
         if (selectors.isBlank()) return ""
